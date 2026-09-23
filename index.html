@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#0d0f0e">
 <title>ShuttleDraw — Badminton Doubles Tournament Manager</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%F0%9F%8F%B8%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&display=swap" rel="stylesheet">
@@ -53,7 +54,9 @@
     overscroll-behavior-y: none;
   }
 
-  .app-shell { display: grid; grid-template-rows: auto auto 1fr; min-height: 100vh; }
+  /* minmax(0,1fr) stops the single grid column from being forced wider than the
+     viewport by wide min-content children (standings table, tab strip). */
+  .app-shell { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto 1fr; min-height: 100vh; }
 
   header {
     background: var(--bg2); border-bottom: 1px solid var(--border);
@@ -99,7 +102,7 @@
   .page-subtitle { font-size: 13.5px; color: var(--text2); margin-bottom: 1.5rem; font-weight: 300; }
   .section-title { font-family: var(--font-head); font-size: 12px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: var(--text3); margin: 1.75rem 0 0.85rem; display: flex; align-items: center; gap: 10px; }
   .section-title:first-child { margin-top: 0; }
-  .section-title .line { flex: 1; height: 1px; background: var(--border); }
+  .section-title .line { flex: 1; min-width: 0; height: 1px; background: var(--border); }
 
   /* CARDS */
   .card { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 1rem; }
@@ -110,8 +113,8 @@
     display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 10px 18px;
     border-radius: var(--radius); border: 1px solid var(--border2); background: transparent;
     color: var(--text); font-family: var(--font-body); font-size: 14px; font-weight: 500;
+    min-height: 44px;
     cursor: pointer; transition: var(--transition); text-decoration: none; white-space: nowrap;
-    min-height: 42px;
   }
   .btn:hover { background: var(--bg4); }
   .btn:active { transform: scale(0.98); }
@@ -122,8 +125,8 @@
   .btn-danger:hover { background: rgba(255,107,91,0.16); }
   .btn-ghost { border-color: transparent; color: var(--text2); }
   .btn-ghost:hover { color: var(--text); }
-  .btn-sm { padding: 7px 13px; font-size: 13px; min-height: 36px; }
-  .btn-xs { padding: 5px 10px; font-size: 12px; min-height: 32px; }
+  .btn-sm { padding: 8px 14px; font-size: 13px; min-height: 44px; }
+  .btn-xs { padding: 6px 12px; font-size: 12px; min-height: 40px; }
   .btn-block { width: 100%; }
   .btn-group { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 1.25rem; }
   .btn-group .btn { flex: 1 1 auto; }
@@ -399,6 +402,7 @@
         <li>Round-robin inside each group — every pair plays every other pair once</li>
         <li>5 pairs per group → 10 matches per group → 20 group matches</li>
         <li>Single game to 21. Win = 2 points, loss = 0. No draws.</li>
+        <li>Standard badminton scoring: win by 2 clear points, with a 30-point cap (21–20 → play on; 30–29 wins)</li>
         <li>Ranked by points, then point difference, then points scored</li>
       </ul>
     </div>
@@ -406,7 +410,8 @@
       <h3>Rolling court scheduling</h3>
       <ul class="rules-list">
         <li>No fixed time slots — a court picks up the next eligible match the moment it frees up</li>
-        <li>Court 1 runs 6:00 AM–9:00 AM, Courts 2 &amp; 3 run 6:00 AM–8:00 AM</li>
+        <li>Court 1 can take new matches 6:00 AM–9:00 AM; Courts 2 &amp; 3 until 8:00 AM</li>
+        <li>A match already running always finishes, even past those times</li>
         <li>Teams waiting longest are prioritised; back-to-back matches are avoided where possible</li>
         <li>A team can never be on two courts at once</li>
       </ul>
@@ -524,7 +529,7 @@
       matches: [],
       courts: DEFAULT_COURTS.map(function (c) { return Object.assign({}, c, { closed: false }); }),
       knockout: { generated: false, champion: null, qualifiers: null },
-      settings: { enforceTimeWindows: false },
+      settings: { allowOutsideAvailability: false },
       meta: { seq: 0 },
       ui: { screen: 'dashboard' }
     };
@@ -537,6 +542,10 @@
     s.groups = Object.assign({ A: [], B: [] }, s.groups || {});
     s.tournament = Object.assign(base.tournament, s.tournament || {});
     s.settings = Object.assign(base.settings, s.settings || {});
+    if (s.settings.enforceTimeWindows !== undefined && s.settings.allowOutsideAvailability === undefined) {
+      s.settings.allowOutsideAvailability = !s.settings.enforceTimeWindows; // pre-upgrade states
+    }
+    delete s.settings.enforceTimeWindows;
     s.knockout = Object.assign(base.knockout, s.knockout || {});
     s.meta = Object.assign({ seq: 0 }, s.meta || {});
     s.ui = Object.assign({ screen: 'dashboard' }, s.ui || {});
@@ -621,7 +630,12 @@
       if (!raw) return false;
       state = migrate(JSON.parse(raw));
       return true;
-    } catch (e) { return false; }
+    } catch (e) {
+      // Corrupt or unreadable snapshot would otherwise fail forever; drop it so the
+      // next boot rebuilds the default tournament instead of looping on the error.
+      clearStorage();
+      return false;
+    }
   }
   function clearStorage() { try { if (global.localStorage) global.localStorage.removeItem(STORAGE_KEY); } catch (e) {} }
   function exportJSON() { return JSON.stringify(state, null, 2); }
@@ -629,8 +643,11 @@
   function importJSON(text) {
     let parsed;
     try { parsed = JSON.parse(text); } catch (e) { return { ok: false, msg: 'That file is not valid JSON.' }; }
-    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.teams) || !Array.isArray(parsed.matches)) {
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !Array.isArray(parsed.teams) || !Array.isArray(parsed.matches)) {
       return { ok: false, msg: 'This does not look like a ShuttleDraw backup.' };
+    }
+    if (!parsed.teams.length || parsed.teams.some(function (t) { return !t || t.id == null || typeof t.name !== 'string'; })) {
+      return { ok: false, msg: 'This backup has no usable teams.' };
     }
     state = migrate(parsed);
     save();
@@ -752,22 +769,37 @@
     return limit ? scored.slice(0, limit) : scored;
   }
 
-  function effectiveClosed(court, now) {
-    if (court.closed) return true;
-    if (!state.settings.enforceTimeWindows) return false;
+  // A court accepts new matches only inside its availability window. This gates
+  // *starting* matches only — a match already running always plays to a finish,
+  // even past the nominal close, and rollover is not modelled as fixed slots.
+  function courtAcceptsNewMatch(court, now) {
+    if (court.closed) return false;
+    if (state.settings.allowOutsideAvailability) return true;
     const mins = minutesOfDay(now || new Date());
-    return mins < hhmmToMinutes(court.start) || mins > hhmmToMinutes(court.end);
+    return mins >= hhmmToMinutes(court.start) && mins <= hhmmToMinutes(court.end);
   }
 
-  function courtStatus(court) {
-    if (effectiveClosed(court)) return 'closed';
-    return matchOnCourt(court.id) ? 'in_progress' : 'available';
+  function whyCourtUnavailable(court, now) {
+    if (court.closed) return 'Administrator has marked this court closed.';
+    if (state.settings.allowOutsideAvailability) return '';
+    const mins = minutesOfDay(now || new Date());
+    const open = hhmmToMinutes(court.start), close = hhmmToMinutes(court.end);
+    if (mins < open) return 'Available from ' + formatTime(court.start) + '.';
+    return 'Availability ended at ' + formatTime(court.end) + ' — no new matches.';
   }
 
-  // Suggest one distinct eligible match per idle court.
-  function suggestCourts() {
+  // 'in_progress' | 'available' | 'closed'
+  function courtStatus(court, now) {
+    if (matchOnCourt(court.id)) return 'in_progress';
+    if (courtAcceptsNewMatch(court, now)) return 'available';
+    return 'closed';
+  }
+
+  // Suggest one distinct eligible match per idle court. A busy or unavailable court
+  // is simply left out — its queue entry (if any) is re-ranked next time it renders.
+  function suggestCourts(now) {
     const idle = state.courts
-      .filter(function (c) { return !effectiveClosed(c) && !matchOnCourt(c.id); })
+      .filter(function (c) { return courtAcceptsNewMatch(c, now) && !matchOnCourt(c.id); })
       .sort(function (a, b) { return a.id - b.id; });
     const ranked = rankCandidates(0);
     const usedMatch = {}, usedTeam = {}, out = {};
@@ -794,7 +826,8 @@
   }
 
   /* ── starting / completing ───────────────────────────── */
-  function startMatch(matchId, courtId) {
+  // `now` is an optional clock injection for deterministic tests; production omits it.
+  function startMatch(matchId, courtId, now) {
     const m = getMatch(matchId);
     if (!m) return { ok: false, msg: 'Match not found.' };
     if (m.status === 'in_progress') return { ok: false, msg: 'That match is already in progress.' };
@@ -803,8 +836,10 @@
 
     const court = state.courts.find(function (c) { return c.id === courtId; });
     if (!court) return { ok: false, msg: 'Court not found.' };
-    if (effectiveClosed(court)) return { ok: false, msg: court.name + ' is closed.' };
     if (matchOnCourt(courtId)) return { ok: false, msg: court.name + ' already has a match in progress.' };
+    if (!courtAcceptsNewMatch(court, now)) {
+      return { ok: false, msg: court.name + " can't take a new match. " + whyCourtUnavailable(court, now) };
+    }
 
     const busy = busyTeamIds();
     if (busy[m.teamA]) return { ok: false, msg: teamName(m.teamA) + ' is already playing on another court.' };
@@ -892,6 +927,14 @@
     const err = validateGroupScore(a, b);
     if (err) return { ok: false, msg: err };
 
+    // Knockout teams are derived from the final group standings. Once the bracket
+    // exists, changing a group result could silently re-pair (or invalidate) it, so
+    // route the correction through Reset, which clears the bracket and re-queues the
+    // match so both can be rebuilt from the corrected standings.
+    if (m.status === 'completed' && state.matches.some(function (x) { return x.stage !== 'group'; })) {
+      return { ok: false, msg: 'The knockout bracket was built from these standings. Use ↺ Reset on this match, re-enter the corrected score, then regenerate the bracket from the updated standings.' };
+    }
+
     m.scoreA = a; m.scoreB = b;
     m.winner = a > b ? m.teamA : m.teamB;
     m.loser = a > b ? m.teamB : m.teamA;
@@ -950,6 +993,8 @@
     state.knockout.generated = false;
     state.knockout.champion = null;
     state.knockout.qualifiers = null;
+    save();
+    return { ok: true };
   }
 
   // Describe what resetting a match will cascade into (for confirmation UI).
@@ -1227,6 +1272,7 @@
     exportJSON: exportJSON,
     importJSON: importJSON,
     resetTournament: resetTournament,
+    clearKnockout: clearKnockout,
 
     computeStandings: computeStandings,
     groupStageComplete: groupStageComplete,
@@ -1239,7 +1285,8 @@
     queuedMatches: queuedMatches,
     inProgressMatches: inProgressMatches,
     courtStatus: courtStatus,
-    effectiveClosed: effectiveClosed,
+    courtAcceptsNewMatch: courtAcceptsNewMatch,
+    whyCourtUnavailable: whyCourtUnavailable,
 
     startMatch: startMatch,
     validateGroupScore: validateGroupScore,
@@ -1403,7 +1450,7 @@
       : TM.KNOCKOUT_LABEL[m.stage] + ' ' + m.id;
 
     if (m.stage === 'group') {
-      $('#score-sub').textContent = 'Single game to ' + TM.GROUP_TARGET + ' points. Winner is calculated automatically.';
+      $('#score-sub').textContent = 'Single game to ' + TM.GROUP_TARGET + ' points — win by 2 clear points (' + TM.GROUP_CAP + '-point cap). Winner is calculated automatically.';
       $('#score-body').innerHTML =
         '<div class="score-block">' +
           '<div class="score-team-name">' + esc(tA ? tA.name : 'Team A') + '</div>' +
@@ -1642,13 +1689,18 @@
 
   /* ═══════════════ COURTS ═══════════════ */
   function courtCard(court) {
-    const st = TM.getState();
     const cur = TM.matchOnCourt(court.id);
-    const closed = TM.effectiveClosed(court);
+    const accepts = TM.courtAcceptsNewMatch(court);
     const suggests = TM.suggestCourts();
     const sug = suggests[court.id];
-    const cls = closed ? ' closed' : (cur ? ' live' : '');
-    const status = closed ? '<span class="pill pill-closed">Closed</span>' : (cur ? '<span class="pill pill-live">● In progress</span>' : '<span class="pill pill-free">Available</span>');
+
+    // A busy court is "in progress" regardless of the clock; a running match always
+    // finishes. Only the *next* match is gated by the availability window.
+    const cls = accepts ? (cur ? ' live' : '') : ' closed';
+    let status;
+    if (cur) status = '<span class="pill pill-live">● In progress</span>';
+    else if (accepts) status = '<span class="pill pill-free">Available</span>';
+    else status = '<span class="pill pill-closed">Closed</span>';
 
     let html = '<div class="court-card' + cls + '">';
     html += '<div class="court-head"><div><div class="court-name">' + esc(court.name) + '</div><div class="court-window">' + TM.formatTime(court.start) + ' – ' + TM.formatTime(court.end) + '</div></div>' + status + '</div>';
@@ -1658,6 +1710,7 @@
     if (cur) {
       html += '<div class="court-teams">' + teamsBlock(cur) + '</div>';
       html += '<div class="court-reason">' + esc(cur.id) + ' · started ' + timeOf(cur.startedAt) + '</div>';
+      if (!accepts) html += '<div class="court-reason">Once it finishes, no further matches start on this court.</div>';
       html += '<div class="court-actions"><button class="btn btn-primary btn-sm" onclick="App.openScore(\'' + cur.id + '\',\'courts\')">Enter result</button>' +
         '<button class="btn btn-sm" onclick="App.askReset(\'' + cur.id + '\',\'courts\')" title="Undo">↺</button></div>';
     } else {
@@ -1669,8 +1722,8 @@
     html += '<div class="court-block-label">Next eligible match</div>';
     if (cur) {
       html += '<div class="court-empty">Complete the current match to unlock the queue</div>';
-    } else if (closed) {
-      html += '<div class="court-empty">Court closed</div>';
+    } else if (!accepts) {
+      html += '<div class="court-empty">' + esc(TM.whyCourtUnavailable(court) || 'Court unavailable') + '</div>';
     } else if (sug) {
       const m = sug.match;
       const chk = canStart(m, court.id);
@@ -1774,7 +1827,7 @@
     const m = TM.getMatch(matchId);
     if (!m) return;
     if (busy[m.teamA] || busy[m.teamB]) { toast('One of those teams is already on court.'); return; }
-    const free = st.courts.find(function (c) { return !TM.effectiveClosed(c) && !TM.matchOnCourt(c.id); });
+    const free = st.courts.find(function (c) { return TM.courtAcceptsNewMatch(c) && !TM.matchOnCourt(c.id); });
     if (!free) { toast('No free court right now.'); return; }
     startMatch(matchId, free.id);
   }
@@ -2052,14 +2105,16 @@
 
     html += '<div class="section-title">Courts <span class="line"></span></div>';
     html += '<div class="card">' + st.courts.map(function (c) {
-      return '<div class="toggle"><div class="toggle-info"><span class="toggle-title">' + esc(c.name) + '</span><span class="toggle-sub">Available ' + TM.formatTime(c.start) + ' – ' + TM.formatTime(c.end) + '</span></div>' +
-        '<span class="pill ' + (c.closed ? 'pill-closed' : 'pill-free') + '">' + (c.closed ? 'Closed' : 'Open') + '</span></div>';
+      const within = TM.courtAcceptsNewMatch(c);
+      return '<div class="toggle"><div class="toggle-info"><span class="toggle-title">' + esc(c.name) + '</span><span class="toggle-sub">Available ' + TM.formatTime(c.start) + ' – ' + TM.formatTime(c.end) + ' for new matches</span></div>' +
+        '<span class="pill ' + (within ? 'pill-free' : 'pill-closed') + '">' + (within ? 'Open' : 'Outside window') + '</span></div>';
     }).join('') + '</div>';
 
     html += '<div class="section-title">Scheduling <span class="line"></span></div>';
-    html += '<div class="card"><div class="toggle">' +
-      '<div class="toggle-info"><span class="toggle-title">Enforce court time windows</span><span class="toggle-sub">When on, courts outside their window are closed and cannot start matches. Off by default for rolling use.</span></div>' +
-      '<label class="switch"><input type="checkbox"' + (st.settings.enforceTimeWindows ? ' checked' : '') + ' onchange="App.setTimeWindows(this.checked)"><span class="slider"></span></label>' +
+    html += '<div class="card">' +
+      '<div class="toggle">' +
+      '<div class="toggle-info"><span class="toggle-title">Allow matches outside court availability</span><span class="toggle-sub">Override: lets courts accept new matches outside their availability window. Leave off for normal operation — a match already in progress always plays to a finish either way.</span></div>' +
+      '<label class="switch"><input type="checkbox"' + (st.settings.allowOutsideAvailability ? ' checked' : '') + ' onchange="App.setAllowOutside(this.checked)"><span class="slider"></span></label>' +
       '</div></div>';
 
     html += '<div class="section-title">Backup <span class="line"></span></div>';
@@ -2092,10 +2147,10 @@
     render();
   }
 
-  function setTimeWindows(on) {
-    TM.getState().settings.enforceTimeWindows = !!on;
+  function setAllowOutside(on) {
+    TM.getState().settings.allowOutsideAvailability = !!on;
     TM.save();
-    toast(on ? 'Time windows enforced' : 'Rolling mode — courts always open');
+    toast(on ? 'Override on — courts accept matches outside availability' : 'Normal operation — availability windows enforced for new matches');
     render();
   }
 
@@ -2234,7 +2289,7 @@
     revertTeams: revertTeams,
 
     setName: setName,
-    setTimeWindows: setTimeWindows,
+    setAllowOutside: setAllowOutside,
     exportBackup: exportBackup,
     triggerImport: triggerImport,
     handleImport: handleImport,

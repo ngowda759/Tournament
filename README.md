@@ -146,9 +146,11 @@ Completing a match frees its court instantly and the next eligible match appears
 If the ideal next match would make a team play immediately again, another eligible match is
 chosen when one exists — and if one does not, the UI says so explicitly.
 
-Court time windows (`06:00–09:00` for Court 1, `06:00–08:00` for the others) are recorded and
-displayed. They are enforced only when the **“Enforce court time windows”** setting is turned
-on in Settings (off by default so a live event can keep rolling past the nominal window).
+Court availability windows (`06:00–09:00` for Court 1, `06:00–08:00` for the others) are recorded
+and displayed. They gate **starting a new match only**: a match already in progress always plays
+to a finish, even past the nominal close. Schedule starts after a window closes only if the
+administrator turns on the **“Allow starting matches outside court hours”** setting in Settings
+(off by default, so the rolling schedule stays honest to the venue's real hours).
 
 ---
 
@@ -352,7 +354,7 @@ lets the UI stay a thin rendering layer.
   } ],
   courts:    [ { id, name, start, end, closed } ],
   knockout:  { generated, champion, qualifiers },
-  settings:  { enforceTimeWindows },
+  settings:  { allowOutsideAvailability },
   meta:      { seq },         // monotonic completion counter for fair rotation
   ui:        { screen }
 }
@@ -384,6 +386,18 @@ It extracts the DOM-free `TM` layer from `index.html` and asserts:
 - localStorage round-trip, export/import, reset
 - team-edit guards (rename allowed, structural change blocked once results exist)
 - a full automatic group stage driven entirely by the rolling scheduler
+- court availability gating (start blocked outside hours, in-progress match unaffected, override)
+- corrupt/absent/denied localStorage never throws and defaults rebuild
+
+`tests/core.test.js` is the only file committed for tests because it needs nothing beyond Node.
+The browser/render checks below were run against a real headless Chromium during development and
+are not committed, so the repository keeps zero dependencies:
+
+- every screen renders at 375 px, 390 px and 412 px with no page-level horizontal overflow
+- the knockout bracket scrolls inside its own container instead of widening the page
+- score inputs and buttons meet a 44 px touch target, inputs request a numeric keypad
+- the full flow (group stage → standings → qualifiers → QF → SF → final → champion) in-browser
+- state survives a real page reload, and export → import → reset round-trips
 
 Manual checks worth repeating before an event: open the app, run the group stage, then the
 knockout, refresh mid-way to confirm persistence, and try an invalid score to confirm it is
