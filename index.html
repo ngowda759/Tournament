@@ -151,6 +151,13 @@
     border-color: var(--accent-border); box-shadow: 0 0 0 3px rgba(184,245,74,0.08);
   }
   input::placeholder { color: var(--text3); }
+  .court-count-select {
+    background: var(--bg4); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 10px 13px; font-family: var(--font-body); font-size: 15px; color: var(--text);
+    outline: none; transition: var(--transition); width: 100%; min-height: 44px;
+    -webkit-appearance: none; appearance: none;
+  }
+  .court-count-select:focus { border-color: var(--accent-border); box-shadow: 0 0 0 3px rgba(184,245,74,0.08); }
 
   /* PROGRESS */
   .progress-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.4rem; font-size: 13px; color: var(--text2); }
@@ -175,13 +182,34 @@
 
   /* COURT CARDS */
   .courts-grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
-  @media (min-width: 700px) { .courts-grid { grid-template-columns: repeat(3, 1fr); } }
+  @media (min-width: 700px) { .courts-grid { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); } }
   .court-card { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 1rem; display: flex; flex-direction: column; gap: 10px; }
   .court-card.live { border-color: rgba(245,166,35,0.35); }
   .court-card.closed { opacity: 0.68; }
+  .court-card.disabled { opacity: 0.5; border-style: dashed; }
   .court-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .court-name { font-family: var(--font-head); font-size: 15px; font-weight: 800; letter-spacing: -0.2px; }
   .court-window { font-size: 11px; color: var(--text3); }
+
+  /* COURT CONFIG (Settings) */
+  .court-cfg { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; background: var(--bg2); margin-bottom: 10px; }
+  .court-cfg:last-child { margin-bottom: 0; }
+  .court-cfg.inactive { opacity: 0.72; border-style: dashed; }
+  .court-cfg-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+  .court-cfg-title { font-family: var(--font-head); font-size: 13.5px; font-weight: 800; }
+  .court-cfg-times { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .court-cfg-times .field { margin-bottom: 0; }
+  .cfg-msg { font-size: 12.5px; line-height: 1.5; margin-top: 8px; }
+  .cfg-msg.err { color: var(--danger); }
+  .cfg-msg.ok { color: var(--accent); }
+  input[type=time] {
+    background: var(--bg4); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 10px 13px; font-family: var(--font-body); font-size: 15px; color: var(--text);
+    outline: none; transition: var(--transition); width: 100%; min-height: 44px;
+    -webkit-appearance: none; appearance: none;
+  }
+  input[type=time]:focus { border-color: var(--accent-border); box-shadow: 0 0 0 3px rgba(184,245,74,0.08); }
+  .court-window-tag { font-size: 11px; color: var(--text3); }
   .court-block { border-radius: var(--radius); padding: 10px 11px; background: var(--bg2); border: 1px solid var(--border); }
   .court-block.live-block { background: rgba(245,166,35,0.06); border-color: rgba(245,166,35,0.25); }
   .court-block.next-block { background: var(--accent-bg); border-color: var(--accent-border); }
@@ -410,8 +438,8 @@
       <h3>Rolling court scheduling</h3>
       <ul class="rules-list">
         <li>No fixed time slots — a court picks up the next eligible match the moment it frees up</li>
-        <li>Court 1 can take new matches 6:00 AM–9:00 AM; Courts 2 &amp; 3 until 8:00 AM</li>
-        <li>A match already running always finishes, even past those times</li>
+        <li>Each court has its own editable availability window (Settings → Court configuration); defaults are Court 1 6:00 AM–9:00 AM, Courts 2 &amp; 3 6:00 AM–8:00 AM</li>
+        <li>A match already running always finishes, even past its court's closing time</li>
         <li>Teams waiting longest are prioritised; back-to-back matches are avoided where possible</li>
         <li>A team can never be on two courts at once</li>
       </ul>
@@ -447,7 +475,7 @@
   'use strict';
 
   const STORAGE_KEY = 'shuttledraw_v4';
-  const STATE_VERSION = 4;
+  const STATE_VERSION = 5;
   const GROUPS = ['A', 'B'];
 
   const GROUP_WIN_POINTS = 2;
@@ -475,10 +503,16 @@
     ]
   };
 
+  // Court configuration is editable at runtime (Settings → Court Configuration).
+  // `id` is a stable identity used by match history; `name`/`startTime`/`endTime`/
+  // `enabled` are administrator-editable. Nothing in the scheduler hard-codes ids,
+  // names or times — it reads whatever is in state.courts.
+  const MAX_COURTS = 8;
+  const MIN_COURTS = 1;
   const DEFAULT_COURTS = [
-    { id: 1, name: 'Court 1', start: '06:00', end: '09:00' },
-    { id: 2, name: 'Court 2', start: '06:00', end: '08:00' },
-    { id: 3, name: 'Court 3', start: '06:00', end: '08:00' }
+    { id: 1, name: 'Court 1', startTime: '06:00', endTime: '09:00', enabled: true },
+    { id: 2, name: 'Court 2', startTime: '06:00', endTime: '08:00', enabled: true },
+    { id: 3, name: 'Court 3', startTime: '06:00', endTime: '08:00', enabled: true }
   ];
 
   const QUALIFY_COUNT = 4;
@@ -517,6 +551,144 @@
     }, o || {});
   }
 
+  /* ── court configuration ─────────────────────────────── */
+  function newCourt(o) {
+    return Object.assign({
+      id: 0, name: '', startTime: '06:00', endTime: '08:00', enabled: true, closed: false
+    }, o || {});
+  }
+
+  // Accept both the current shape and the pre-v5 shape ({ start, end, closed }).
+  // `id`/`name`/`startTime`/`endTime`/`enabled` are the editable configuration;
+  // `closed` is the transient per-session "mark closed" override.
+  function normalizeCourt(c, idx) {
+    const isTime = function (v) { return typeof v === 'string' && TIME_RE.test(v.trim()); };
+    return newCourt({
+      id: (c && typeof c.id === 'number' && isFinite(c.id)) ? c.id : (idx + 1),
+      name: (c && typeof c.name === 'string' && c.name.trim()) ? c.name.trim() : ('Court ' + (idx + 1)),
+      startTime: (c && isTime(c.startTime)) ? c.startTime : ((c && isTime(c.start)) ? c.start : '06:00'),
+      endTime: (c && isTime(c.endTime)) ? c.endTime : ((c && isTime(c.end)) ? c.end : '08:00'),
+      enabled: !(c && c.enabled === false),
+      closed: !!(c && c.closed)
+    });
+  }
+
+  function enabledCourts() {
+    return state.courts.filter(function (c) { return c.enabled !== false; });
+  }
+
+  function courtById(id) {
+    return state.courts.find(function (c) { return c.id === id; }) || null;
+  }
+
+  function courtName(id) {
+    const c = courtById(id);
+    return c ? c.name : ('Court ' + id);
+  }
+
+  const TIME_RE = /^([01]?\d|2[0-3]):([0-5]\d)$/;
+
+  function validateTime(v, label) {
+    if (typeof v !== 'string' || !TIME_RE.test(v.trim())) {
+      return (label || 'Time') + ' must be a valid time in 24-hour HH:MM form.';
+    }
+    return null;
+  }
+
+  // Validate a whole proposed court list without mutating live state, so the UI can
+  // reject a bad edit atomically and show why.
+  function validateCourts(list) {
+    if (!Array.isArray(list)) return 'Court configuration must be a list.';
+    if (list.length < 1 || list.length > MAX_COURTS) return 'The number of courts must be between 1 and ' + MAX_COURTS + '.';
+    const names = {};
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      if (!c) return 'Court ' + (i + 1) + ' is missing.';
+      const name = (c.name == null ? '' : String(c.name)).trim();
+      if (!name) return 'Court ' + (i + 1) + ': name cannot be empty.';
+      const key = name.toLowerCase();
+      if (names[key]) return 'Two courts are both named “' + name + '”. Give every court a unique name.';
+      names[key] = true;
+      const se = validateTime(c.startTime, 'Court ' + (i + 1) + ' start time');
+      if (se) return se;
+      const ee = validateTime(c.endTime, 'Court ' + (i + 1) + ' end time');
+      if (ee) return ee;
+      if (hhmmToMinutes(c.endTime) <= hhmmToMinutes(c.startTime)) {
+        return 'Court ' + (i + 1) + ' (' + name + '): the end time must be later than the start time.';
+      }
+    }
+    return null;
+  }
+
+  // Reject a change that would leave a running match on a court that no longer
+  // exists. We never silently move or cancel a live match.
+  function courtsBlockActiveMatch(list) {
+    const ids = {};
+    list.forEach(function (c) { ids[c.id] = true; });
+    const stuck = inProgressMatches().filter(function (m) { return m.court != null && !ids[m.court]; });
+    if (stuck.length) {
+      const names = stuck.map(function (m) { return courtName(m.court) + ' (' + m.id + ')'; }).join(', ');
+      return 'A match is still in progress on ' + names + '. Finish or reset it before removing that court.';
+    }
+    return null;
+  }
+
+  function nextCourtId() {
+    let max = 0;
+    state.courts.forEach(function (c) { if (c.id > max) max = c.id; });
+    return max + 1;
+  }
+
+  // Build the configuration for a target court count. Existing courts keep their id,
+  // name and times (so identity and history are preserved); extra courts are appended
+  // with sensible defaults; surplus courts are disabled rather than deleted so their
+  // configuration and completed-match history remain intact and can be restored.
+  function setCourtCount(count) {
+    const n = Number(count);
+    if (!Number.isInteger(n) || n < 1 || n > MAX_COURTS) {
+      return { ok: false, msg: 'The number of courts must be between 1 and ' + MAX_COURTS + '.' };
+    }
+    const ordered = state.courts.slice().sort(function (a, b) { return a.id - b.id; });
+    const active = ordered.slice(0, n);
+    const surplus = ordered.slice(n);
+    const block = courtsBlockActiveMatch(active);
+    if (block) return { ok: false, msg: block };
+
+    const specs = active.map(function (c) { return Object.assign(newCourt(c), { enabled: true }); });
+    for (let i = specs.length; i < n; i++) {
+      specs.push(newCourt({ id: nextCourtId() + (i - specs.length), name: 'Court ' + (i + 1), enabled: true }));
+    }
+    const rest = surplus.map(function (c) { return Object.assign(newCourt(c), { enabled: false }); });
+    const list = specs.concat(rest);
+    const err = validateCourts(specs);
+    if (err) return { ok: false, msg: err };
+    state.courts = list;
+    save();
+    return { ok: true, courts: state.courts };
+  }
+
+  // Patch a single court. Rejects invalid times, empty/duplicate names and changes
+  // that would strand a live match.
+  function updateCourt(id, patch) {
+    const court = courtById(id);
+    if (!court) return { ok: false, msg: 'Court not found.' };
+    if (patch && patch.enabled === false && matchOnCourt(id)) {
+      return { ok: false, msg: 'A match is in progress on ' + court.name + '. Finish or reset it before disabling this court.' };
+    }
+    const next = newCourt(Object.assign({}, court, patch || {}));
+    const proposed = state.courts.map(function (c) { return c.id === id ? next : c; });
+    const active = proposed.filter(function (c) { return c.enabled !== false; });
+    const err = validateCourts(active);
+    if (err) return { ok: false, msg: err };
+    state.courts = proposed;
+    save();
+    return { ok: true, court: next };
+  }
+
+  function setCourtEnabled(id, on) {
+    return updateCourt(id, { enabled: !!on });
+  }
+
   /* ── state ───────────────────────────────────────────── */
   let state = null;
 
@@ -527,7 +699,7 @@
       teams: [],
       groups: { A: [], B: [] },
       matches: [],
-      courts: DEFAULT_COURTS.map(function (c) { return Object.assign({}, c, { closed: false }); }),
+      courts: DEFAULT_COURTS.map(function (c) { return newCourt(c); }),
       knockout: { generated: false, champion: null, qualifiers: null },
       settings: { allowOutsideAvailability: false },
       meta: { seq: 0 },
@@ -551,9 +723,15 @@
     s.ui = Object.assign({ screen: 'dashboard' }, s.ui || {});
     if (!Array.isArray(s.matches)) s.matches = [];
     if (!Array.isArray(s.teams)) s.teams = [];
+    // Court configuration migration: pre-v5 states stored { start, end, closed } which
+    // normalizeCourt maps onto the new { startTime, endTime, enabled }. A missing or
+    // empty list falls back to the standard three-court layout.
     if (!Array.isArray(s.courts) || !s.courts.length) {
-      s.courts = DEFAULT_COURTS.map(function (c) { return Object.assign({}, c, { closed: false }); });
+      s.courts = DEFAULT_COURTS.map(function (c) { return newCourt(c); });
+    } else {
+      s.courts = s.courts.map(normalizeCourt);
     }
+    if (!s.courts.some(function (c) { return c.enabled !== false; })) s.courts[0].enabled = true;
     s.matches = s.matches.map(function (m) { return newMatch(m); });
     let maxSeq = 0;
     s.matches.forEach(function (m) { if (m.completedSeq > maxSeq) maxSeq = m.completedSeq; });
@@ -769,34 +947,40 @@
     return limit ? scored.slice(0, limit) : scored;
   }
 
-  // A court accepts new matches only inside its availability window. This gates
-  // *starting* matches only — a match already running always plays to a finish,
-  // even past the nominal close, and rollover is not modelled as fixed slots.
+  // A court accepts new matches only when it is enabled and inside its (editable)
+  // availability window. This gates *starting* matches only — a match already running
+  // always plays to a finish, even past the configured end time.
   function courtAcceptsNewMatch(court, now) {
+    if (!court || court.enabled === false) return false;
     if (court.closed) return false;
     if (state.settings.allowOutsideAvailability) return true;
     const mins = minutesOfDay(now || new Date());
-    return mins >= hhmmToMinutes(court.start) && mins <= hhmmToMinutes(court.end);
+    // Half-open window: a court open until 08:00 accepts new matches up to 07:59 and
+    // no longer at 08:00 (an in-progress match still always finishes).
+    return mins >= hhmmToMinutes(court.startTime) && mins < hhmmToMinutes(court.endTime);
   }
 
   function whyCourtUnavailable(court, now) {
+    if (!court) return 'Court not found.';
+    if (court.enabled === false) return 'This court is disabled in Settings.';
     if (court.closed) return 'Administrator has marked this court closed.';
     if (state.settings.allowOutsideAvailability) return '';
     const mins = minutesOfDay(now || new Date());
-    const open = hhmmToMinutes(court.start), close = hhmmToMinutes(court.end);
-    if (mins < open) return 'Available from ' + formatTime(court.start) + '.';
-    return 'Availability ended at ' + formatTime(court.end) + ' — no new matches.';
+    const open = hhmmToMinutes(court.startTime), close = hhmmToMinutes(court.endTime);
+    if (mins < open) return 'Available from ' + formatTime(court.startTime) + '.';
+    return 'Availability ended at ' + formatTime(court.endTime) + ' — no new matches.';
   }
 
-  // 'in_progress' | 'available' | 'closed'
+  // 'in_progress' | 'available' | 'closed' | 'disabled'
   function courtStatus(court, now) {
     if (matchOnCourt(court.id)) return 'in_progress';
+    if (court.enabled === false) return 'disabled';
     if (courtAcceptsNewMatch(court, now)) return 'available';
     return 'closed';
   }
 
-  // Suggest one distinct eligible match per idle court. A busy or unavailable court
-  // is simply left out — its queue entry (if any) is re-ranked next time it renders.
+  // Suggest one distinct eligible match per idle court. A busy, disabled or
+  // unavailable court is simply left out — re-ranked next time it renders.
   function suggestCourts(now) {
     const idle = state.courts
       .filter(function (c) { return courtAcceptsNewMatch(c, now) && !matchOnCourt(c.id); })
@@ -834,8 +1018,9 @@
     if (m.status === 'completed') return { ok: false, msg: 'That match is already completed. Reset it first to replay it.' };
     if (!m.teamA || !m.teamB) return { ok: false, msg: 'Both teams must be known before the match can start.' };
 
-    const court = state.courts.find(function (c) { return c.id === courtId; });
+    const court = courtById(courtId);
     if (!court) return { ok: false, msg: 'Court not found.' };
+    if (court.enabled === false) return { ok: false, msg: court.name + ' is disabled in Settings and cannot take a new match.' };
     if (matchOnCourt(courtId)) return { ok: false, msg: court.name + ' already has a match in progress.' };
     if (!courtAcceptsNewMatch(court, now)) {
       return { ok: false, msg: court.name + " can't take a new match. " + whyCourtUnavailable(court, now) };
@@ -943,7 +1128,9 @@
       m.completedSeq = ++state.meta.seq;
     }
     m.completedAt = new Date().toISOString();
-    m.court = null;
+    // Keep m.court as the historical assignment. The court is freed for scheduling
+    // because matchOnCourt() only considers in_progress matches, so history and
+    // availability stay independent.
     save();
     ensureKnockout();
     return { ok: true, match: m };
@@ -970,7 +1157,6 @@
       m.completedSeq = ++state.meta.seq;
     }
     m.completedAt = new Date().toISOString();
-    m.court = null;
     save();
     ensureKnockout();
     return { ok: true, match: m };
@@ -1248,6 +1434,8 @@
     KNOCKOUT_LABEL: KNOCKOUT_LABEL,
     KNOCKOUT_TOTAL: KNOCKOUT_TOTAL,
     QUALIFY_COUNT: QUALIFY_COUNT,
+    MAX_COURTS: MAX_COURTS,
+    MIN_COURTS: MIN_COURTS,
     DEFAULT_COURTS: DEFAULT_COURTS,
     DEFAULT_PAIRS: DEFAULT_PAIRS,
 
@@ -1260,6 +1448,17 @@
     buildDefaultTournament: buildDefaultTournament,
     buildGroupMatches: buildGroupMatches,
     roundRobin: roundRobin,
+
+    newCourt: newCourt,
+    normalizeCourt: normalizeCourt,
+    enabledCourts: enabledCourts,
+    courtById: courtById,
+    courtName: courtName,
+    validateTime: validateTime,
+    validateCourts: validateCourts,
+    setCourtCount: setCourtCount,
+    updateCourt: updateCourt,
+    setCourtEnabled: setCourtEnabled,
 
     getTeam: getTeam,
     getMatch: getMatch,
@@ -1384,8 +1583,8 @@
   }
 
   function courtPill(courtId) {
-    if (!courtId) return '';
-    const c = TM.getState().courts.find(function (x) { return x.id === courtId; });
+    if (!courtId && courtId !== 0) return '';
+    const c = TM.courtById(courtId);
     return '<span class="pill">' + esc(c ? c.name : ('Court ' + courtId)) + '</span>';
   }
 
@@ -1614,7 +1813,7 @@
     const ch = info.champion ? TM.getTeam(info.champion) : null;
 
     let html = '<div class="page-title">Dashboard</div>';
-    html += '<div class="page-subtitle">Live overview of ' + esc(st.tournament.name) + ' · ' + st.teams.length + ' pairs · ' + st.courts.length + ' courts</div>';
+    html += '<div class="page-subtitle">Live overview of ' + esc(st.tournament.name) + ' · ' + st.teams.length + ' pairs · ' + TM.enabledCourts().length + ' courts</div>';
 
     html += '<div class="section-title">Tournament progress <span class="line"></span></div>';
     html += '<div class="card">';
@@ -1690,27 +1889,32 @@
   /* ═══════════════ COURTS ═══════════════ */
   function courtCard(court) {
     const cur = TM.matchOnCourt(court.id);
+    const enabled = court.enabled !== false;
     const accepts = TM.courtAcceptsNewMatch(court);
     const suggests = TM.suggestCourts();
     const sug = suggests[court.id];
 
     // A busy court is "in progress" regardless of the clock; a running match always
-    // finishes. Only the *next* match is gated by the availability window.
-    const cls = accepts ? (cur ? ' live' : '') : ' closed';
+    // finishes. A disabled court is shown as Disabled and never offers a next match.
+    const cls = !enabled ? ' disabled' : (accepts ? (cur ? ' live' : '') : ' closed');
     let status;
-    if (cur) status = '<span class="pill pill-live">● In progress</span>';
+    if (!enabled) status = '<span class="pill pill-closed">Disabled</span>';
+    else if (cur) status = '<span class="pill pill-live">● In progress</span>';
     else if (accepts) status = '<span class="pill pill-free">Available</span>';
     else status = '<span class="pill pill-closed">Closed</span>';
 
+    const windowTxt = TM.formatTime(court.startTime) + ' – ' + TM.formatTime(court.endTime);
+
     let html = '<div class="court-card' + cls + '">';
-    html += '<div class="court-head"><div><div class="court-name">' + esc(court.name) + '</div><div class="court-window">' + TM.formatTime(court.start) + ' – ' + TM.formatTime(court.end) + '</div></div>' + status + '</div>';
+    html += '<div class="court-head"><div><div class="court-name">' + esc(court.name) + '</div><div class="court-window">' + windowTxt + '</div></div>' + status + '</div>';
 
     html += '<div class="court-block' + (cur ? ' live-block' : '') + '">';
     html += '<div class="court-block-label">Current match</div>';
     if (cur) {
       html += '<div class="court-teams">' + teamsBlock(cur) + '</div>';
       html += '<div class="court-reason">' + esc(cur.id) + ' · started ' + timeOf(cur.startedAt) + '</div>';
-      if (!accepts) html += '<div class="court-reason">Once it finishes, no further matches start on this court.</div>';
+      if (!enabled) html += '<div class="court-reason">This court was disabled while the match was running — it still finishes normally.</div>';
+      else if (!accepts) html += '<div class="court-reason">Once it finishes, no further matches start on this court.</div>';
       html += '<div class="court-actions"><button class="btn btn-primary btn-sm" onclick="App.openScore(\'' + cur.id + '\',\'courts\')">Enter result</button>' +
         '<button class="btn btn-sm" onclick="App.askReset(\'' + cur.id + '\',\'courts\')" title="Undo">↺</button></div>';
     } else {
@@ -1722,6 +1926,8 @@
     html += '<div class="court-block-label">Next eligible match</div>';
     if (cur) {
       html += '<div class="court-empty">Complete the current match to unlock the queue</div>';
+    } else if (!enabled) {
+      html += '<div class="court-empty">Disabled in settings — not used for new matches</div>';
     } else if (!accepts) {
       html += '<div class="court-empty">' + esc(TM.whyCourtUnavailable(court) || 'Court unavailable') + '</div>';
     } else if (sug) {
@@ -1787,7 +1993,7 @@
   }
 
   function toggleCourt(courtId) {
-    const c = TM.getState().courts.find(function (x) { return x.id === courtId; });
+    const c = TM.courtById(courtId);
     if (!c) return;
     if (!c.closed && TM.matchOnCourt(courtId)) { toast('Finish the match on ' + c.name + ' first.'); return; }
     c.closed = !c.closed;
@@ -2092,6 +2298,83 @@
   }
 
   /* ═══════════════ SETTINGS ═══════════════ */
+  function activeCourtCount() {
+    return TM.getState().courts.filter(function (c) { return c.enabled !== false; }).length;
+  }
+
+  // One editable card per configured court, in id order. Enabled courts come first;
+  // disabled ones are shown dimmed so the administrator can restore them.
+  function courtConfigBlocks(st) {
+    const ordered = st.courts.slice().sort(function (a, b) {
+      const ea = a.enabled === false ? 1 : 0, eb = b.enabled === false ? 1 : 0;
+      return (ea - eb) || (a.id - b.id);
+    });
+    return ordered.map(function (c) {
+      const on = c.enabled !== false;
+      const cur = TM.matchOnCourt(c.id);
+      const status = !on
+        ? '<span class="pill pill-closed">Disabled</span>'
+        : (cur ? '<span class="pill pill-live">● In progress</span>' : (TM.courtAcceptsNewMatch(c) ? '<span class="pill pill-free">Available now</span>' : '<span class="pill">Outside window</span>'));
+      let html = '<div class="court-cfg' + (on ? '' : ' inactive') + '">';
+      html += '<div class="court-cfg-head"><span class="court-cfg-title">' + esc(c.name) + '</span>' + status +
+        '<label class="switch"><input type="checkbox"' + (on ? ' checked' : '') + ' onchange="App.toggleCourtConfig(' + c.id + ',this.checked)"><span class="slider"></span></label></div>';
+      html += '<div class="field" style="margin-bottom:10px;"><label>Name</label><input type="text" value="' + esc(c.name) + '" maxlength="30" ' +
+        'onchange="App.renameCourt(' + c.id + ',this.value)" onkeydown="if(event.key===\'Enter\'){this.blur();}"></div>';
+      html += '<div class="court-cfg-times">' +
+        '<div class="field"><label>Available from</label><input type="time" value="' + esc(c.startTime) + '" onchange="App.setCourtTime(' + c.id + ',\'startTime\',this.value)"></div>' +
+        '<div class="field"><label>Available until</label><input type="time" value="' + esc(c.endTime) + '" onchange="App.setCourtTime(' + c.id + ',\'endTime\',this.value)"></div>' +
+        '</div>';
+      if (cur) html += '<div class="muted" style="font-size:11.5px;margin-top:8px;">' + esc(cur.id) + ' is in progress here. Changes apply to the next match; this one finishes normally.</div>';
+      html += '</div>';
+      return html;
+    }).join('');
+  }
+
+  function cfgMsg(r) {
+    const el = $('#cfg-msg');
+    if (!el) { if (r && !r.ok) toast(r.msg); return; }
+    el.className = 'cfg-msg ' + (r && r.ok ? 'ok' : 'err');
+    el.textContent = (r && r.msg) ? r.msg : (r && r.ok ? 'Court configuration saved.' : '');
+  }
+
+  // Render first, then write the message: render() rebuilds the Settings markup,
+  // so anything written into #cfg-msg before it would be discarded.
+  function applyCfg(r, okMsg, okToast) {
+    if (!r.ok) { toast(r.msg); render(); cfgMsg(r); return; }
+    if (okToast) toast(okToast);
+    render();
+    cfgMsg({ ok: true, msg: okMsg });
+  }
+
+  function setCourtCount(v) {
+    const r = TM.setCourtCount(Number(v));
+    const n = activeCourtCount();
+    applyCfg(r, r.ok ? ('Configured for ' + n + ' court' + (n === 1 ? '' : 's') + '.') : null,
+      r.ok ? ('Now using ' + n + ' court' + (n === 1 ? '' : 's')) : null);
+  }
+
+  function renameCourt(id, name) {
+    const r = TM.updateCourt(id, { name: String(name || '').trim() });
+    applyCfg(r, r.ok ? ('Renamed to “' + r.court.name + '”.') : null,
+      r.ok ? ('Court renamed to ' + r.court.name) : null);
+  }
+
+  function setCourtTime(id, field, value) {
+    if (field !== 'startTime' && field !== 'endTime') return;
+    const patch = {}; patch[field] = value;
+    const r = TM.updateCourt(id, patch);
+    applyCfg(r,
+      r.ok ? (r.court.name + ' now accepts new matches ' + TM.formatTime(r.court.startTime) + ' – ' + TM.formatTime(r.court.endTime) + '.') : null,
+      r.ok ? (r.court.name + ' updated') : null);
+  }
+
+  function toggleCourtConfig(id, on) {
+    const r = TM.setCourtEnabled(id, on);
+    applyCfg(r,
+      r.ok ? (r.court.name + (on ? ' enabled.' : ' disabled — it will not receive new matches.')) : null,
+      r.ok ? (r.court.name + (on ? ' enabled' : ' disabled')) : null);
+  }
+
   function viewSettings() {
     const st = TM.getState();
     let html = '<div class="page-title">Settings</div>';
@@ -2103,12 +2386,18 @@
       '<div class="muted" style="font-size:12px;">Created ' + esc(String(st.tournament.createdAt).slice(0, 10)) + ' · ' + st.teams.length + ' pairs · ' + TM.groupMatches().length + ' group matches</div>' +
       '</div>';
 
-    html += '<div class="section-title">Courts <span class="line"></span></div>';
-    html += '<div class="card">' + st.courts.map(function (c) {
-      const within = TM.courtAcceptsNewMatch(c);
-      return '<div class="toggle"><div class="toggle-info"><span class="toggle-title">' + esc(c.name) + '</span><span class="toggle-sub">Available ' + TM.formatTime(c.start) + ' – ' + TM.formatTime(c.end) + ' for new matches</span></div>' +
-        '<span class="pill ' + (within ? 'pill-free' : 'pill-closed') + '">' + (within ? 'Open' : 'Outside window') + '</span></div>';
-    }).join('') + '</div>';
+    html += '<div class="section-title">Court configuration <span class="line"></span></div>';
+    html += '<div class="card">' +
+      '<div class="field"><label>Number of courts (' + TM.MIN_COURTS + '–' + TM.MAX_COURTS + ')</label>' +
+      '<select class="court-count-select" onchange="App.setCourtCount(this.value)">';
+    for (let n = TM.MIN_COURTS; n <= TM.MAX_COURTS; n++) {
+      html += '<option value="' + n + '"' + (activeCourtCount() === n ? ' selected' : '') + '>' + n + ' court' + (n === 1 ? '' : 's') + '</option>';
+    }
+    html += '</select></div>';
+    html += '<div class="muted" style="font-size:12px;">Courts are listed below. Reducing the count disables the extra courts without deleting their configuration or match history; increasing it adds a new court with defaults.</div>';
+    html += '</div>';
+
+    html += '<div class="card" style="margin-top:10px;">' + courtConfigBlocks(st) + '<div class="cfg-msg" id="cfg-msg"></div></div>';
 
     html += '<div class="section-title">Scheduling <span class="line"></span></div>';
     html += '<div class="card">' +
@@ -2290,6 +2579,10 @@
 
     setName: setName,
     setAllowOutside: setAllowOutside,
+    setCourtCount: setCourtCount,
+    renameCourt: renameCourt,
+    setCourtTime: setCourtTime,
+    toggleCourtConfig: toggleCourtConfig,
     exportBackup: exportBackup,
     triggerImport: triggerImport,
     handleImport: handleImport,
