@@ -16,6 +16,7 @@ The organizer can run the whole event from a phone.
 - [Scoring](#scoring)
 - [Group stage](#group-stage)
 - [Rolling court scheduling](#rolling-court-scheduling)
+- [Court configuration](#court-configuration)
 - [Knockout structure](#knockout-structure)
 - [Match numbering](#match-numbering)
 - [Screens](#screens)
@@ -39,9 +40,9 @@ The organizer can run the whole event from a phone.
 | Doubles pairs | 10 |
 | Groups | 2 (Group A, Group B) |
 | Pairs per group | 5 |
-| Courts | 3 |
-| Court 1 window | 06:00 AM → 09:00 AM |
-| Courts 2 & 3 window | 06:00 AM → 08:00 AM |
+| Courts | 3 (fully editable — see [Court configuration](#court-configuration)) |
+| Court 1 window | 06:00 AM → 09:00 AM (default) |
+| Courts 2 & 3 window | 06:00 AM → 08:00 AM (default) |
 
 ### Group A
 
@@ -116,8 +117,11 @@ Qualifiers are never entered by hand.
 
 This is the heart of the app, and it deliberately does **not** use fixed time slots.
 
-Available courts: **Court 1, Court 2, Court 3** (Court 1 runs an hour longer).
-When a court becomes free, the app immediately offers the **next eligible match** for it.
+The scheduler never hard-codes a court number, name or time. It reads the live
+`settings.courts` configuration (see [Court configuration](#court-configuration)), so an
+administrator can add courts, rename them, change their hours or disable them mid-tournament.
+Every court whose configured window is currently open is *idle* and immediately offers the
+**next eligible match**.
 
 Every time the Courts view is rendered, the scheduler:
 
@@ -140,17 +144,69 @@ Hard guarantees enforced by `startMatch`:
 - A team can never be on two courts at once.
 - A court can never host two matches at once.
 - A completed match cannot be started again.
-- At most 3 matches are ever in progress.
+- A disabled court never receives a new match (not even with the outside-hours override on).
+- At most one match is ever in progress per enabled court.
 
 Completing a match frees its court instantly and the next eligible match appears.
 If the ideal next match would make a team play immediately again, another eligible match is
 chosen when one exists — and if one does not, the UI says so explicitly.
 
-Court availability windows (`06:00–09:00` for Court 1, `06:00–08:00` for the others) are recorded
-and displayed. They gate **starting a new match only**: a match already in progress always plays
-to a finish, even past the nominal close. Schedule starts after a window closes only if the
-administrator turns on the **“Allow starting matches outside court hours”** setting in Settings
-(off by default, so the rolling schedule stays honest to the venue's real hours).
+Availability windows are **half-open**: a court configured `06:00 → 08:00` accepts new matches
+from 06:00 up to (but not including) 08:00. They gate **starting a new match only** — a match
+already in progress always plays to a finish, even past its court's closing time. Starting
+matches after a window closes requires the **“Allow starting matches outside court hours”**
+setting in Settings (off by default).
+
+> The original venue windows are Court 1 `06:00–09:00` and Courts 2 & 3 `06:00–08:00`. Those are
+> now just the defaults of an editable configuration rather than constants in the scheduler.
+
+---
+
+## Court configuration
+
+Courts are **not** hard-coded. Settings → **Court configuration** lets the administrator change,
+at any time, including mid-tournament:
+
+- **Number of courts** — `1` to `8`. A row appears for every court.
+- **Name** — e.g. rename `Court 1` to `Main Court`. The new name is used everywhere: Settings,
+  Dashboard, Courts screen, match details and the scheduler.
+- **Available from / until** — per-court time windows using native time inputs.
+- **Enabled** — a per-court toggle.
+
+The configuration is stored in tournament state, so it survives refresh, restart and
+backup/import:
+
+```js
+settings.courts: [
+  { id: 1, name: "Court 1", startTime: "06:00", endTime: "09:00", enabled: true },
+  { id: 2, name: "Court 2", startTime: "06:00", endTime: "08:00", enabled: true },
+  { id: 3, name: "Court 3", startTime: "06:00", endTime: "08:00", enabled: true }
+]
+```
+
+`id` is stable internal identity; everything else is editable.
+
+Behaviour and safety rules:
+
+- **Changing a window takes effect immediately** for scheduling and **never interrupts a match
+  already in progress**. A match that starts at 07:59 on a court closing at 08:00 runs to
+  completion; that court then simply stops taking new matches.
+- **Disabling** a court removes it from suggestions and shows it as *Disabled* on the Courts
+  screen. It never receives a new match — not even when the outside-hours override is on.
+- **Reducing the count** disables the surplus courts instead of deleting them, so their
+  configuration and their completed-match history are preserved and they can be restored by
+  raising the count again. **Increasing the count** appends new courts with sensible defaults.
+- **Changing court configuration never** regenerates the 20 group matches, resets results,
+  resets standings or resets knockout progression. Only availability changes.
+- **Completed matches keep the court they actually played on.** Reducing the court count does
+  not rewrite history.
+- **Validation** rejects an empty or duplicate name, a malformed time, an end time not later
+  than the start time, and a count outside `1–8`. Rejected edits are atomic — the live
+  configuration is left untouched and the reason is shown inline. Disabling, or dropping via
+  the count, a court that currently has a match in progress is refused with a clear warning
+  rather than silently affecting the running match.
+
+Existing backups remain backwards compatible.
 
 ---
 
@@ -204,11 +260,11 @@ When the final is decided the app shows a clear **🏆 CHAMPION** card.
 | **Standings** | Group A and Group B tables with qualifying positions highlighted |
 | **Knockout** | QF → SF → Final bracket plus the champion card |
 | **Teams** | Edit pair names, players and levels; add/remove pairs |
-| **Settings** | Tournament name, courts, scheduling options, backup, reset |
+| **Settings** | Tournament name, **editable court configuration** (count, names, hours, enable/disable), scheduling options, backup, reset |
 
-Each court card shows the court number, status (*Available / In progress / Closed*), the
-current match with its match number and teams, the next eligible match, and Start/Complete
-buttons.
+Each court card shows the court's configured name, status (*Available / In progress / Closed /
+Disabled*), its availability window, the current match with its match number and teams, the next
+eligible match, and Start/Complete buttons.
 
 ---
 
@@ -220,7 +276,7 @@ State is saved to `localStorage` under the key `shuttledraw_v4` and includes:
 - teams, players, levels and group membership
 - groups and all matches
 - scores, sets, winners and losers
-- court states and start/completion timestamps
+- court states, **court configuration** (count, names, availability windows, enabled flags) and start/completion timestamps
 - standings (derived live from results)
 - knockout progression and qualifiers
 - settings and the current screen
@@ -237,10 +293,15 @@ On the **Settings** screen:
   (`shuttledraw-backup-YYYYMMDD-HHMM.json`).
 - **Import backup** restores a previously exported JSON file. Invalid or unrelated files are
   rejected with a clear message.
-- **Reset tournament** restores the default 20-player configuration and deletes all results
-  (confirmation required).
+- **Reset tournament** restores the default 20-player / 3-court configuration and deletes all
+  results (confirmation required).
 - **Clear results only** keeps teams and fixtures but deletes every score and the knockout
   bracket (confirmation required).
+
+Court configuration (count, names, hours, enabled flags) has its own section and is edited
+independently — see [Court configuration](#court-configuration). Changing it never resets
+results or standings, and **Reset tournament** is the way to restore the default three-court
+layout.
 
 ---
 
@@ -280,7 +341,7 @@ The UI is mobile-first:
 - Horizontally scrollable tab bar — no cramped icons.
 - Modals slide up from the bottom of the screen as sheets.
 - Large numeric score inputs with numeric keyboards (`inputmode="numeric"`).
-- Court cards stack on phones and go three-across on tablets/desktop.
+- Court cards stack on phones and go N-across on tablets/desktop.
 - The bracket scrolls horizontally (intentional) so all four stages stay readable.
 - Standings tables scroll horizontally inside their card, so the page itself never overflows.
 
@@ -317,6 +378,7 @@ separated layers:
 │  • deterministic round-robin generator                     │
 │  • match state model + validation                          │
 │  • rolling court scheduler (eligibility, ranking, suggest) │
+│  • editable court configuration + validation               │
 │  • standings (points / PF / PA / diff / tie-breaks)        │
 │  • knockout generation + cascade resets                    │
 │  • localStorage save/load, migrate, export/import          │
@@ -328,6 +390,7 @@ separated layers:
 │  • tab navigation and view rendering                       │
 │  • score-entry modal with live winner preview              │
 │  • courts, standings, bracket, teams, settings views       │
+│  • court configuration editor (count / name / hours / on)  │
 │  • toasts and confirmation dialogs                         │
 └────────────────────────────────────────────────────────────┘
 ```
@@ -352,7 +415,8 @@ lets the UI stay a thin rendering layer.
       sets[], setsA, setsB,   // knockout
       winner, loser, target
   } ],
-  courts:    [ { id, name, start, end, closed } ],
+  courts:    [ { id, name, startTime, endTime, enabled, closed } ],
+  //           id is stable identity; preparation/UI editor writes name/times/enabled
   knockout:  { generated, champion, qualifiers },
   settings:  { allowOutsideAvailability },
   meta:      { seq },         // monotonic completion counter for fair rotation
@@ -387,6 +451,12 @@ It extracts the DOM-free `TM` layer from `index.html` and asserts:
 - team-edit guards (rename allowed, structural change blocked once results exist)
 - a full automatic group stage driven entirely by the rolling scheduler
 - court availability gating (start blocked outside hours, in-progress match unaffected, override)
+- **editable court configuration**: default windows, per-court time changes honoured by the
+  scheduler, disabling a court (never suggested, never started, override does not bypass it),
+  renaming flows through `courtName`, increasing and decreasing the court count, completed
+  matches retaining their original court, live matches surviving configuration changes,
+  invalid names/times/counts rejected atomically, and config surviving reload and backup
+- migration of the pre-v5 `{ start, end }` court shape onto `{ startTime, endTime, enabled }`
 - corrupt/absent/denied localStorage never throws and defaults rebuild
 
 `tests/core.test.js` is the only file committed for tests because it needs nothing beyond Node.

@@ -297,9 +297,9 @@ const NOON = new Date(2026, 0, 1, 6, 30, 0); // deterministic clock, inside 06:0
   TM.resetTournament();
   const st = TM.getState();
   eq('3 courts', st.courts.length, 3);
-  eq('court1 end 09:00', st.courts.find(c => c.id === 1).end, '09:00');
-  eq('court2 end 08:00', st.courts.find(c => c.id === 2).end, '08:00');
-  eq('court3 end 08:00', st.courts.find(c => c.id === 3).end, '08:00');
+  eq('court1 end 09:00', st.courts.find(c => c.id === 1).endTime, '09:00');
+  eq('court2 end 08:00', st.courts.find(c => c.id === 2).endTime, '08:00');
+  eq('court3 end 08:00', st.courts.find(c => c.id === 3).endTime, '08:00');
   // roll through all group matches with automatic court allocation, at an
   // injected clock inside every court's window so the full stage can finish
   let guard = 0;
@@ -521,6 +521,263 @@ const NOON = new Date(2026, 0, 1, 6, 30, 0); // deterministic clock, inside 06:0
   TM.importJSON(JSON.stringify(legacy2));
   eq('legacy enforced flag maps to off', TM.getState().settings.allowOutsideAvailability, false);
 })();
+
+/* ── 20. editable court configuration ──────────────────── */
+(function () {
+  const at = function (h, m) { return new Date(2026, 0, 1, h, m || 0, 0); };
+
+  // 1–4. defaults
+  TM.resetTournament();
+  let s = TM.getState();
+  eq('default court count = 3', s.courts.length, 3);
+  eq('default C1 window 06:00', s.courts.find(c => c.id === 1).startTime, '06:00');
+  eq('default C1 window 09:00', s.courts.find(c => c.id === 1).endTime, '09:00');
+  eq('default C2 window 06:00', s.courts.find(c => c.id === 2).startTime, '06:00');
+  eq('default C2 window 08:00', s.courts.find(c => c.id === 2).endTime, '08:00');
+  eq('default C3 window 06:00', s.courts.find(c => c.id === 3).startTime, '06:00');
+  eq('default C3 window 08:00', s.courts.find(c => c.id === 3).endTime, '08:00');
+  check('default courts all enabled', s.courts.every(c => c.enabled === true));
+  eq('C1 default accepts at 06:00', TM.courtAcceptsNewMatch(s.courts[0], at(6, 0)), true);
+  eq('C2 default rejects at 08:30', TM.courtAcceptsNewMatch(s.courts[1], at(8, 30)), false);
+
+  // 5–6. change Court 2 to 07:00–10:00 and verify the scheduler honours it
+  const r1 = TM.updateCourt(2, { startTime: '07:00', endTime: '10:00' });
+  check('Court 2 time change accepted', r1.ok, r1.msg);
+  s = TM.getState();
+  const c2 = s.courts.find(c => c.id === 2);
+  eq('C2 end now 10:00', c2.endTime, '10:00');
+  eq('C2 accepts at 07:30', TM.courtAcceptsNewMatch(c2, at(7, 30)), true);
+  eq('C2 accepts at 09:30 (extended)', TM.courtAcceptsNewMatch(c2, at(9, 30)), true);
+  eq('C2 rejects at 06:30 (now opens 07:00)', TM.courtAcceptsNewMatch(c2, at(6, 30)), false);
+  eq('C2 rejects at 10:01', TM.courtAcceptsNewMatch(c2, at(10, 1)), false);
+  // and the scheduler actually offers C2 inside the new window, not before it
+  check('scheduler offers C2 at 09:30', TM.suggestCourts(at(9, 30))[2] !== undefined);
+  eq('scheduler withholds C2 at 06:30', TM.suggestCourts(at(6, 30))[2], undefined);
+
+  // start a real match on C2 inside its window to prove startMatch reads config
+  TM.resetTournament();
+  TM.updateCourt(2, { startTime: '07:00', endTime: '10:00' });
+  const mm2 = TM.groupMatches()[0];
+  let started = TM.startMatch(mm2.id, 2, at(9, 30));
+  check('match can start on C2 at 09:30 after extension', started.ok, started.msg);
+  eq('assigned to court 2', TM.getMatch(mm2.id).court, 2);
+
+  // 7–8. disable Court 3
+  TM.resetTournament();
+  const r2 = TM.setCourtEnabled(3, false);
+  check('Court 3 disabled', r2.ok, r2.msg);
+  s = TM.getState();
+  eq('C3 enabled flag false', s.courts.find(c => c.id === 3).enabled, false);
+  eq('C3 not accepted any time', TM.courtAcceptsNewMatch(s.courts.find(c => c.id === 3), at(7, 0)), false);
+  const sug = TM.suggestCourts(at(7, 0));
+  eq('scheduler never suggests disabled C3', sug[3], undefined);
+  check('scheduler still fills C1/C2', !!sug[1] && !!sug[2]);
+  const anyC3 = TM.groupMatches().find(x => x.status === 'queued');
+  const c3start = TM.startMatch(anyC3.id, 3, at(7, 0));
+  eq('start on disabled C3 rejected', c3start.ok, false);
+  check('rejection mentions disabled', /disabled/i.test(c3start.msg), c3start.msg);
+  // re-enabling restores it
+  TM.setCourtEnabled(3, true);
+  check('C3 usable again after re-enable', TM.suggestCourts(at(7, 0))[3] !== undefined);
+
+  // the outside-hours override must not resurrect a disabled court
+  TM.getState().settings.allowOutsideAvailability = true;
+  TM.setCourtEnabled(3, false);
+  eq('override does not bypass disabled', TM.courtAcceptsNewMatch(TM.courtById(3), at(7, 0)), false);
+  eq('disabled court still absent from suggestions under override', TM.suggestCourts(at(7, 0))[3], undefined);
+  check('override still opens enabled courts', TM.courtAcceptsNewMatch(TM.courtById(2), at(12, 0)) === true);
+  TM.getState().settings.allowOutsideAvailability = false;
+  TM.setCourtEnabled(3, true);
+
+  // 9. rename Court 1
+  TM.resetTournament();
+  const r3 = TM.updateCourt(1, { name: 'Main Court' });
+  check('rename accepted', r3.ok, r3.msg);
+  s = TM.getState();
+  eq('C1 name changed in state', s.courts.find(c => c.id === 1).name, 'Main Court');
+  eq('C1 id unchanged', s.courts.find(c => c.id === 1).id, 1);
+  eq('courtName helper reflects rename', TM.courtName(1), 'Main Court');
+  eq('other courts untouched', s.courts.find(c => c.id === 2).name, 'Court 2');
+
+  // 10. increase 3 -> 4
+  TM.resetTournament();
+  TM.updateCourt(1, { name: 'Main Court' });
+  const r4 = TM.setCourtCount(4);
+  check('increase to 4 courts', r4.ok, r4.msg);
+  s = TM.getState();
+  eq('now 4 courts', s.courts.length, 4);
+  eq('4 enabled', s.courts.filter(c => c.enabled !== false).length, 4);
+  eq('new C4 has unique id', new Set(s.courts.map(c => c.id)).size, 4);
+  check('C4 has a default window', /^\d{2}:\d{2}$/.test(s.courts.find(c => c.id === 4).startTime));
+  eq('C1 rename survived count increase', TM.courtName(1), 'Main Court');
+
+  // 11. decrease 4 -> 2 (keeps config, disables the rest, history intact)
+  // seed a completed match on court 4 first so we can prove history is preserved
+  const m4 = TM.groupMatches()[0];
+  TM.startMatch(m4.id, 4, at(7, 0));
+  TM.saveGroupScore(m4.id, 21, 12);
+  const histCourt = TM.getMatch(m4.id).court;
+  const r5 = TM.setCourtCount(2);
+  check('decrease to 2 courts', r5.ok, r5.msg);
+  s = TM.getState();
+  eq('2 enabled courts', s.courts.filter(c => c.enabled !== false).length, 2);
+  eq('C3 + C4 disabled', s.courts.filter(c => c.id > 2).every(c => c.enabled === false), true);
+  eq('C1 config preserved', TM.courtName(1), 'Main Court');
+  eq('C2 config preserved', TM.courtName(2), 'Court 2');
+  eq('history keeps original court id', histCourt, 4);
+  eq('completed match still on court 4', TM.getMatch(m4.id).court, 4);
+  eq('completed match not disturbed', TM.getMatch(m4.id).status, 'completed');
+  eq('disabled C4 not scheduled', TM.suggestCourts(at(7, 0))[4], undefined);
+  eq('enabled count helper', TM.enabledCourts().length, 2);
+
+  // 13. active matches are never interrupted by configuration changes
+  TM.resetTournament();
+  const live = TM.groupMatches()[0];
+  TM.startMatch(live.id, 3, at(7, 0));
+  eq('match in progress on C3', TM.getMatch(live.id).status, 'in_progress');
+  eq('still assigned to its court', TM.getMatch(live.id).court, 3);
+  // widening the window: the running match must be untouched
+  const r6 = TM.updateCourt(3, { startTime: '05:00', endTime: '11:00' });
+  check('window change accepted while busy', r6.ok, r6.msg);
+  eq('running match still in progress', TM.getMatch(live.id).status, 'in_progress');
+  eq('running match still on its court', TM.getMatch(live.id).court, 3);
+  // disabling the court a match is running on must be refused, not silently applied
+  const r7 = TM.setCourtEnabled(3, false);
+  eq('cannot disable a busy court', r7.ok, false);
+  check('busy-court rejection is explained', /in progress/i.test(r7.msg), r7.msg);
+  eq('court still enabled after refusal', TM.courtById(3).enabled, true);
+  // shrinking the count so the busy court would be dropped is refused too
+  const r8 = TM.setCourtCount(2);
+  eq('cannot drop a busy court via count', r8.ok, false);
+  check('count-drop rejection mentions the match', /in progress/i.test(r8.msg), r8.msg);
+  eq('count unchanged after refusal', TM.enabledCourts().length, 3);
+  // a count that keeps the busy court is still allowed
+  eq('count that keeps the busy court is allowed', TM.setCourtCount(3).ok, true);
+  // the match can still finish normally after all those attempts
+  const fin = TM.saveGroupScore(live.id, 21, 19);
+  check('busy match completes normally', fin.ok, fin.msg);
+  eq('completed match keeps its court history', TM.getMatch(live.id).court, 3);
+  eq('court freed for scheduling after completion', TM.matchOnCourt(3), null);
+
+  // 12 / 14. invalid time ranges rejected atomically
+  TM.resetTournament();
+  const before = TM.exportJSON();
+  const bad1 = TM.updateCourt(2, { endTime: '05:00' }); // end before start
+  eq('end-before-start rejected', bad1.ok, false);
+  check('range error explained', /later than/i.test(bad1.msg), bad1.msg);
+  const bad2 = TM.updateCourt(2, { startTime: 'oops' });
+  eq('malformed start rejected', bad2.ok, false);
+  const bad3 = TM.updateCourt(2, { endTime: '25:00' });
+  eq('out-of-range hour rejected', bad3.ok, false);
+  const bad4 = TM.updateCourt(2, { name:  '   ' });
+  eq('empty name rejected', bad4.ok, false);
+  check('empty-name error explained', /cannot be empty/i.test(bad4.msg), bad4.msg);
+  const bad5 = TM.updateCourt(2, { name: 'Court 1' }); // duplicate of C1's default name
+  eq('duplicate name rejected', bad5.ok, false);
+  check('duplicate-name error explained', /unique|both named/i.test(bad5.msg), bad5.msg);
+  check('failed time-range edits left state untouched', TM.exportJSON() === before, 'state changed after rejected edits');
+  eq('invalid time helper', TM.validateTime('6:5', 'X') !== null, true);
+  eq('valid time helper', TM.validateTime('06:05', 'X'), null);
+
+  // 15. invalid court counts rejected
+  eq('count 0 rejected', TM.setCourtCount(0).ok, false);
+  eq('count 9 rejected', TM.setCourtCount(9).ok, false);
+  eq('count 8 accepted', TM.setCourtCount(8).ok, true);
+  eq('8 enabled', TM.enabledCourts().length, 8);
+  eq('count 1 accepted', TM.setCourtCount(1).ok, true);
+  eq('1 enabled', TM.enabledCourts().length, 1);
+  eq('count 2 accepted', TM.setCourtCount(2).ok, true);
+  eq('count 3 accepted', TM.setCourtCount(3).ok, true);
+  eq('3 enabled', TM.enabledCourts().length, 3);
+  eq('total never exceeds the maximum', TM.getState().courts.length <= 8, true);
+
+  // 16. configuration survives a localStorage reload
+  TM.resetTournament();
+  TM.updateCourt(1, { name: 'Centre Court' });
+  TM.updateCourt(2, { startTime: '07:00', endTime: '10:00' });
+  TM.setCourtEnabled(3, false);
+  const persisted = TM.getState().courts.map(c => ({ id: c.id, name: c.name, s: c.startTime, e: c.endTime, on: c.enabled }));
+  TM.load();
+  const afterLoad = TM.getState().courts.map(c => ({ id: c.id, name: c.name, s: c.startTime, e: c.endTime, on: c.enabled }));
+  eq('court config survives reload', JSON.stringify(afterLoad), JSON.stringify(persisted));
+
+  // 17. configuration survives export/import
+  const dump = TM.exportJSON();
+  const imp = TM.importJSON(dump);
+  check('import ok', imp.ok, imp.msg);
+  const afterImp = TM.getState().courts.map(c => ({ id: c.id, name: c.name, s: c.startTime, e: c.endTime, on: c.enabled }));
+  eq('court config survives export/import', JSON.stringify(afterImp), JSON.stringify(persisted));
+
+  // 18. legacy state (old { start, end, closed } shape) migrates to the defaults
+  const legacy = {
+    version: 4,
+    courts: [
+      { id: 1, name: 'Court 1', start: '06:00', end: '09:00', closed: false },
+      { id: 2, name: 'Court 2', start: '06:00', end: '08:00', closed: false },
+      { id: 3, name: 'Court 3', start: '06:00', end: '08:00', closed: false }
+    ],
+    teams: [{ id: 'A1', group: 'A', name: 'X & Y', players: ['X', 'Y'], level: 'Tunga' }],
+    matches: []
+  };
+  const mig = TM.migrate(legacy);
+  eq('legacy: 3 courts preserved', mig.courts.length, 3);
+  eq('legacy: start -> startTime', mig.courts[0].startTime, '06:00');
+  eq('legacy: end -> endTime', mig.courts[0].endTime, '09:00');
+  eq('legacy: C2 endTime 08:00', mig.courts[1].endTime, '08:00');
+  check('legacy: enabled defaults true', mig.courts.every(c => c.enabled === true));
+  eq('legacy: new schema version', mig.version, 5);
+
+  // legacy state missing courts entirely falls back to the standard three
+  const mig2 = TM.migrate({ teams: [{ id: 'A1', group: 'A', name: 'X & Y', players: ['X', 'Y'], level: 'Tunga' }], matches: [] });
+  eq('legacy: missing courts -> 3 defaults', mig2.courts.length, 3);
+  eq('legacy: default C1 end 09:00', mig2.courts[0].endTime, '09:00');
+
+  // 13b. the documented close-time scenario: a match starting at 07:59 on a court
+  // that closes at 08:00 still finishes, and that court then takes no new match.
+  TM.resetTournament();
+  const late = TM.groupMatches()[0];
+  let lateStart = TM.startMatch(late.id, 2, at(7, 59));
+  check('match starts at 07:59 on C2', lateStart.ok, lateStart.msg);
+  // simulating the clock ticking past 08:00: the running match is untouched
+  eq('still in progress just after 08:00', TM.matchOnCourt(2) && TM.matchOnCourt(2).id, late.id);
+  eq('C2 accepts no new match at 08:00', TM.courtAcceptsNewMatch(TM.courtById(2), at(8, 0)), false);
+  const lateDone = TM.saveGroupScore(late.id, 21, 18);
+  check('match finishes normally after the close time', lateDone.ok, lateDone.msg);
+  eq('C2 free but unavailable for new matches', TM.suggestCourts(at(8, 0))[2], undefined);
+  // extending the window or using the override makes C2 eligible again
+  eq('extending C2 to 09:00 re-enables it', TM.updateCourt(2, { endTime: '09:00' }).ok, true);
+  check('C2 eligible again at 08:30', TM.suggestCourts(at(8, 30))[2] !== undefined);
+
+  // 18b. court changes must not disturb match generation, results, standings or
+  // knockout progression.
+  TM.resetTournament();
+  TM.groupMatches().forEach(function (m) { TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 10, m.teamA < m.teamB ? 10 : 21); });
+  TM.ensureKnockout(); // generates QFs from the completed group stage
+  const groupIds = TM.groupMatches().map(function (m) { return m.id; }).join(',');
+  const standingsA = JSON.stringify(TM.computeStandings('A'));
+  const qfIds = ['QF-1', 'QF-2', 'QF-3', 'QF-4'];
+  const qfBefore = qfIds.map(function (id) { const m = TM.getMatch(id); return m ? (m.teamA + '|' + m.teamB) : id + ':none'; }).join(',');
+  const doneBefore = TM.getState().matches.filter(function (m) { return m.status === 'completed'; }).length;
+  const historyBefore = TM.getState().matches.filter(function (m) { return m.status === 'completed'; })
+    .map(function (m) { return m.id + ':' + m.court; }).sort().join(',');
+
+  TM.updateCourt(1, { name: 'Main Court' });
+  TM.updateCourt(2, { startTime: '07:00', endTime: '10:00' });
+  TM.setCourtEnabled(3, false);
+  TM.setCourtCount(5);
+
+  eq('group match list unchanged', TM.groupMatches().map(function (m) { return m.id; }).join(','), groupIds);
+  eq('no match regenerated', TM.groupMatches().length, 20);
+  eq('standings unchanged', JSON.stringify(TM.computeStandings('A')), standingsA);
+  eq('completed count unchanged', TM.getState().matches.filter(function (m) { return m.status === 'completed'; }).length, doneBefore);
+  eq('QF bracket unchanged', qfIds.map(function (id) { const m = TM.getMatch(id); return m ? (m.teamA + '|' + m.teamB) : id + ':none'; }).join(','), qfBefore);
+  eq('completed-match court history unchanged', TM.getState().matches.filter(function (m) { return m.status === 'completed'; })
+    .map(function (m) { return m.id + ':' + m.court; }).sort().join(','), historyBefore);
+  eq('renames still applied after all changes', TM.courtName(1), 'Main Court');
+
+  TM.resetTournament();
+})();
+
 
 /* ── report ─────────────────────────────────────────────── */
 console.log('\n' + (fail === 0 ? '✅ ALL TESTS PASSED' : '❌ FAILURES'));
