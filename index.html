@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#0d0f0e">
-<title>ShuttleDraw — Badminton Doubles Tournament Manager</title>
+<title>BestShot — Badminton Doubles Tournament Manager</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%F0%9F%8F%B8%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -44,6 +44,45 @@
     --font-body: 'DM Sans', sans-serif;
     --transition: 0.18s ease;
     --safe-bottom: env(safe-area-inset-bottom, 0px);
+    /* Theme-dependent surfaces that are not part of the palette above: text drawn
+       on the accent, and the modal scrim. Both are overridden by the light theme. */
+    --on-accent: #0d0f0e;
+    --overlay: rgba(0,0,0,0.75);
+  }
+
+  /* ── LIGHT THEME ───────────────────────────────────────────
+     The dark palette is the product identity; the light theme is the same layout
+     and typography with the surface tokens inverted. The lime accent is darkened
+     so accent-on-white text stays readable, and --on-accent flips to white. */
+  [data-theme="light"] {
+    --bg: #f2f4ef;
+    --bg2: #ffffff;
+    --bg3: #ffffff;
+    --bg4: #e9ece5;
+    --border: rgba(20,24,15,0.10);
+    --border2: rgba(20,24,15,0.18);
+    --text: #15180f;
+    --text2: #5b6353;
+    --text3: #8b9285;
+    --accent: #5f9414;
+    --accent2: #4d7a0f;
+    --accent-bg: rgba(95,148,20,0.10);
+    --accent-border: rgba(95,148,20,0.32);
+    --blue: #2563eb;
+    --blue-bg: rgba(37,99,235,0.08);
+    --blue-border: rgba(37,99,235,0.28);
+    --pink: #db2777;
+    --pink-bg: rgba(219,39,119,0.08);
+    --pink-border: rgba(219,39,119,0.28);
+    --danger: #d6402e;
+    --danger-bg: rgba(214,64,46,0.08);
+    --warn: #b26a00;
+    --warn-bg: rgba(178,106,0,0.10);
+    --gold: #b8860b;
+    --silver: #6b7280;
+    --bronze: #a05a2c;
+    --on-accent: #ffffff;
+    --overlay: rgba(20,24,15,0.45);
   }
 
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -92,7 +131,7 @@
     transition: var(--transition); min-height: 40px;
   }
   .tab:hover { background: var(--bg3); color: var(--text); }
-  .tab.active { background: var(--accent); color: #0d0f0e; font-weight: 700; }
+  .tab.active { background: var(--accent); color: var(--on-accent); font-weight: 700; }
 
   main { padding: 1.25rem 1rem calc(3rem + var(--safe-bottom)); max-width: 1080px; margin: 0 auto; width: 100%; }
   @media (min-width: 720px) { main { padding: 1.75rem 1.5rem 3rem; } }
@@ -119,7 +158,7 @@
   .btn:hover { background: var(--bg4); }
   .btn:active { transform: scale(0.98); }
   .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  .btn-primary { background: var(--accent); color: #0d0f0e; border-color: transparent; font-weight: 700; }
+  .btn-primary { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 700; }
   .btn-primary:hover { background: var(--accent2); }
   .btn-danger { background: var(--danger-bg); color: var(--danger); border-color: rgba(255,107,91,0.25); }
   .btn-danger:hover { background: rgba(255,107,91,0.16); }
@@ -171,6 +210,93 @@
   .stat-value { font-family: var(--font-head); font-size: 19px; font-weight: 800; color: var(--text); }
   .stat-card.accent-stat { border-color: var(--accent-border); background: var(--accent-bg); }
   .stat-card.accent-stat .stat-value { color: var(--accent); }
+
+  /* DASHBOARD V2 */
+  .status-strip { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: var(--radius); background: var(--bg2); border: 1px solid var(--border); font-size: 13px; color: var(--text2); margin-bottom: 14px; }
+  .status-strip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text3); flex-shrink: 0; }
+  .status-strip.live { border-color: rgba(245,166,35,0.3); background: var(--warn-bg); color: var(--warn); }
+  .status-strip.live .dot { background: var(--warn); }
+  .status-strip.ready { border-color: var(--blue-border); background: var(--blue-bg); color: var(--blue); }
+  .status-strip.ready .dot { background: var(--blue); }
+  .status-strip.complete { border-color: rgba(255,217,61,0.4); background: linear-gradient(135deg, rgba(255,217,61,0.12), var(--accent-bg)); color: var(--gold); }
+  .status-strip.complete .dot { background: var(--gold); }
+
+  /* Compact KPI cards: 2 cols on phone, 3 on tablet, 6 on desktop. */
+  .kpi-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  @media (min-width: 560px) { .kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  @media (min-width: 900px) { .kpi-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+  .kpi-card { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); padding: 11px 13px; min-width: 0; }
+  .kpi-card.accent { border-color: var(--accent-border); background: var(--accent-bg); }
+  .kpi-card.live { border-color: rgba(245,166,35,0.35); background: var(--warn-bg); }
+  .kpi-value { font-family: var(--font-head); font-size: 24px; font-weight: 800; line-height: 1.1; letter-spacing: -0.5px; color: var(--text); }
+  .kpi-card.accent .kpi-value { color: var(--accent); }
+  .kpi-card.live .kpi-value { color: var(--warn); }
+  .kpi-label { font-size: 10px; font-weight: 700; letter-spacing: 0.9px; text-transform: uppercase; color: var(--text3); margin-top: 3px; }
+
+  /* Stage progress */
+  .stage-list { display: flex; flex-direction: column; gap: 12px; }
+  .stage-item.upcoming { opacity: 0.55; }
+  .stage-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 5px; }
+  .stage-name { font-size: 13px; font-weight: 600; color: var(--text); }
+  .stage-count { font-family: var(--font-head); font-size: 13.5px; font-weight: 800; color: var(--text2); font-variant-numeric: tabular-nums; }
+  .bar { height: 6px; background: var(--bg4); border-radius: 4px; overflow: hidden; }
+  .bar > span { display: block; height: 100%; background: var(--accent); border-radius: 4px; transition: width 0.4s ease; }
+
+  /* Analytics two-column layout */
+  .analytics-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
+  @media (min-width: 820px) { .analytics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; } }
+  .dash-col { min-width: 0; }
+  .dash-col .section-title { margin-top: 1.75rem; }
+  @media (min-width: 820px) { .analytics-grid + .analytics-grid { margin-top: 0; } }
+
+  /* Level distribution bars */
+  .level-bars { display: flex; flex-direction: column; gap: 9px; }
+  .level-bar-row { display: grid; grid-template-columns: 76px minmax(0, 1fr) 28px; align-items: center; gap: 10px; }
+  .level-bar-name { font-size: 12.5px; font-weight: 600; color: var(--text2); overflow-wrap: anywhere; }
+  .level-bar-row.warn .level-bar-name { color: var(--warn); }
+  .level-bar-track { height: 14px; background: var(--bg4); border-radius: 4px; overflow: hidden; }
+  .level-bar-fill { height: 100%; background: var(--accent); border-radius: 4px; transition: width 0.4s ease; min-width: 4px; }
+  .level-bar-row.warn .level-bar-fill { background: var(--warn); }
+  .level-bar-fill.zero { background: var(--border2); }
+  .level-bar-count { font-family: var(--font-head); font-size: 14px; font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; }
+  .level-bar-row.warn .level-bar-count { color: var(--warn); }
+
+  /* Group performance */
+  .gp-list { display: flex; flex-direction: column; gap: 14px; }
+  .gp-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 5px; }
+  .gp-name { font-family: var(--font-head); font-size: 13px; font-weight: 800; color: var(--text); }
+  .gp-pct { font-family: var(--font-head); font-size: 13px; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .gp-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 7px; }
+  .gp-stat { font-size: 11.5px; color: var(--text3); }
+  .gp-stat b { color: var(--text2); font-weight: 700; }
+
+  /* Leaders */
+  .leader-list { display: flex; flex-direction: column; gap: 2px; }
+  .leader-row { display: flex; align-items: center; gap: 11px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .leader-row:last-child { border-bottom: none; }
+  .leader-rank { font-family: var(--font-head); font-size: 15px; font-weight: 800; color: var(--text3); width: 22px; flex-shrink: 0; }
+  .leader-row:nth-child(1) .leader-rank { color: var(--gold); }
+  .leader-row:nth-child(2) .leader-rank { color: var(--silver); }
+  .leader-row:nth-child(3) .leader-rank { color: var(--bronze); }
+  .leader-body { flex: 1; min-width: 0; }
+  .leader-name { font-size: 13.5px; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+  .leader-group { font-size: 11px; color: var(--text3); margin-top: 1px; }
+  .leader-stat { font-family: var(--font-head); font-size: 12.5px; font-weight: 800; color: var(--accent); white-space: nowrap; flex-shrink: 0; }
+  .leader-stat .diff { color: var(--text3); font-weight: 600; }
+
+  .dash-actions { margin-top: 12px; }
+  .link-btn { background: none; border: none; padding: 0; color: var(--accent); font-family: var(--font-body); font-size: 12.5px; font-weight: 600; cursor: pointer; min-height: 40px; display: inline-flex; align-items: center; }
+  .link-btn:hover { color: var(--accent2); text-decoration: underline; }
+
+  /* Compact court cards on the dashboard */
+  .court-card.compact { gap: 8px; padding: 0.85rem; }
+  .court-card.compact .court-name { font-size: 13.5px; }
+  .court-card.compact .court-teams { font-size: 13px; }
+
+  /* Light theme surface fixes: cards/inputs already use tokens, but a few shadows
+     and the bracket/board backgrounds assume a dark canvas. */
+  [data-theme="light"] #toast { box-shadow: 0 8px 32px rgba(20,24,15,0.18); }
+  [data-theme="light"] .champion-card { background: linear-gradient(135deg, rgba(255,217,61,0.22), var(--accent-bg)); }
 
   /* PILLS / BADGES */
   .pill { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 600; padding: 3px 9px; border-radius: 20px; background: var(--bg4); color: var(--text2); border: 1px solid var(--border); white-space: nowrap; }
@@ -331,7 +457,7 @@
 
   /* MODAL */
   .modal-overlay {
-    position: fixed; inset: 0; background: rgba(0,0,0,0.75);
+    position: fixed; inset: 0; background: var(--overlay);
     display: flex; align-items: flex-end; justify-content: center;
     z-index: 200; padding: 0; opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
   }
@@ -400,9 +526,10 @@
   <header>
     <a class="logo" href="#">
       <div class="logo-icon">🏸</div>
-      Shuttle<span>Draw</span>
+      Best<span>Shot</span>
     </a>
     <div class="header-actions">
+      <button class="btn btn-xs" id="theme-toggle" onclick="App.toggleTheme()" title="Toggle light/dark theme">🌙<span class="hide-xs"> Theme</span></button>
       <button class="btn btn-xs" onclick="App.about()">? <span class="hide-xs">Help</span></button>
       <button class="btn btn-xs" onclick="App.nav('settings')">⚙️ <span class="hide-xs">Settings</span></button>
     </div>
@@ -443,7 +570,7 @@
 <!-- ABOUT MODAL -->
 <div class="modal-overlay" id="about-modal">
   <div class="modal">
-    <h3>How ShuttleDraw works</h3>
+    <h3>How BestShot works</h3>
     <p>A configurable badminton doubles tournament manager. Run any number of pairs across one or more groups — the 10-pair, 2-group, 3-court setup is just the default example. Everything runs in the browser — no server, no accounts.</p>
     <div class="about-card">
       <h3>Tournament configuration</h3>
@@ -1307,7 +1434,7 @@
     let parsed;
     try { parsed = JSON.parse(text); } catch (e) { return { ok: false, msg: 'That file is not valid JSON.' }; }
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !Array.isArray(parsed.teams) || !Array.isArray(parsed.matches)) {
-      return { ok: false, msg: 'This does not look like a ShuttleDraw backup.' };
+      return { ok: false, msg: 'This does not look like a BestShot backup.' };
     }
     if (!parsed.teams.length || parsed.teams.some(function (t) { return !t || t.id == null || typeof t.name !== 'string'; })) {
       return { ok: false, msg: 'This backup has no usable teams.' };
@@ -2017,6 +2144,122 @@
       .slice(0, limit || 5);
   }
 
+  /* ── dashboard analytics ─────────────────────────────── */
+  // Everything the Dashboard renders is derived here from live state. Nothing is
+  // cached or stored: each call re-reads state.matches / state.teams / state.courts
+  // so a result entered anywhere is reflected on the next render.
+
+  // Pairs · matches · completed · live · active courts · progress %.
+  function dashboardKPIs() {
+    const p = progress();
+    return {
+      pairs: state.teams.length,
+      totalMatches: p.overallTotal,
+      completed: p.overallDone,
+      live: state.matches.filter(function (m) { return m.status === 'in_progress'; }).length,
+      courts: enabledCourts().length,
+      progressPct: p.pct
+    };
+  }
+
+  // The stages the tournament will actually play, in bracket order. Before the
+  // bracket exists the prediction comes from the qualification rule
+  // (bracketRounds), so a top-2 field shows Semi-Final/Final instead of QF/SF/Final.
+  function dashboardStages() {
+    const koMatches = state.matches.filter(function (m) { return m.stage !== 'group' && !m.bye; });
+    let defs;
+    if (koMatches.length) {
+      // Every round the bracket will play, so a not-yet-created Final still shows
+      // as "—" rather than disappearing. `state.knockout.qualifiers` is the field the
+      // bracket was actually built from.
+      let count = 0;
+      if (state.knockout.qualifiers) {
+        Object.keys(state.knockout.qualifiers).forEach(function (g) { count += (state.knockout.qualifiers[g] || []).length; });
+      }
+      defs = count >= 2 ? bracketRounds(count) : null;
+      if (!defs || !defs.length) {
+        const present = {};
+        koMatches.forEach(function (m) { present[m.stage] = true; });
+        defs = KNOCKOUT_ROUNDS.filter(function (r) { return present[r.key]; });
+      }
+    } else {
+      defs = bracketRounds(qualifierCount());
+    }
+    return defs.map(function (r) {
+      const list = state.matches.filter(function (m) { return m.stage === r.key && !m.bye; });
+      const done = list.filter(function (m) { return m.status === 'completed'; }).length;
+      return { key: r.key, name: r.name, exists: true, total: list.length, done: done };
+    });
+  }
+
+  // Count per actual team assignment, plus the Unassigned sentinel. `max` lets the
+  // UI size the bars proportionally without the chart inventing a scale.
+  function levelDistribution() {
+    const counts = levelCounts();
+    const order = levels().filter(function (l) { return l.enabled !== false; }).map(function (l) { return { id: l.id, name: l.name }; });
+    order.push({ id: UNASSIGNED_ID, name: UNASSIGNED_NAME });
+    const rows = order.map(function (l) {
+      return { id: l.id, name: l.name, count: counts[l.id] || 0, unassigned: l.id === UNASSIGNED_ID };
+    });
+    let max = 0;
+    rows.forEach(function (r) { if (r.count > max) max = r.count; });
+    return { rows: rows, max: max, total: state.teams.length, unassigned: counts[UNASSIGNED_ID] || 0 };
+  }
+
+  // One row per configured group, derived from its fixtures — never from a fixed
+  // A/B assumption. Groups with no fixtures yet report zeroes.
+  function groupPerformance() {
+    return groupIds().map(function (g) {
+      const gm = groupMatches(g);
+      const total = gm.length;
+      const completed = gm.filter(function (m) { return m.status === 'completed'; }).length;
+      return {
+        group: g,
+        label: groupLabel(g),
+        pairs: (state.groups[g] || []).length,
+        total: total,
+        completed: completed,
+        remaining: total - completed,
+        pct: total ? Math.round((completed / total) * 100) : 0
+      };
+    });
+  }
+
+  // Top N across every group, using the exact computeStandings ranking and
+  // tie-breaks. Teams with no play are excluded so leaders only appear once there
+  // are results. `group` is carried for a multi-group label.
+  function dashboardLeaders(limit) {
+    const all = [];
+    groupIds().forEach(function (g) {
+      computeStandings(g).forEach(function (r) {
+        if (r.played > 0) all.push({ team: r.team, group: g, played: r.played, pts: r.pts, diff: r.diff, pf: r.pf });
+      });
+    });
+    all.sort(function (a, b) {
+      return (b.pts - a.pts) || (b.diff - a.diff) || (b.pf - a.pf) || a.team.name.localeCompare(b.team.name);
+    });
+    return limit ? all.slice(0, limit) : all;
+  }
+
+  // Total qualifiers implied by the current qualification rule.
+  function qualifierCount() {
+    let count = 0;
+    const per = qualifiedPerGroup();
+    groupIds().forEach(function (g) { count += per[g]; });
+    return count;
+  }
+
+  // Coarse state used by the dashboard status strip.
+  function dashboardStatus() {
+    const info = knockoutInfo();
+    const p = progress();
+    if (info.champion) return 'complete';
+    if (info.exists) return 'knockout';
+    if (info.groupDone && p.groupTotal > 0) return 'ready';
+    if (state.teams.length === 0) return 'empty';
+    return 'group';
+  }
+
   /* ── team editing ────────────────────────────────────── */
   // Signature of the *playing structure*: which pair sits in which group. It is
   // intentionally independent of the set of empty group containers, so adding or
@@ -2490,6 +2733,13 @@
 
     progress: progress,
     recentResults: recentResults,
+    dashboardKPIs: dashboardKPIs,
+    dashboardStages: dashboardStages,
+    dashboardLeaders: dashboardLeaders,
+    dashboardStatus: dashboardStatus,
+    levelDistribution: levelDistribution,
+    groupPerformance: groupPerformance,
+    qualifierCount: qualifierCount,
 
     validateTeams: validateTeams,
     validateGroups: validateGroups,
@@ -2817,53 +3067,193 @@
   /* ═══════════════ DASHBOARD ═══════════════ */
   function viewDashboard() {
     const st = TM.getState();
+    const kpi = TM.dashboardKPIs();
     const p = TM.progress();
+    const stages = TM.dashboardStages();
+    const status = TM.dashboardStatus();
     const info = TM.knockoutInfo();
     const ch = info.champion ? TM.getTeam(info.champion) : null;
 
     let html = '<div class="page-title">Dashboard</div>';
-    html += '<div class="page-subtitle">Live overview of ' + esc(st.tournament.name) + ' · ' + st.teams.length + ' pairs · ' + TM.enabledCourts().length + ' courts</div>';
+    html += '<div class="page-subtitle">Live control centre for ' + esc(st.tournament.name) + '</div>';
+
+    html += statusStrip(status, kpi, p);
+    html += kpiCards(kpi);
 
     html += '<div class="section-title">Tournament progress <span class="line"></span></div>';
-    html += '<div class="card">';
-    html += '<div class="progress-row"><span>Group Stage · ' + p.groupDone + ' / ' + p.groupTotal + ' completed</span><span class="mono">' + pct(p.groupDone, p.groupTotal) + '%</span></div>';
-    html += '<div class="progress-bar" style="margin-bottom:14px;"><div class="progress-fill" style="width:' + pct(p.groupDone, p.groupTotal) + '%"></div></div>';
-    html += '<div class="progress-row"><span>Overall · ' + p.overallDone + ' / ' + p.overallTotal + ' completed</span><span class="mono">' + p.pct + '%</span></div>';
-    html += '<div class="progress-bar"><div class="progress-fill" style="width:' + p.pct + '%"></div></div>';
-    html += '</div>';
+    html += progressCard(stages, p);
 
-    if (ch) {
-      html += '<div class="champion-card" style="margin-top:14px;"><div class="crown">🏆</div><div class="ctitle">Champion</div><div class="cname">' + esc(ch.name) + '</div></div>';
-    }
-
-    html += '<div class="section-title">Courts <span class="line"></span></div>';
-    html += '<div class="courts-grid">' + st.courts.map(courtCard).join('') + '</div>';
+    html += '<div class="section-title">Live courts <span class="line"></span></div>';
+    html += liveCourtsBlock(st, kpi);
 
     html += '<div class="section-title">Next matches <span class="line"></span></div>';
     html += nextMatchesBlock();
 
-    html += '<div class="section-title">Live standings <span class="line"></span></div>';
-    TM.groupIds().forEach(function (g) {
-      const size = TM.teamsInGroup(g).length;
-      html += '<div class="card"><div class="muted" style="margin-bottom:8px;">' + esc(TM.groupLabel(g)) +
-        (size ? '' : ' — no pairs assigned yet') + '</div>' +
-        (size ? standingsTable(g, true) : '<div class="alert alert-info" style="margin:0;">No pairs in this group yet. Assign pairs on the Teams screen.</div>') +
-        '</div>';
-    });
+    html += '<div class="analytics-grid">';
+    html += '<div class="dash-col">' + levelDistributionBlock() + '</div>';
+    html += '<div class="dash-col">' + groupPerformanceBlock() + '</div>';
+    html += '</div>';
 
-    html += '<div class="section-title">Recent results <span class="line"></span></div>';
-    html += recentBlock();
+    html += '<div class="analytics-grid">';
+    html += '<div class="dash-col">' + leadersBlock() + '</div>';
+    html += '<div class="dash-col">' + recentBlock() + '</div>';
+    html += '</div>';
+
+    if (ch) {
+      html += '<div class="section-title">Champion <span class="line"></span></div>';
+      html += '<div class="champion-card"><div class="crown">🏆</div><div class="ctitle">Tournament Champion</div>' +
+        '<div class="cname">' + esc(ch.name) + '</div>' + (ch.players && ch.players.length ? '<div class="muted" style="margin-top:4px;">' + esc(ch.players.join(' · ')) + '</div>' : '') + '</div>';
+    }
 
     return html;
   }
 
   function pct(a, b) { return b ? Math.round((a / b) * 100) : 0; }
 
+  /* ── status strip ─────────────────────────────────────── */
+  function statusStrip(status, kpi, p) {
+    let cls = '', msg = '';
+    if (status === 'complete') { cls = 'complete'; msg = '🏆 Tournament complete'; }
+    else if (status === 'knockout') { cls = 'live'; msg = 'Knockout in progress · ' + p.knockoutDone + ' / ' + p.knockoutTotal + ' knockout matches complete'; }
+    else if (status === 'ready') { cls = 'ready'; msg = 'Group stage complete — ready for knockout generation.'; }
+    else if (status === 'empty') { cls = ''; msg = 'No pairs configured yet.'; }
+    else if (kpi.live > 0) { cls = 'live'; msg = kpi.live + (kpi.live === 1 ? ' match' : ' matches') + ' in progress · ' + kpi.courts + ' active courts'; }
+    else { cls = ''; msg = 'Group stage in progress · ' + kpi.completed + ' / ' + kpi.totalMatches + ' matches complete'; }
+    return '<div class="status-strip ' + cls + '"><span class="dot"></span><span>' + esc(msg) + '</span></div>';
+  }
+
+  /* ── KPI cards ────────────────────────────────────────── */
+  function kpiCards(k) {
+    const cards = [
+      { label: 'Pairs', value: k.pairs, cls: '' },
+      { label: 'Matches', value: k.totalMatches, cls: '' },
+      { label: 'Completed', value: k.completed, cls: 'accent' },
+      { label: 'Live', value: k.live, cls: k.live ? 'live' : '' },
+      { label: 'Courts', value: k.courts, cls: '' },
+      { label: 'Progress', value: k.progressPct + '%', cls: 'accent' }
+    ];
+    return '<div class="kpi-grid">' + cards.map(function (c) {
+      return '<div class="kpi-card ' + c.cls + '"><div class="kpi-value">' + esc(String(c.value)) + '</div><div class="kpi-label">' + esc(c.label) + '</div></div>';
+    }).join('') + '</div>';
+  }
+
+  /* ── tournament progress ──────────────────────────────── */
+  function progressCard(stages, p) {
+    const st = TM.getState();
+    let html = '<div class="card">';
+    html += '<div class="stage-list">';
+    html += stageRow('Group Stage', p.groupDone, p.groupTotal, p.groupTotal > 0);
+    stages.forEach(function (s) {
+      html += stageRow(s.name, s.done, s.total, s.total > 0);
+    });
+    html += '</div>';
+
+    html += '<div class="progress-row" style="margin-top:16px;"><span>Overall</span><span class="mono">' + p.pct + '%</span></div>';
+    html += '<div class="progress-bar"><div class="progress-fill" style="width:' + p.pct + '%"></div></div>';
+
+    if (!st.teams.length) html += '<div class="alert alert-info" style="margin:12px 0 0;">No pairs configured yet. Add pairs on the Teams screen to generate fixtures.</div>';
+    else if (!st.matches.length) html += '<div class="alert alert-info" style="margin:12px 0 0;">No matches generated yet. Save the team list to build fixtures.</div>';
+    html += '</div>';
+    return html;
+  }
+
+  function stageRow(name, done, total, hasTotal) {
+    const upcoming = !hasTotal;
+    return '<div class="stage-item' + (upcoming ? ' upcoming' : '') + '">' +
+      '<div class="stage-head"><span class="stage-name">' + esc(name) + '</span><span class="stage-count">' +
+      (hasTotal ? done + ' / ' + total : '—') + '</span></div>' +
+      '<div class="bar"><span style="width:' + (hasTotal ? pct(done, total) : 0) + '%"></span></div>' +
+      '</div>';
+  }
+
+  /* ── live courts ──────────────────────────────────────── */
+  function liveCourtsBlock(st, kpi) {
+    if (!st.courts.length) return '<div class="card"><div class="muted">No courts configured.</div></div>';
+    let html = '';
+    if (!kpi.live) html += '<div class="muted" style="margin-bottom:10px;">No matches currently in progress.</div>';
+    html += '<div class="courts-grid">' + st.courts.map(function (c) { return courtCard(c, true); }).join('') + '</div>';
+    return html;
+  }
+
+  /* ── level distribution ───────────────────────────────── */
+  function levelDistributionBlock() {
+    const ld = TM.levelDistribution();
+    let html = '<div class="section-title">Team level distribution <span class="line"></span></div>';
+    html += '<div class="card">';
+    if (!ld.total) {
+      html += '<div class="muted">No pairs configured yet.</div>';
+      return html + '</div>';
+    }
+    html += '<div class="level-bars">';
+    ld.rows.forEach(function (r) {
+      const width = ld.max ? Math.round((r.count / ld.max) * 100) : 0;
+      const warn = r.unassigned && r.count > 0;
+      html += '<div class="level-bar-row' + (warn ? ' warn' : '') + '">' +
+        '<div class="level-bar-name">' + esc(r.name) + '</div>' +
+        '<div class="level-bar-track"><div class="level-bar-fill' + (r.count ? '' : ' zero') + '" style="width:' + (r.count ? Math.max(width, 4) : 3) + '%"></div></div>' +
+        '<div class="level-bar-count">' + r.count + '</div>' +
+        '</div>';
+    });
+    html += '</div>';
+    if (ld.unassigned > 0) {
+      html += '<div class="alert alert-warn" style="margin:12px 0 0;">' + ld.unassigned + (ld.unassigned === 1 ? ' pair is' : ' pairs are') + ' unassigned. Assign a level to complete the draw.</div>';
+    }
+    html += '<div class="dash-actions"><button class="link-btn" onclick="App.nav(\'settings\')">Manage levels →</button></div>';
+    html += '</div>';
+    return html;
+  }
+
+  /* ── group performance ────────────────────────────────── */
+  function groupPerformanceBlock() {
+    const rows = TM.groupPerformance();
+    let html = '<div class="section-title">Group performance <span class="line"></span></div>';
+    html += '<div class="card">';
+    if (!rows.length) return html + '<div class="muted">No groups configured yet.</div></div>';
+    html += '<div class="gp-list">';
+    rows.forEach(function (r) {
+      html += '<div class="gp-row">' +
+        '<div class="gp-head"><span class="gp-name">' + esc(r.label) + '</span><span class="gp-pct">' + r.pct + '%</span></div>' +
+        '<div class="bar"><span style="width:' + r.pct + '%"></span></div>' +
+        '<div class="gp-meta">' +
+          '<span class="gp-stat"><b>' + r.pairs + '</b> ' + (r.pairs === 1 ? 'pair' : 'pairs') + '</span>' +
+          '<span class="gp-stat"><b>' + r.total + '</b> matches</span>' +
+          '<span class="gp-stat"><b>' + r.completed + '</b> completed</span>' +
+          '<span class="gp-stat"><b>' + r.remaining + '</b> remaining</span>' +
+        '</div>' +
+        '</div>';
+    });
+    html += '</div></div>';
+    return html;
+  }
+
+  /* ── current leaders ──────────────────────────────────── */
+  function leadersBlock() {
+    const leaders = TM.dashboardLeaders(5);
+    const groups = TM.groupIds();
+    let html = '<div class="section-title">Current leaders <span class="line"></span></div>';
+    html += '<div class="card">';
+    if (!leaders.length) {
+      return html + '<div class="muted">Standings will appear after results are recorded.</div></div>';
+    }
+    html += '<div class="leader-list">';
+    leaders.forEach(function (l, i) {
+      html += '<div class="leader-row">' +
+        '<div class="leader-rank">' + (i + 1) + '</div>' +
+        '<div class="leader-body"><div class="leader-name">' + esc(l.team.name) + '</div>' +
+        (groups.length > 1 ? '<div class="leader-group">' + esc(TM.groupLabel(l.group)) + '</div>' : '') +
+        '</div>' +
+        '<div class="leader-stat">' + l.pts + ' pts <span class="diff">· ' + (l.diff > 0 ? '+' : '') + l.diff + ' diff</span></div>' +
+        '</div>';
+    });
+    html += '</div></div>';
+    return html;
+  }
+
   function nextMatchesBlock() {
     const ranked = TM.rankCandidates(5);
     const suggests = TM.suggestCourts();
     const byMatch = {};
-    Object.keys(suggests).forEach(function (cid) { byMatch[suggests[cid].match.id] = cid; });
+    Object.keys(suggests).forEach(function (cid) { byMatch[suggests[cid].match.id] = Number(cid); });
 
     if (!ranked.length) {
       const st = TM.getState();
@@ -2879,34 +3269,85 @@
       return '<div class="mrow">' +
         '<div class="mrow-top"><span class="mrow-id">' + esc(m.id) + '</span>' + stagePill(m) + (c ? '<span class="pill pill-free">→ ' + esc(c.name) + '</span>' : '<span class="pill">no free court</span>') + '</div>' +
         '<div class="court-teams">' + teamsBlock(m) + '</div>' +
-        '<div class="court-reason">' + esc(r.reason) + '</div>' +
+        '<div class="court-reason"><b style="color:var(--text2);">Reason:</b> ' + esc(r.reason) + '</div>' +
         '</div>';
     }).join('') + '</div>';
   }
 
   function stagePill(m) {
-    if (m.stage === 'group') return '<span class="pill">Group ' + m.group + ' · R' + m.round + '</span>';
-    return '<span class="pill">' + TM.KNOCKOUT_LABEL[m.stage] + '</span>';
+    if (m.stage === 'group') return '<span class="pill">Group ' + esc(m.group) + ' · R' + m.round + '</span>';
+    return '<span class="pill">' + esc(TM.KNOCKOUT_LABEL[m.stage]) + '</span>';
   }
 
   function recentBlock() {
     const rec = TM.recentResults(6);
-    if (!rec.length) return '<div class="card"><div class="muted">No results yet. Start a match from the Courts tab.</div></div>';
-    return '<div class="mgrid">' + rec.map(function (m) {
-      return '<div class="mrow done">' +
-        '<div class="mrow-top"><span class="mrow-id">' + esc(m.id) + '</span>' + stagePill(m) + '<span class="pill pill-done">✓ Final</span></div>' +
-        '<div class="court-teams">' + teamsBlockScored(m) + '</div>' +
-        '</div>';
-    }).join('') + '</div>';
+    let html = '<div class="section-title">Recent results <span class="line"></span></div>';
+    if (!rec.length) return html + '<div class="card"><div class="muted">No results yet. Start a match from the Courts tab.</div></div>';
+    html += '<div class="mgrid">' + rec.map(resultRow).join('') + '</div>';
+    return html;
+  }
+
+  function resultRow(m) {
+    const w = TM.getTeam(m.winner), l = TM.getTeam(m.loser);
+    let score = '';
+    if (m.stage === 'group') {
+      score = (m.winner === m.teamA ? m.scoreA : m.scoreB) + ' – ' + (m.winner === m.teamA ? m.scoreB : m.scoreA);
+    } else {
+      const sa = m.setsA || 0, sb = m.setsB || 0;
+      score = (m.winner === m.teamA ? sa : sb) + ' – ' + (m.winner === m.teamA ? sb : sa);
+    }
+    const meta = [];
+    if (m.bye) meta.push('Bye');
+    else if (m.court) meta.push(TM.courtName(m.court));
+    meta.push(m.stage === 'group' ? esc(TM.groupLabel(m.group)) : esc(TM.KNOCKOUT_LABEL[m.stage]));
+    if (m.completedAt) meta.push(timeOf(m.completedAt));
+    return '<div class="mrow done">' +
+      '<div class="mrow-top"><span class="mrow-id">✓ ' + esc(m.id) + '</span>' + stagePill(m) + '<span class="pill pill-done">Final</span></div>' +
+      '<div class="court-teams">' +
+        '<div class="t win"><span class="nm">' + esc(w ? w.name : '—') + '</span><span class="sc">' + esc(score) + '</span></div>' +
+        '<div class="t lose"><span class="nm">' + esc(l ? l.name : '—') + '</span></div>' +
+      '</div>' +
+      '<div class="court-reason">' + meta.join(' · ') + '</div>' +
+      '</div>';
   }
 
   /* ═══════════════ COURTS ═══════════════ */
-  function courtCard(court) {
+  function courtCard(court, compact) {
     const cur = TM.matchOnCourt(court.id);
     const enabled = court.enabled !== false;
     const accepts = TM.courtAcceptsNewMatch(court);
     const suggests = TM.suggestCourts();
     const sug = suggests[court.id];
+    const cstate = TM.courtStatus(court);
+
+    // Compact dashboard variant: status-led with just what is happening now.
+    if (compact) {
+      const cls = cstate === 'in_progress' ? ' live' : (cstate === 'disabled' ? ' disabled' : (cstate === 'closed' ? ' closed' : ' free'));
+      let statusPill;
+      if (cstate === 'in_progress') statusPill = '<span class="pill pill-live">● Live</span>';
+      else if (cstate === 'disabled') statusPill = '<span class="pill pill-closed">Disabled</span>';
+      else if (cstate === 'closed') statusPill = '<span class="pill pill-closed">Closed</span>';
+      else statusPill = '<span class="pill pill-free">Available</span>';
+
+      let h = '<div class="court-card compact' + cls + '">';
+      h += '<div class="court-head"><span class="court-name">' + esc(court.name) + '</span>' + statusPill + '</div>';
+      if (cur) {
+        h += '<div class="court-teams">' + teamsBlock(cur) + '</div>';
+        h += '<div class="court-reason mono">' + esc(cur.id) + ' · started ' + timeOf(cur.startedAt) + '</div>';
+      } else if (cstate === 'disabled') {
+        h += '<div class="court-empty">Disabled in settings</div>';
+      } else if (cstate === 'closed') {
+        h += '<div class="court-empty">' + esc(TM.whyCourtUnavailable(court) || 'Court unavailable') + '</div>';
+      } else if (sug) {
+        h += '<div class="court-reason" style="margin-top:0;">Next</div>';
+        h += '<div class="court-teams">' + teamsBlock(sug.match) + '</div>';
+        h += '<div class="court-reason mono">' + esc(sug.match.id) + '</div>';
+      } else {
+        h += '<div class="court-empty">No eligible match waiting</div>';
+      }
+      h += '</div>';
+      return h;
+    }
 
     // A busy court is "in progress" regardless of the clock; a running match always
     // finishes. A disabled court is shown as Disabled and never offers a next match.
@@ -3928,7 +4369,7 @@
       const stamp = d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0') + '-' +
         String(d.getHours()).padStart(2, '0') + String(d.getMinutes()).padStart(2, '0');
       a.href = url;
-      a.download = 'shuttledraw-backup-' + stamp + '.json';
+      a.download = 'bestshot-backup-' + stamp + '.json';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -4001,8 +4442,34 @@
     $('#view').innerHTML = html;
   }
 
+  /* ═══════════════ THEME ═══════════════ */
+  // Light/dark is a display preference only — it never touches tournament state,
+  // so it is stored under its own key rather than inside the saved tournament.
+  const THEME_KEY = 'shuttledraw_theme';
+
+  function readTheme() {
+    try { return global.localStorage && global.localStorage.getItem(THEME_KEY) === 'light' ? 'light' : 'dark'; }
+    catch (e) { return 'dark'; }
+  }
+
+  function applyTheme(theme) {
+    const root = document.documentElement;
+    if (!root) return;
+    if (theme === 'light') root.setAttribute('data-theme', 'light');
+    else root.removeAttribute('data-theme');
+    const btn = document.getElementById('theme-toggle');
+    if (btn) btn.innerHTML = (theme === 'light' ? '☀️' : '🌙') + '<span class="hide-xs"> Theme</span>';
+  }
+
+  function toggleTheme() {
+    const next = readTheme() === 'light' ? 'dark' : 'light';
+    try { if (global.localStorage) global.localStorage.setItem(THEME_KEY, next); } catch (e) {}
+    applyTheme(next);
+  }
+
   /* ═══════════════ BOOT ═══════════════ */
   function boot() {
+    applyTheme(readTheme());
     TM.ensureState();
     TM.ensureKnockout();
     render();
@@ -4025,6 +4492,7 @@
     nav: nav,
     render: render,
     toast: toast,
+    toggleTheme: toggleTheme,
 
     openScore: openScore,
     previewScore: previewScore,

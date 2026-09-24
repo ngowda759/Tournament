@@ -1,4 +1,4 @@
-# 🏸 ShuttleDraw — Configurable Badminton Doubles Tournament Manager
+# 🏸 BestShot — Configurable Badminton Doubles Tournament Manager
 
 A lightweight, single-file badminton **doubles** tournament manager. It is fully
 **configurable**: run any number of pairs, split them across any number of groups, and let the
@@ -697,7 +697,7 @@ Refresh the browser and the tournament continues exactly where it left off.
 On the **Settings** screen:
 
 - **Export backup** downloads the entire tournament as a JSON file
-  (`shuttledraw-backup-YYYYMMDD-HHMM.json`).
+  (`bestshot-backup-YYYYMMDD-HHMM.json`).
 - **Import backup** restores a previously exported JSON file. Invalid or unrelated files are
   rejected with a clear message.
 - **Reset tournament** restores the default example configuration (10 pairs, 2 groups, 3 courts)

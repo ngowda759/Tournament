@@ -239,6 +239,102 @@ App.repairLevels();
 eq('repair left fixtures intact', TM.groupMatches().map(function (m) { return m.id + ':' + m.teamA + ':' + m.teamB; }).join(','), fixturesBefore);
 eq('repair left default Kaveri count at 3', TM.levelCounts().kaveri, 3);
 
+// ── Dashboard V2 render structure ──────────────────────────────────────────────
+// Every section must appear on the default dashboard, derived from live state.
+TM.resetTournament();
+App.nav('dashboard');
+s = getEl('view').innerHTML;
+['kpi-grid', 'kpi-card', 'stage-list', 'status-strip', 'courts-grid', 'level-bars',
+ 'gp-list', 'mgrid', 'progress-bar'].forEach(function (key) {
+  check('dashboard contains ' + key, s.indexOf(key) !== -1, 'missing ' + key);
+});
+['Pairs', 'Matches', 'Completed', 'Live', 'Courts', 'Progress'].forEach(function (label) {
+  check('dashboard KPI label ' + label, s.indexOf('>' + label + '<') !== -1, 'missing ' + label);
+});
+check('dashboard shows group stage count 0 / 20', s.indexOf('0 / 20') !== -1, 'no 0/20');
+check('dashboard shows QF stage', s.indexOf('Quarter-Final') !== -1, 'no QF');
+check('dashboard no undefined/NaN', s.indexOf('undefined') === -1 && s.indexOf('NaN') === -1);
+check('dashboard shows no-results leader message', s.indexOf('Standings will appear after results are recorded.') !== -1, 'no leader empty state');
+
+// A completed match must be reflected immediately on the next render. Court windows
+// are ignored here so the injected activity is deterministic regardless of clock.
+TM.getState().settings.allowOutsideAvailability = true;
+TM.groupMatches().slice(0, 3).forEach(function (m) { TM.saveGroupScore(m.id, 21, 15); });
+TM.startMatch(TM.groupMatches()[3].id, 1);
+App.nav('dashboard');
+s = getEl('view').innerHTML;
+check('dashboard shows a leader list after results', s.indexOf('leader-list') !== -1 && s.indexOf('leader-row') !== -1, 'no leader rows');
+check('dashboard shows live KPI styling', s.indexOf('kpi-card live') !== -1, 'no live kpi');
+check('dashboard shows a recent result', s.indexOf('Recent results') !== -1 && s.indexOf('mrow done') !== -1, 'no recent result');
+check('dashboard recent result has score separator', s.indexOf('–') !== -1, 'no score');
+check('dashboard is still free of undefined/NaN', s.indexOf('undefined') === -1 && s.indexOf('NaN') === -1);
+
+// Level distribution: the default has one unassigned pair, shown as a warning.
+check('dashboard flags unassigned level', s.indexOf('level-bar-row warn') !== -1, 'no unassigned warning');
+
+// Group performance works for 3 and 4 groups.
+TM.resetTournament();
+const four = [];
+['A', 'B', 'C', 'D'].forEach(function (g) { for (let i = 1; i <= 3; i++) four.push({ id: g + i, group: g, name: g + i + ' pair' }); });
+TM.applyTeams(four, { regenerate: true, groups: ['A', 'B', 'C', 'D'] });
+App.nav('dashboard');
+s = getEl('view').innerHTML;
+['Group A', 'Group B', 'Group C', 'Group D'].forEach(function (gl) {
+  check('4-group dashboard shows ' + gl, s.indexOf(gl) !== -1, 'missing ' + gl);
+});
+check('4-group dashboard no undefined/NaN', s.indexOf('undefined') === -1 && s.indexOf('NaN') === -1);
+
+// Champion/status: group stage complete with no bracket shows the ready message.
+TM.resetTournament();
+TM.applyTeams([
+  { id: 'A1', group: 'A', name: 'a1' }, { id: 'A2', group: 'A', name: 'a2' }
+], { regenerate: true, groups: ['A'] });
+TM.groupMatches().forEach(function (m) { TM.saveGroupScore(m.id, 21, 15); });
+TM.clearKnockout();
+App.nav('dashboard');
+s = getEl('view').innerHTML;
+check('dashboard shows ready-for-knockout status', s.indexOf('ready for knockout generation') !== -1, 'no ready status');
+check('dashboard hides champion card until a champion exists', s.indexOf('Tournament Champion') === -1, 'champion shown early');
+
+// Empty states: a tournament with no teams (set directly so the 2-pair floor, which
+// only guards fixture generation, does not stand in for a genuinely empty document).
+TM.resetTournament();
+TM.setState(Object.assign(TM.getState(), { teams: [], matches: [], groups: { A: [], B: [] }, groupLabels: {} }));
+App.nav('dashboard');
+s = getEl('view').innerHTML;
+check('empty dashboard shows no-pairs message', s.indexOf('No pairs configured yet.') !== -1, 'no empty message');
+check('empty dashboard no undefined/NaN', s.indexOf('undefined') === -1 && s.indexOf('NaN') === -1);
+check('empty dashboard still renders KPI cards', s.indexOf('kpi-grid') !== -1, 'no kpis');
+
+// Champion state: a fully played 2-pair tournament crowns a champion prominently.
+TM.resetTournament();
+TM.applyTeams([
+  { id: 'A1', group: 'A', name: 'Alpha Pair' }, { id: 'A2', group: 'A', name: 'Beta Pair' }
+], { regenerate: true, groups: ['A'] });
+TM.setQualification(2);
+TM.groupMatches().forEach(function (m) { TM.saveGroupScore(m.id, 21, 15); });
+TM.ensureKnockout();
+const finalM = TM.getMatch('F-1');
+if (finalM) { TM.saveKnockoutScore('F-1', [{ a: 21, b: 15 }, { a: 21, b: 15 }, { a: null, b: null }]); }
+App.nav('dashboard');
+s = getEl('view').innerHTML;
+if (TM.knockoutInfo().champion) {
+  check('completed dashboard shows champion card', s.indexOf('Tournament Champion') !== -1, 'no champion card');
+  check('completed dashboard shows champion name', s.indexOf(TM.teamName(TM.knockoutInfo().champion)) !== -1, 'no champion name');
+  check('completed dashboard status is complete', s.indexOf('Tournament complete') !== -1, 'no complete status');
+}
+
+// Suggested court must resolve to a real court name (court ids are numbers while
+// suggestCourts keys are strings, so a loose compare would silently drop the pill).
+TM.resetTournament();
+TM.getState().settings.allowOutsideAvailability = true;
+App.nav('dashboard');
+s = getEl('view').innerHTML;
+check('next matches shows a suggested court', s.indexOf('→ Court') !== -1, 'no suggested court pill');
+// With 5 ranked candidates and 3 courts, exactly the first three get a real court
+// name (the rest correctly read "no free court").
+check('exactly three suggested courts', (s.match(/→ Court/g) || []).length, 3);
+
 console.log('\n' + (fail === 0 ? '✅ ALL RENDERS OK' : '❌ RENDER FAILURES'));
 console.log('passed: ' + pass + '  failed: ' + fail);
 if (failures.length) { console.log('\nFailures:'); failures.forEach(f => console.log('  - ' + f)); process.exit(1); }
