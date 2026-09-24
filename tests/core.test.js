@@ -2663,6 +2663,185 @@ function assertRoundRobin(label, groupId, n) {
   check('adding a pair changes derived totals', after !== before, 'before ' + before + ' after ' + after);
 })();
 
+/* ══════════════════════════════════════════════════════════
+   57. Dashboard V3 — live control centre helpers
+   ══════════════════════════════════════════════════════════ */
+
+/* Status wording: the group stage must report the GROUP total, never the overall
+   tournament total, and every value stays dynamic. */
+(function () {
+  TM.resetTournament();
+  const p = TM.progress();
+  const kpi = TM.dashboardKPIs();
+  const text = TM.statusText('group', p, kpi);
+  check('group status names the group count 0 / 20', /0 \/ 20 group matches complete/.test(text), text);
+  check('group status never shows the overall 27 count', text.indexOf('27') === -1, text);
+  check('group status has a text label, not colour alone', /Group Stage in progress/.test(text), text);
+
+  // A different shape moves the group count (no hard-coded 20/27).
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 4, B: 4 }), { regenerate: true });
+  TM.setQualification(2);
+  const p8 = TM.progress();
+  eq('8p group total is 12', p8.groupTotal, 12);
+  eq('8p overall total is 15', p8.overallTotal, 15);
+  const text8 = TM.statusText('group', p8, TM.dashboardKPIs());
+  check('8p group status uses 12', /0 \/ 12 group matches complete/.test(text8), text8);
+  check('8p group status never shows overall 15', text8.indexOf('15') === -1, text8);
+})();
+
+/* Empty tournament status. */
+(function () {
+  TM.resetTournament();
+  TM.setState(Object.assign(TM.getState(), { teams: [], matches: [], groups: { A: [], B: [] }, groupLabels: {} }));
+  eq('status empty with no pairs', TM.dashboardStatus(), 'empty');
+  const text = TM.statusText('empty', TM.progress(), TM.dashboardKPIs());
+  check('empty status mentions no pairs', /No pairs configured yet/.test(text), text);
+})();
+
+/* Group-stage complete (awaiting knockout) status. */
+(function () {
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 2 }), { regenerate: true, groups: ['A'] });
+  TM.groupMatches().forEach(m => TM.saveGroupScore(m.id, 21, 15));
+  TM.clearKnockout();
+  eq('status ready when group stage complete', TM.dashboardStatus(), 'ready');
+  const text = TM.statusText('ready', TM.progress(), TM.dashboardKPIs());
+  check('ready status reads Group Stage complete · Knockout stage ready',
+    text.indexOf('Group Stage complete · Knockout stage ready') !== -1, text);
+})();
+
+/* Knockout in progress: the strip names the live round and its own counts. */
+(function () {
+  function setup3() {
+    TM.resetTournament();
+    const t = [];
+    ['A', 'B', 'C'].forEach(g => { for (let i = 1; i <= 3; i++) t.push({ id: g + i, group: g, name: g + i + ' pair' }); });
+    TM.applyTeams(t, { regenerate: true, groups: ['A', 'B', 'C'] });
+    TM.setQualification(2);
+    TM.groupMatches().forEach(m => TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 15, m.teamA < m.teamB ? 15 : 21));
+    TM.ensureKnockout();
+  }
+  setup3();
+  eq('3x3 top2 status is knockout', TM.dashboardStatus(), 'knockout');
+  const r = TM.currentKnockoutRound();
+  eq('current knockout round is qf', r.key, 'qf');
+  eq('current round display name is Quarter-finals', r.name, 'Quarter-finals');
+  check('qf total counts real matches only (not byes)', r.total === 2, 'total ' + r.total);
+  const text = TM.statusText('knockout', TM.progress(), TM.dashboardKPIs());
+  check('knockout status names the round and counts', /Quarter-finals in progress · 0 \/ 2 complete/.test(text), text);
+  check('knockout status never claims a group total', text.indexOf('group matches') === -1, text);
+
+  // A 4-qualifier bracket has no quarter-final: the strip must say Semi-finals.
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 4 }), { regenerate: true, groups: ['A'] });
+  TM.setQualification(4);
+  TM.groupMatches().forEach(m => TM.saveGroupScore(m.id, 21, 15));
+  TM.ensureKnockout();
+  const sf = TM.currentKnockoutRound();
+  eq('4-qualifier current round is sf', sf.key, 'sf');
+  eq('4-qualifier round name is Semi-finals', sf.name, 'Semi-finals');
+  check('unknown stage falls back to stored name', TM.stageDisplayName('zz', 'Custom Round') === 'Custom Round');
+})();
+
+/* Tournament complete status. */
+(function () {
+  TM.resetTournament();
+  TM.applyTeams([
+    { id: 'A1', group: 'A', name: 'Alpha Pair' }, { id: 'A2', group: 'A', name: 'Beta Pair' }
+  ], { regenerate: true, groups: ['A'] });
+  TM.setQualification(2);
+  TM.groupMatches().forEach(m => TM.saveGroupScore(m.id, 21, 15));
+  TM.ensureKnockout();
+  const finalM = TM.getMatch('F-1');
+  if (finalM) TM.saveKnockoutScore('F-1', [{ a: 21, b: 15 }, { a: 21, b: 15 }, { a: null, b: null }]);
+  eq('status complete with champion', TM.dashboardStatus(), 'complete');
+  const text = TM.statusText('complete', TM.progress(), TM.dashboardKPIs());
+  check('complete status reads Tournament complete · Champion decided',
+    text.indexOf('Tournament complete · Champion decided') !== -1, text);
+})();
+
+/* Live and available court counts come from the scheduler, not from constants. */
+(function () {
+  TM.resetTournament();
+  // Ignore the wall clock so availability is deterministic regardless of when the
+  // suite runs (the configured court windows are real tournament state).
+  TM.getState().settings.allowOutsideAvailability = true;
+  let s = TM.schedulerSummary();
+  eq('fresh: no live matches', s.live, 0);
+  eq('fresh: three courts available', s.available, 3);
+  eq('fresh: twenty queued matches', s.queued, 20);
+  check('fresh: ready matches do not exceed queued', s.ready <= s.queued);
+
+  TM.startMatch(TM.groupMatches()[0].id, 1, NOON);
+  s = TM.schedulerSummary();
+  eq('live count after start', s.live, 1);
+  eq('available drops to two when a court is busy', s.available, 2);
+  eq('queued drops by the started match', s.queued, 19);
+  check('ready never exceeds queued after start', s.ready <= s.queued);
+
+  // The live status strip reports the scheduler counts.
+  const text = TM.statusText('group', TM.progress(), TM.dashboardKPIs());
+  check('live status strip reports matches live', /1 match live/.test(text), text);
+  check('live status strip reports courts available', /2 courts available/.test(text), text);
+  check('live status strip reports matches queued', /19 matches queued/.test(text), text);
+
+  // Disabling a court lowers the available count without touching the matches.
+  TM.resetTournament();
+  TM.getState().settings.allowOutsideAvailability = true;
+  TM.setCourtEnabled(3, false);
+  eq('disabled court is not available', TM.schedulerSummary().available, 2);
+  eq('disabled court is not counted as enabled', TM.dashboardKPIs().courts, 2);
+})();
+
+/* Waiting queue mirrors the scheduler's ordering, and is capped for display. */
+(function () {
+  TM.resetTournament();
+  const full = TM.waitingQueue(0);
+  const capped = TM.waitingQueue(4);
+  eq('queue total equals queued group fixtures', full.total, 20);
+  eq('capped queue returns four rows', capped.rows.length, 4);
+  const ranked = TM.rankCandidates(0).map(r => r.match.id);
+  eq('queue preserves scheduler order', capped.rows.map(r => r.id).join(','), ranked.slice(0, 4).join(','));
+  check('queue rows carry a label and both teams',
+    capped.rows.every(r => r.label && r.teamA && r.teamB), 'missing fields');
+
+  // Once a match starts, its teams leave the queue (they can no longer start).
+  TM.getState().settings.allowOutsideAvailability = true;
+  TM.startMatch(TM.rankCandidates(0)[0].match.id, 1, NOON);
+  const after = TM.waitingQueue(0);
+  check('queue total shrinks when a match starts', after.total < full.total, after.total + ' vs ' + full.total);
+})();
+
+/* Stage display names: quarter/semi plurals, and no round invented. */
+(function () {
+  eq('qf display', TM.stageDisplayName('qf', 'Quarter-Final'), 'Quarter-finals');
+  eq('sf display', TM.stageDisplayName('sf', 'Semi-Final'), 'Semi-finals');
+  eq('final display', TM.stageDisplayName('final', 'Final'), 'Final');
+  eq('r16 display', TM.stageDisplayName('r16', 'Round of 16'), 'Round of 16');
+  // Dynamic bracket rounds still resolve their display name.
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 8, B: 8 }), { regenerate: true, groups: ['A', 'B'] });
+  TM.setQualification(8);
+  const names = TM.dashboardStages().map(x => TM.stageDisplayName(x.key, x.name));
+  eq('16-qualifier stage names', JSON.stringify(names), JSON.stringify(['Round of 16', 'Quarter-finals', 'Semi-finals', 'Final']));
+})();
+
+/* Leaders expose the fields the dashboard table shows and stay in standings order. */
+(function () {
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 5, B: 5 }), { regenerate: true });
+  eq('no leaders before results', TM.dashboardLeaders(5).length, 0);
+  TM.groupMatches('A').slice(0, 6).forEach(m => TM.saveGroupScore(m.id, 21, 15));
+  const leaders = TM.dashboardLeaders(5);
+  const standby = TM.computeStandings('A').filter(r => r.played > 0);
+  eq('leaders carry played', leaders[0].played, standby[0].played);
+  eq('leaders carry wins', leaders[0].won, standby[0].won);
+  eq('leaders carry points', leaders[0].pts, standby[0].pts);
+  eq('leaders carry diff', leaders[0].diff, standby[0].diff);
+  eq('leader is standings top', leaders[0].team.id, standby[0].team.id);
+})();
+
 /* ── report ─────────────────────────────────────────────── */
 console.log('\n' + (fail === 0 ? '✅ ALL TESTS PASSED' : '❌ FAILURES'));
 console.log('passed: ' + pass + '  failed: ' + fail);

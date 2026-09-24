@@ -252,9 +252,9 @@ s = getEl('view').innerHTML;
   check('dashboard KPI label ' + label, s.indexOf('>' + label + '<') !== -1, 'missing ' + label);
 });
 check('dashboard shows group stage count 0 / 20', s.indexOf('0 / 20') !== -1, 'no 0/20');
-check('dashboard shows QF stage', s.indexOf('Quarter-Final') !== -1, 'no QF');
+check('dashboard shows QF stage', s.indexOf('Quarter-finals') !== -1, 'no QF');
 check('dashboard no undefined/NaN', s.indexOf('undefined') === -1 && s.indexOf('NaN') === -1);
-check('dashboard shows no-results leader message', s.indexOf('Standings will appear after results are recorded.') !== -1, 'no leader empty state');
+check('dashboard shows no-results leader message', s.indexOf('No completed matches yet.') !== -1, 'no leader empty state');
 
 // A completed match must be reflected immediately on the next render. Court windows
 // are ignored here so the injected activity is deterministic regardless of clock.
@@ -293,7 +293,7 @@ TM.groupMatches().forEach(function (m) { TM.saveGroupScore(m.id, 21, 15); });
 TM.clearKnockout();
 App.nav('dashboard');
 s = getEl('view').innerHTML;
-check('dashboard shows ready-for-knockout status', s.indexOf('ready for knockout generation') !== -1, 'no ready status');
+check('dashboard shows ready-for-knockout status', s.indexOf('Group Stage complete · Knockout stage ready') !== -1, 'no ready status');
 check('dashboard hides champion card until a champion exists', s.indexOf('Tournament Champion') === -1, 'champion shown early');
 
 // Empty states: a tournament with no teams (set directly so the 2-pair floor, which
@@ -334,6 +334,111 @@ check('next matches shows a suggested court', s.indexOf('→ Court') !== -1, 'no
 // With 5 ranked candidates and 3 courts, exactly the first three get a real court
 // name (the rest correctly read "no free court").
 check('exactly three suggested courts', (s.match(/→ Court/g) || []).length, 3);
+
+// ── Dashboard V3 live control centre ──────────────────────────────────────────
+
+// Branding, theme toggle and Help must remain in the shell regardless of Dashboard
+// layout changes.
+check('BestShot branding remains', html.indexOf('Best<span>Shot</span>') !== -1 || html.indexOf('Best<span>') !== -1, 'no logo');
+check('theme toggle remains', html.indexOf('id="theme-toggle"') !== -1 && html.indexOf('toggleTheme()') !== -1, 'no theme toggle');
+check('help remains', html.indexOf('App.about()') !== -1, 'no help control');
+check('settings control remains', html.indexOf("App.nav('settings')") !== -1, 'no settings control');
+
+// Fresh default tournament: section order and group-vs-overall wording.
+TM.resetTournament();
+App.nav('dashboard');
+s = getEl('view').innerHTML;
+['kpi-grid', 'stage-list', 'status-strip', 'courts-grid', 'level-bars', 'gp-list',
+ 'mgrid', 'progress-bar', 'queue-list'].forEach(function (key) {
+  check('dashboard V3 contains ' + key, s.indexOf(key) !== -1, 'missing ' + key);
+});
+check('dashboard V3 shows 0 / 20 group matches wording', s.indexOf('0 / 20 group matches complete') !== -1, 'no group wording');
+check('dashboard V3 never shows 0 / 27 group matches', s.indexOf('0 / 27 group matches') === -1, 'found bad wording');
+check('dashboard V3 shows Quarter-finals (plural)', s.indexOf('Quarter-finals') !== -1, 'no plural QF');
+check('dashboard V3 shows Semi-finals (plural)', s.indexOf('Semi-finals') !== -1, 'no plural SF');
+// Live Courts must appear before the analytics (Group performance / Level distribution).
+const iCourts = s.indexOf('Live courts');
+const iNext = s.indexOf('Next matches');
+const iQueue = s.indexOf('Waiting queue');
+const iGroup = s.indexOf('Group performance');
+const iLevel = s.indexOf('Team level distribution');
+check('Live courts before next matches', iCourts !== -1 && iCourts < iNext, iCourts + '/' + iNext);
+check('Next matches before waiting queue', iNext !== -1 && iNext < iQueue, iNext + '/' + iQueue);
+check('Waiting queue before group performance', iQueue !== -1 && iQueue < iGroup, iQueue + '/' + iGroup);
+check('Group performance before level distribution', iGroup !== -1 && iGroup < iLevel, iGroup + '/' + iLevel);
+check('dashboard V3 no undefined/NaN/null leak',
+  s.indexOf('undefined') === -1 && s.indexOf('NaN') === -1 && s.indexOf('>null<') === -1);
+
+// Live state: a started match shows LIVE on a court and shrinks the queue.
+TM.getState().settings.allowOutsideAvailability = true;
+TM.startMatch(TM.groupMatches()[0].id, 1);
+App.nav('dashboard');
+s = getEl('view').innerHTML;
+check('court card shows LIVE label', s.indexOf('>LIVE<') !== -1 || s.indexOf('● LIVE') !== -1, 'no LIVE label');
+check('court card shows AVAILABLE label', s.indexOf('AVAILABLE') !== -1, 'no AVAILABLE label');
+check('live court shows an Enter result action', s.indexOf('Enter result') !== -1, 'no enter result');
+check('dashboard shows live scheduler summary', /live ·/.test(s) || s.indexOf('live ·') !== -1, 'no live summary');
+check('waiting queue renders rows', s.indexOf('queue-row') !== -1, 'no queue rows');
+check('waiting queue shows + N more waiting', s.indexOf('more waiting') !== -1, 'no more-waiting tail');
+check('next matches shows group label', s.indexOf('Group A · R') !== -1 || s.indexOf('Group A') !== -1, 'no group label');
+check('live dashboard still has no undefined/NaN', s.indexOf('undefined') === -1 && s.indexOf('NaN') === -1);
+
+// Completed matches: the leaders table shows rank/team/played/wins/points/diff.
+TM.resetTournament();
+TM.getState().settings.allowOutsideAvailability = true;
+TM.groupMatches().slice(0, 3).forEach(function (m) { TM.saveGroupScore(m.id, 21, 15); });
+App.nav('dashboard');
+s = getEl('view').innerHTML;
+check('leaders table renders', s.indexOf('leader-row') !== -1 && s.indexOf('leader-cols') !== -1, 'no leaders');
+check('leaders table has P/W/Pts/Diff headers', /<span>P<\/span>[\s\S]*?<span>W<\/span>[\s\S]*?<span>Pts<\/span>[\s\S]*?<span>Diff<\/span>/.test(s), 'no headers');
+check('recent results render', s.indexOf('Recent results') !== -1 && s.indexOf('mrow done') !== -1, 'no recent');
+
+// Dynamic courts: a disabled court is excluded and the enabled count is shown.
+TM.resetTournament();
+TM.getState().settings.allowOutsideAvailability = true;
+TM.setCourtEnabled(3, false);
+App.nav('dashboard');
+s = getEl('view').innerHTML;
+check('disabled court hidden from live courts', s.indexOf('Court 3') === -1, 'Court 3 still shown');
+check('enabled court count shown', /2 courts enabled/.test(s), 'no enabled count');
+
+// 3-group shape: group performance and queue support every group.
+TM.resetTournament();
+const t3 = [];
+['A', 'B', 'C'].forEach(function (g) { for (let i = 1; i <= 3; i++) t3.push({ id: g + i, group: g, name: g + i + ' pair' }); });
+TM.applyTeams(t3, { regenerate: true, groups: ['A', 'B', 'C'] });
+TM.getState().settings.allowOutsideAvailability = true;
+App.nav('dashboard');
+s = getEl('view').innerHTML;
+['Group A', 'Group B', 'Group C'].forEach(function (g) {
+  check('3-group dashboard shows ' + g, s.indexOf(g) !== -1, 'missing ' + g);
+});
+check('3-group dashboard no undefined/NaN', s.indexOf('undefined') === -1 && s.indexOf('NaN') === -1);
+
+// Knockout in progress: the strip names the round dynamically.
+TM.resetTournament();
+const tk = [];
+['A', 'B', 'C'].forEach(function (g) { for (let i = 1; i <= 3; i++) tk.push({ id: g + i, group: g, name: g + i + ' pair' }); });
+TM.applyTeams(tk, { regenerate: true, groups: ['A', 'B', 'C'] });
+TM.setQualification(2);
+TM.groupMatches().forEach(function (m) { TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 15, m.teamA < m.teamB ? 15 : 21); });
+TM.ensureKnockout();
+App.nav('dashboard');
+s = getEl('view').innerHTML;
+check('knockout dashboard names the current round', s.indexOf('Quarter-finals in progress') !== -1, 'no knockout round status');
+check('knockout dashboard has no undefined/NaN', s.indexOf('undefined') === -1 && s.indexOf('NaN') === -1);
+
+// Mobile navigation: primary destinations plus a More control, no destination lost.
+App.nav('dashboard');
+const navEl = getEl('nav-tabs');
+const navHtml2 = navEl.innerHTML;
+check('mobile nav has More control', navHtml2.indexOf('nav-more-btn') !== -1, 'no More');
+['Dashboard', 'Matches', 'Courts'].forEach(function (label) {
+  check('mobile nav primary ' + label, navHtml2.indexOf('>' + label + '<') !== -1 || navHtml2.indexOf(label) !== -1, 'missing ' + label);
+});
+['Standings', 'Knockout', 'Teams', 'Settings'].forEach(function (label) {
+  check('mobile nav keeps destination ' + label, navHtml2.indexOf(label) !== -1, 'missing ' + label);
+});
 
 console.log('\n' + (fail === 0 ? '✅ ALL RENDERS OK' : '❌ RENDER FAILURES'));
 console.log('passed: ' + pass + '  failed: ' + fail);
