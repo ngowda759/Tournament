@@ -10,6 +10,8 @@ const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const core = html.match(/<script id="core-logic">([\s\S]*?)<\/script>/);
 const ui = html.match(/<script id="ui-layer">([\s\S]*?)<\/script>/);
 if (!core || !ui) { console.error('scripts not found'); process.exit(1); }
+// CSS text, so layout regressions (shrinkable grid tracks, min-width:0) can be asserted.
+const styleText = (html.match(/<style[^>]*>([\s\S]*?)<\/style>/) || ['', ''])[1];
 
 let pass = 0, fail = 0;
 const failures = [];
@@ -147,6 +149,16 @@ check('teams screen lists Group C', s.indexOf('Group C') !== -1);
 check('teams screen has add pair', s.indexOf('+ Add pair') !== -1);
 check('teams screen has add group', s.indexOf('+ Add group') !== -1);
 check('teams screen has save', s.indexOf('Save teams') !== -1);
+// Mobile-safe structure: the row and its grid tracks must be allowed to shrink
+// (minmax(0,1fr)) and the group/level controls must sit in a shinkable flex wrapper
+// so they wrap instead of pushing the page wider than the viewport.
+check('team rows render', s.indexOf('team-edit-row') !== -1, 'no rows');
+check('team controls wrapper renders', s.indexOf('team-edit-controls') !== -1, 'no controls wrapper');
+check('team inputs keep their grid', s.indexOf('team-edit-inputs') !== -1, 'no inputs grid');
+check('team edit head has no inline flex layout', s.indexOf("display:flex;gap:6px;align-items:center;\">") === -1, 'inline controls layout remains');
+check('team rows use shrinkable grid tracks', /\.team-edit-row\s*\{[^}]*grid-template-columns:\s*minmax\(0\s*,\s*1fr\)/.test(styleText), 'row track not shrinkable');
+check('team controls can shrink', /\.team-edit-controls\s*\{[^}]*min-width:\s*0/.test(styleText), 'controls cannot shrink');
+check('team inputs fill their track', /\.team-edit-inputs input\s*\{[^}]*min-width:\s*0/.test(styleText) && /\.team-edit-inputs input\s*\{[^}]*width:\s*100%/.test(styleText), 'inputs not width-constrained');
 
 // 9 pairs, 5+4, top 4 → 16 group → 23 overall
 TM.resetTournament();
