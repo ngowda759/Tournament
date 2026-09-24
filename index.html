@@ -306,6 +306,17 @@
   .level-kaveri { color: var(--accent); border-color: var(--accent-border); background: var(--accent-bg); }
   .level-unassigned { color: var(--text3); border-style: dashed; }
 
+  /* TEAM LEVEL ASSIGNMENT (Settings) */
+  .level-summary { font-family: var(--font-head); font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 12px; }
+  .level-cfg-block { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; margin-bottom: 10px; background: var(--bg3); }
+  .level-cfg-block.inactive { opacity: 0.6; }
+  .level-cfg-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+  .level-cfg-pairs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .level-cfg-pairs li { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .level-cfg-name { font-size: 13px; color: var(--text); }
+  .level-select { background: var(--bg4); border: 1px solid var(--border); border-radius: 8px; color: var(--text); padding: 5px 8px; font-size: 12px; }
+  .team-edit-title { flex: 1; min-width: 0; font-size: 13px; font-weight: 700; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
   /* TOAST */
   #toast {
     position: fixed; bottom: calc(20px + var(--safe-bottom)); left: 50%;
@@ -783,38 +794,83 @@
 
   function levels() { return state.settings.levels; }
 
+  // The Unassigned level as a fresh object. Kept as the single constructor so every
+  // caller that needs the sentinel gets the same { id, name, enabled } shape.
+  function unassignedLevel() { return newLevel({ id: UNASSIGNED_ID, name: UNASSIGNED_NAME, enabled: true }); }
+
+  // The one canonical resolver for a stored level representation. Given a raw value
+  // (a pair's `level`, a legacy backup value, or an id passed by the UI) it returns
+  // the configured level it names, or the Unassigned sentinel when nothing matches.
+  //
+  // Resolution order is deliberately generous so a valid assignment is never lost
+  // merely because it was stored as a display name or in a different case:
+  //   1. exact canonical id          ('kaveri' → kaveri)
+  //   2. case-insensitive id         ('KAVERI' → kaveri)
+  //   3. exact display name          ('Kaveri' → kaveri)
+  //   4. case-insensitive name       ('kaveri' as a name → kaveri)
+  //   5. normalized slug             (' Kaveri!' → kaveri)
+  //   6. the Unassigned sentinel     (anything genuinely unknown)
+  // It only ever reads stored id/name information — it never infers a level from a
+  // pair's name or players. The optional `list` lets migration resolve against a
+  // not-yet-installed settings.levels without touching live state.
+  function resolveLevelIn(list, value) {
+    const raw = value == null ? '' : String(value).trim();
+    if (raw === UNASSIGNED_ID || raw.toLowerCase() === UNASSIGNED_NAME.toLowerCase()) return unassignedLevel();
+    list = Array.isArray(list) ? list : [];
+    // 1. exact canonical id
+    let found = list.find(function (l) { return l.id === raw; });
+    // 2. case-insensitive id
+    if (!found) {
+      const lower = raw.toLowerCase();
+      found = list.find(function (l) { return String(l.id).toLowerCase() === lower; });
+    }
+    // 3. exact display name
+    if (!found) found = list.find(function (l) { return l.name === raw; });
+    // 4. case-insensitive display name
+    if (!found) {
+      const lower = raw.toLowerCase();
+      found = list.find(function (l) { return String(l.name).toLowerCase() === lower; });
+    }
+    // 5. normalized slug (matches an id or a name that slugifies to the same value)
+    if (!found) {
+      const slug = slugifyLevel(raw);
+      if (slug) found = list.find(function (l) { return String(l.id).toLowerCase() === slug || slugifyLevel(l.name) === slug; });
+    }
+    return found || unassignedLevel();
+  }
+
+  function resolveLevel(value) { return resolveLevelIn(levels(), value); }
+
+  // The configured level with the given id, resolved canonically. Case-insensitive
+  // on the id so a UI caller passing 'Kaveri' still finds the 'kaveri' level.
   function levelById(id) {
-    return levels().find(function (l) { return l.id === id; }) || null;
+    const resolved = resolveLevel(id);
+    return resolved.id === UNASSIGNED_ID ? null : resolved;
   }
 
-  // The level a pair is actually assigned to. The Unassigned sentinel is a real,
-  // always-available level with a fixed id so counts and display stay uniform.
-  function levelForTeam(t) {
-    const id = (t && t.level) || UNASSIGNED_ID;
-    const found = levelById(id);
-    if (found) return found;
-    if (id === UNASSIGNED_ID) return newLevel({ id: UNASSIGNED_ID, name: UNASSIGNED_NAME, enabled: true });
-    return newLevel({ id: UNASSIGNED_ID, name: UNASSIGNED_NAME, enabled: true });
-  }
+  // The level a pair is actually assigned to. Always goes through the canonical
+  // resolver, so the Teams dropdown, Settings counts and every chip agree.
+  function levelForTeam(t) { return resolveLevel(t && t.level); }
 
-  function levelName(id) { return levelForTeam({ level: id }).name; }
+  function levelName(id) { return resolveLevel(id).name; }
 
   // Every selectable level for a pair: the configured enabled levels, followed by
   // the virtual Unassigned level. Disabled levels are hidden from the dropdown.
   function selectableLevels() {
     const out = levels().filter(function (l) { return l.enabled !== false; }).map(copy);
-    out.push(newLevel({ id: UNASSIGNED_ID, name: UNASSIGNED_NAME, enabled: true }));
+    out.push(unassignedLevel());
     return out;
   }
 
   // The count per level is *derived* from team assignments — never stored — so it
-  // can never disagree with state.teams.
+  // can never disagree with state.teams. Every pair is routed through the canonical
+  // resolver, so a legacy display-name/case value counts as assigned.
   function levelCounts() {
     const counts = {};
     levels().forEach(function (l) { counts[l.id] = 0; });
     counts[UNASSIGNED_ID] = 0;
     state.teams.forEach(function (t) {
-      const id = (t && t.level && levelById(t.level)) ? t.level : UNASSIGNED_ID;
+      const id = resolveLevel(t && t.level).id;
       counts[id] = (counts[id] || 0) + 1;
     });
     return counts;
@@ -855,11 +911,21 @@
 
   // A pair assigned to a level that the organizer removes (or disables) is moved
   // back to Unassigned rather than silently shown as an unknown level. This changes
-  // no fixtures or groups.
+  // no fixtures or groups. `validIds` is the set of ids that remain selectable.
   function reconcileTeamLevels(validIds) {
     let moved = 0;
     state.teams.forEach(function (t) {
-      if (!t.level || !validIds[t.level]) { t.level = UNASSIGNED_ID; moved++; }
+      if (!t) return;
+      const resolved = resolveLevel(t.level);
+      const ok = resolved.id !== UNASSIGNED_ID && !!validIds[resolved.id];
+      if (!ok) {
+        if (t.level !== UNASSIGNED_ID) moved++;
+        t.level = UNASSIGNED_ID;
+      } else if (t.level !== resolved.id) {
+        // Canonicalize the stored representation (name/case → id) without changing
+        // which level the pair belongs to.
+        t.level = resolved.id;
+      }
     });
     return moved;
   }
@@ -877,6 +943,34 @@
     reconcileTeamLevels(valid);
     save();
     return { ok: true, levels: state.settings.levels };
+  }
+
+  // The canonical way to set a pair's level. Resolves whatever the caller passes
+  // (id, display name, any case) to a configured level id, falling back to the
+  // Unassigned sentinel only when nothing matches. Writes through applyTeams so the
+  // same validation, fixture-safety and persistence rules apply.
+  function setTeamLevel(teamId, level, opts) {
+    const t = getTeam(teamId);
+    if (!t) return { ok: false, msg: 'Pair not found.' };
+    const resolved = resolveLevel(level);
+    if (t.level === resolved.id) return { ok: true, unchanged: true };
+    return updateTeam(teamId, { level: resolved.id }, opts);
+  }
+
+  // Non-destructive repair of stored level assignments. Normalizes every pair's
+  // level to a canonical configured id through the same resolver used everywhere
+  // else, and counts only genuine changes. It never touches groups, fixtures,
+  // results or the knockout — it only rewrites `team.level` values that are stored
+  // as a valid-but-non-canonical representation (e.g. 'Kaveri' → 'kaveri').
+  function repairTeamLevels() {
+    let repaired = 0;
+    state.teams.forEach(function (t) {
+      if (!t) return;
+      const resolved = resolveLevel(t.level);
+      if (t.level !== resolved.id) { t.level = resolved.id; repaired++; }
+    });
+    if (repaired) save();
+    return { ok: true, repaired: repaired };
   }
 
   /* ── state ───────────────────────────────────────────── */
@@ -954,17 +1048,15 @@
       });
       s.settings.levels = clean.length ? clean : DEFAULT_LEVELS.map(function (l) { return newLevel(l); });
     }
-    // A pair whose stored level no longer exists (or was stored as the reserved
-    // sentinel) falls back to Unassigned. Legacy backups stored names like 'Tunga'
-    // as the level, so match by id first and then by name.
+    // A pair's stored level is resolved with the exact same canonical resolver used
+    // by the live engine, so a legacy representation (a display name like 'Kaveri',
+    // any case, a slug) maps to its configured id instead of falling to Unassigned.
+    // Only a genuinely unknown value becomes Unassigned. Resolving is idempotent:
+    // once every level is a canonical id, re-running the migration changes nothing.
     if (!Array.isArray(s.teams)) s.teams = [];
-    const levelIdByKey = {};
-    s.settings.levels.forEach(function (l) { levelIdByKey[l.id] = l.id; levelIdByKey[String(l.name).toLowerCase()] = l.id; });
     s.teams.forEach(function (t) {
       if (!t || typeof t !== 'object') return;
-      const key = String(t.level == null ? '' : t.level).trim();
-      const mapped = levelIdByKey[key] || levelIdByKey[key.toLowerCase()];
-      t.level = mapped || UNASSIGNED_ID;
+      t.level = resolveLevelIn(s.settings.levels, t.level).id;
     });
     s.knockout = Object.assign(base.knockout, s.knockout || {});
     s.meta = Object.assign({ seq: 0 }, s.meta || {});
@@ -1179,7 +1271,18 @@
       if (!global.localStorage) return false;
       const raw = global.localStorage.getItem(STORAGE_KEY);
       if (!raw) return false;
-      state = migrate(JSON.parse(raw));
+      const parsed = JSON.parse(raw);
+      // Snapshot the stored level representations before migrating, because migrate()
+      // canonicalizes team levels in place (it shares the parsed team array).
+      const storedLevels = (parsed && Array.isArray(parsed.teams))
+        ? parsed.teams.map(function (t) { return t && t.level; })
+        : null;
+      state = migrate(parsed);
+      // If migration normalized legacy level representations (a display name or a
+      // different case), persist the healed document so localStorage self-repairs and
+      // an existing browser never needs its data cleared. Already-canonical states are
+      // left untouched, so this is not a gratuitous write on every load.
+      if (levelsChangedByMigration(storedLevels, state)) save();
       return true;
     } catch (e) {
       // Corrupt or unreadable snapshot would otherwise fail forever; drop it so the
@@ -1187,6 +1290,15 @@
       clearStorage();
       return false;
     }
+  }
+  function levelsChangedByMigration(storedLevels, after) {
+    if (!Array.isArray(storedLevels)) return true;
+    const a = (after && Array.isArray(after.teams)) ? after.teams : [];
+    if (storedLevels.length !== a.length) return true;
+    for (let i = 0; i < a.length; i++) {
+      if (String(storedLevels[i]) !== String(a[i].level)) return true;
+    }
+    return false;
   }
   function clearStorage() { try { if (global.localStorage) global.localStorage.removeItem(STORAGE_KEY); } catch (e) {} }
   function exportJSON() { return JSON.stringify(state, null, 2); }
@@ -1998,22 +2110,30 @@
       }
     }
 
-    // A level must be one of the configured levels or the reserved Unassigned
-    // sentinel; anything else is rejected rather than silently coerced. Level is
-    // independent of group, so this never affects fixtures.
-    const validLevels = {};
-    selectableLevels().forEach(function (l) { validLevels[l.id] = true; });
+    // A level must resolve to one of the currently selectable levels (an enabled
+    // configured level) or the reserved Unassigned sentinel. A valid-but-non-canonical
+    // representation (a display name or different case) is accepted and canonicalized;
+    // a genuinely unknown level, or a disabled one, is rejected rather than silently
+    // coerced. Level is independent of group, so this never affects fixtures.
+    const selectable = {};
+    selectableLevels().forEach(function (l) { selectable[l.id] = true; });
+    const resolvedLevels = newTeams.map(function (t) { return resolveLevel(t && t.level); });
     for (let i = 0; i < newTeams.length; i++) {
-      const lv = newTeams[i].level || UNASSIGNED_ID;
-      if (!validLevels[lv]) return { ok: false, msg: 'Unknown level “' + lv + '”. Use a level configured in Settings.' };
+      const raw = newTeams[i] && newTeams[i].level;
+      const rawText = raw == null ? '' : String(raw).trim();
+      const unassignedish = rawText === '' || rawText.toLowerCase() === UNASSIGNED_ID || rawText.toLowerCase() === UNASSIGNED_NAME.toLowerCase();
+      if (unassignedish) continue;
+      if (resolvedLevels[i].id === UNASSIGNED_ID || !selectable[resolvedLevels[i].id]) {
+        return { ok: false, msg: 'Unknown level “' + raw + '”. Use a level configured in Settings.' };
+      }
     }
 
     const next = copy(state);
-    next.teams = newTeams.map(function (t) {
+    next.teams = newTeams.map(function (t, i) {
       return {
         id: String(t.id), group: t.group, name: String(t.name).trim(),
         players: Array.isArray(t.players) ? t.players.map(function (p) { return String(p); }) : [],
-        level: t.level || UNASSIGNED_ID
+        level: resolvedLevels[i].id
       };
     });
     // Rebuild the group membership from actual teams, but keep the configured group
@@ -2305,6 +2425,7 @@
     normalizeLevel: normalizeLevel,
     slugifyLevel: slugifyLevel,
     levels: levels,
+    resolveLevel: resolveLevel,
     levelById: levelById,
     levelForTeam: levelForTeam,
     levelName: levelName,
@@ -2314,6 +2435,8 @@
     hasUnassignedTeams: hasUnassignedTeams,
     validateLevels: validateLevels,
     applyLevels: applyLevels,
+    setTeamLevel: setTeamLevel,
+    repairTeamLevels: repairTeamLevels,
 
     getTeam: getTeam,
     getMatch: getMatch,
@@ -3148,11 +3271,14 @@
     if (locked) html += '<div class="alert alert-warn">Matches have already started. Renaming pairs, editing players and changing levels always apply. Adding, removing or moving pairs regenerates the fixtures and will lose existing results — you will be asked to confirm.</div>';
 
     // Level is independent of group, so an unassigned pair never blocks the
-    // tournament — it is reported so the organizer can assign it when ready.
-    const unassigned = TM.levelSummary().unassigned;
-    if (unassigned > 0) {
-      html += '<div class="alert alert-warn">⚠️ ' + unassigned + ' ' + (unassigned === 1 ? 'pair is' : 'pairs are') +
-        ' currently unassigned to a level. This does not affect fixtures — assign a level whenever you are ready.</div>';
+    // tournament — it is reported (with the actual pairs) so the organizer can
+    // assign them when ready. The level is resolved canonically, so a legacy
+    // display-name/case value is never misreported as unassigned.
+    const unassignedTeams = draftTeams.filter(function (t) { return TM.resolveLevel(t && t.level).id === TM.UNASSIGNED_ID; });
+    if (unassignedTeams.length > 0) {
+      html += '<div class="alert alert-warn">⚠️ ' + unassignedTeams.length + ' ' + (unassignedTeams.length === 1 ? 'pair is' : 'pairs are') +
+        ' unassigned: ' + unassignedTeams.map(function (t) { return esc(t.name); }).join(', ') +
+        '. This does not affect fixtures — assign a level whenever you are ready.</div>';
     }
 
     groups.forEach(function (grp) {
@@ -3198,8 +3324,10 @@
 
   function teamEditRow(t, groups) {
     // The level and group dropdowns are populated from configuration/draft state,
-    // never from a hard-coded list.
-    const current = t.level || TM.UNASSIGNED_ID;
+    // never from a hard-coded list. The current level is resolved canonically, so a
+    // draft holding a legacy name/case still selects the right option — the Teams
+    // screen and Settings can never disagree about which level a pair is in.
+    const current = TM.resolveLevel(t.level).id;
     const options = TM.selectableLevels().map(function (lv) {
       return '<option value="' + esc(lv.id) + '"' + (current === lv.id ? ' selected' : '') + '>' + esc(lv.name) + '</option>';
     }).join('');
@@ -3207,9 +3335,11 @@
       return '<option value="' + esc(g) + '"' + (t.group === g ? ' selected' : '') + '>' + esc(TM.groupLabel(g)) + '</option>';
     }).join('');
     const selStyle = 'background:var(--bg4);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:5px 8px;font-size:12px;';
+    const levelName = TM.levelName(current);
     return '<div class="team-edit-row">' +
       '<div class="team-edit-head">' +
         '<span class="team-edit-id">' + esc(t.id) + '</span>' +
+        '<span class="team-edit-title">' + esc(t.name) + ' · ' + esc(levelName) + '</span>' +
         '<div style="display:flex;gap:6px;align-items:center;">' +
           '<select title="Group" onchange="App.updateTeam(\'' + esc(t.id) + '\',\'group\',this.value)" style="' + selStyle + '">' + groupOptions + '</select>' +
           '<select class="level-select" onchange="App.updateTeam(\'' + esc(t.id) + '\',\'level\',this.value)" title="Level" style="' + selStyle + '">' +
@@ -3222,7 +3352,7 @@
         '<input type="text" value="' + esc(t.name) + '" placeholder="Pair name" oninput="App.updateTeam(\'' + esc(t.id) + '\',\'name\',this.value)">' +
         '<input type="text" value="' + esc((t.players || []).join(', ')) + '" placeholder="Players (comma separated)" oninput="App.updateTeam(\'' + esc(t.id) + '\',\'players\',this.value)">' +
       '</div>' +
-      '<div class="muted" style="font-size:11.5px;">' + esc(TM.groupLabel(t.group)) + ' · Level ' + esc(TM.levelName(current)) + '</div>' +
+      '<div class="muted" style="font-size:11.5px;">' + esc(TM.groupLabel(t.group)) + ' · Level ' + esc(levelName) + '</div>' +
       '</div>';
   }
 
@@ -3230,6 +3360,7 @@
     const t = draftTeams.find(function (x) { return x.id === id; });
     if (!t) return;
     if (field === 'players') t.players = value.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+    else if (field === 'level') t.level = TM.resolveLevel(value).id;
     else t[field] = value;
     // Group/level changes re-render so counts and labels follow; draftTeams already
     // holds every field, so no typing is lost.
@@ -3379,9 +3510,76 @@
   }
 
   /* ═══════════════ TEAM LEVEL CONFIGURATION ═══════════════ */
-  // The counts are read from the live team assignments (TM.levelCounts), never
-  // stored separately, so Settings can never disagree with the Teams screen.
+  // The counts and pair lists are read from the live team assignments
+  // (TM.levelCounts / state.teams), never stored separately, so Settings can never
+  // disagree with the Teams screen.
   function levelSum() { return TM.levelSummary(); }
+
+  // Teams whose level resolves to the given id, in stable team-id order. Every pair
+  // shown here is the same object the Teams screen edits.
+  function teamsAtLevel(id) {
+    return TM.getState().teams.filter(function (t) { return TM.resolveLevel(t && t.level).id === id; });
+  }
+
+  // "10 pairs · 9 assigned · 1 unassigned" — a single line summarising the split.
+  function levelSummaryLine() {
+    const s = levelSum();
+    return s.total + ' pair' + (s.total === 1 ? '' : 's') + ' · ' + s.assigned + ' assigned · ' + s.unassigned + ' unassigned';
+  }
+
+  // The assignment control for one pair: the exact same configured level list the
+  // Teams screen uses, with the pair's current (canonically resolved) level selected.
+  function levelSelect(t) {
+    const current = TM.resolveLevel(t && t.level).id;
+    const options = TM.selectableLevels().map(function (lv) {
+      return '<option value="' + esc(lv.id) + '"' + (current === lv.id ? ' selected' : '') + '>' + esc(lv.name) + '</option>';
+    }).join('');
+    return '<select class="level-select" title="Level" onchange="App.setTeamLevel(\'' + esc(t.id) + '\',this.value)">' + options + '</select>';
+  }
+
+  // One block per configured level plus the always-present Unassigned block, each
+  // listing the actual pairs assigned to it with an inline level control.
+  function levelAssignmentBlocks() {
+    let html = '';
+    TM.levels().forEach(function (l) {
+      const list = teamsAtLevel(l.id);
+      const count = list.length;
+      html += '<div class="level-cfg-block' + (l.enabled === false ? ' inactive' : '') + '">' +
+        '<div class="level-cfg-head"><span class="level-chip level-' + esc(TM.slugifyLevel(l.id)) + '">' + esc(l.name) + '</span>' +
+        (l.enabled === false ? ' <span class="pill pill-closed">Disabled</span>' : '') +
+        '<span class="pill">' + count + ' pair' + (count === 1 ? '' : 's') + '</span></div>';
+      if (list.length) {
+        html += '<ul class="level-cfg-pairs">' + list.map(function (t) {
+          return '<li><span class="level-cfg-name">' + esc(t.name) + '</span>' + levelSelect(t) + '</li>';
+        }).join('') + '</ul>';
+      } else {
+        html += '<div class="muted" style="font-size:12px;padding:2px 0;">No pairs at this level.</div>';
+      }
+      html += '</div>';
+    });
+    const un = teamsAtLevel(TM.UNASSIGNED_ID);
+    html += '<div class="level-cfg-block">' +
+      '<div class="level-cfg-head"><span class="level-chip level-unassigned">' + esc(TM.UNASSIGNED_NAME) + '</span>' +
+      '<span class="pill">' + un.length + ' pair' + (un.length === 1 ? '' : 's') + '</span></div>';
+    if (un.length) {
+      html += '<ul class="level-cfg-pairs">' + un.map(function (t) {
+        return '<li><span class="level-cfg-name">' + esc(t.name) + '</span>' + levelSelect(t) + '</li>';
+      }).join('') + '</ul>';
+    } else {
+      html += '<div class="muted" style="font-size:12px;padding:2px 0;">Every pair has a level.</div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  // The unassigned warning names the actual pairs rather than only counting them.
+  function levelUnassignedWarning() {
+    const un = teamsAtLevel(TM.UNASSIGNED_ID);
+    if (!un.length) return '';
+    const names = un.map(function (t) { return esc(t.name); }).join(', ');
+    return '<div class="alert alert-warn" style="margin-top:10px;">⚠️ ' + un.length + ' ' + (un.length === 1 ? 'pair is' : 'pairs are') +
+      ' unassigned: ' + names + '. The tournament still runs — assign a level whenever you are ready.</div>';
+  }
 
   function levelConfigBlocks() {
     const counts = levelSum().counts;
@@ -3460,6 +3658,34 @@
     applyLevelCfg(r,
       r.ok ? ('Removed level “' + lv.name + '”.' + (count ? ' ' + count + ' pair' + (count === 1 ? '' : 's') + ' moved to Unassigned.' : '')) : null,
       r.ok ? ('Level “' + lv.name + '” removed') : null);
+  }
+
+  // Change one pair's level from the Settings screen. Uses the canonical resolver so
+  // whatever the dropdown submits lands on a configured id. Level is independent of
+  // group/fixtures, so applyTeams never regenerates anything, but results could be
+  // present — pass no regenerate flag so a structural change is never silently made.
+  function setTeamLevel(teamId, level) {
+    const t = TM.getTeam(teamId);
+    if (!t) { toast('Pair not found.'); return; }
+    const before = TM.resolveLevel(t.level).id;
+    const r = TM.setTeamLevel(teamId, level);
+    if (!r || !r.ok) { toast((r && r.msg) || 'Could not change the level.'); render(); return; }
+    const lv = TM.resolveLevel(level);
+    if (r.unchanged || before === lv.id) return;
+    toast('Pair ' + t.name + ' moved to ' + lv.name);
+    render();
+    levelConfigMsg({ ok: true, msg: t.name + ' → ' + lv.name + '.' });
+  }
+
+  // Non-destructive repair of legacy level representations. Reports the number of
+  // assignments normalized, or that none needed repair.
+  function repairLevels() {
+    const r = TM.repairTeamLevels();
+    const n = r.repaired;
+    const msg = n ? (n + ' level assignment' + (n === 1 ? '' : 's') + ' repaired.') : 'No level assignments required repair.';
+    toast(msg);
+    render();
+    levelConfigMsg({ ok: true, msg: msg });
   }
 
   function viewSettings() {
@@ -3554,33 +3780,28 @@
       '<button class="btn btn-danger" onclick="App.askRegenerate()">Regenerate fixtures</button>' +
       '</div>';
 
-    // Team levels: the levels themselves are configurable, and each count below is
-    // derived from live team assignments. There is deliberately no stored count.
-    const sum = levelSum();
+    // Team levels: the level configuration and the pair assignments are read from
+    // live team state. Each level lists the actual pairs assigned to it, with an
+    // inline control to move a pair, and a single summary line at the top. There is
+    // deliberately no stored count anywhere.
     html += '<div class="section-title">Team Level Configuration <span class="line"></span></div>';
     html += '<div class="card">';
-    html += '<div class="tbl-wrap"><table class="standings-table"><thead><tr><th>Level</th><th class="num">Number of Pairs</th></tr></thead><tbody>';
-    TM.levels().forEach(function (l) {
-      html += '<tr><td><span class="level-chip level-' + esc(TM.slugifyLevel(l.id)) + '">' + esc(l.name) + '</span>' +
-        (l.enabled === false ? ' <span class="pill pill-closed">Disabled</span>' : '') + '</td>' +
-        '<td class="num-cell">' + (sum.counts[l.id] || 0) + '</td></tr>';
-    });
-    html += '<tr><td><span class="level-chip level-unassigned">' + esc(TM.UNASSIGNED_NAME) + '</span></td>' +
-      '<td class="num-cell">' + sum.unassigned + '</td></tr>';
-    html += '</tbody></table></div>';
-    html += '<div class="muted" style="font-size:12.5px;margin-top:4px;">Total pairs: ' + sum.total + ' · Assigned: ' + sum.assigned + ' · Unassigned: ' + sum.unassigned + '</div>';
-    if (sum.unassigned > 0) {
-      html += '<div class="alert alert-warn" style="margin-top:10px;">⚠️ ' + sum.unassigned + ' ' + (sum.unassigned === 1 ? 'pair is' : 'pairs are') +
-        ' currently unassigned to a level. The tournament still runs — assign a level on the Teams screen whenever you are ready.</div>';
-    }
-    html += '<div class="muted" style="font-size:12px;margin-top:10px;">Counts are calculated from the actual pair assignments on the Teams screen. Add, rename, disable or remove levels here; disabling or removing a level moves its pairs to ' + esc(TM.UNASSIGNED_NAME) + '. Levels are independent of groups, so this never changes fixtures.</div>';
+    html += '<div class="level-summary">' + esc(levelSummaryLine()) + '</div>';
+    html += levelAssignmentBlocks();
+    html += levelUnassignedWarning();
+    html += '<div class="btn-group" style="margin-top:10px;">' +
+      '<button class="btn btn-sm" onclick="App.repairLevels()">Repair level assignments</button>' +
+      '</div>';
+    html += '<div class="muted" style="font-size:12px;margin-top:10px;">Pairs are listed under the level they are assigned to. Changing a pair\'s level here updates the counts immediately and never regenerates fixtures, clears results, or changes groups. “Repair level assignments” normalizes legacy stored levels (for example a display name instead of an id) without touching fixtures or results.</div>';
+    html += '<div class="cfg-msg" id="level-msg"></div>';
     html += '</div>';
 
     html += '<div class="card" style="margin-top:10px;">' + levelConfigBlocks();
     html += '<div class="field" style="margin-top:10px;"><label>Add a level</label>' +
       '<div style="display:flex;gap:8px;"><input type="text" id="new-level-name" maxlength="30" placeholder="e.g. Ganga" style="flex:1;">' +
       '<button class="btn btn-sm" onclick="App.addLevel()">+ Add level</button></div></div>';
-    html += '<div class="cfg-msg" id="level-msg"></div></div>';
+    html += '<div class="muted" style="font-size:12px;margin-top:8px;">Add, rename, disable or remove levels here; disabling or removing a level moves its pairs to ' + esc(TM.UNASSIGNED_NAME) + '. Levels are independent of groups, so this never changes fixtures.</div>';
+    html += '</div>';
 
     html += '<div class="section-title">Court configuration <span class="line"></span></div>';
     html += '<div class="card">' +
@@ -3848,6 +4069,8 @@
     renameLevel: renameLevel,
     removeLevel: removeLevel,
     toggleLevelConfig: toggleLevelConfig,
+    setTeamLevel: setTeamLevel,
+    repairLevels: repairLevels,
     exportBackup: exportBackup,
     triggerImport: triggerImport,
     handleImport: handleImport,
