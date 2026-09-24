@@ -17,6 +17,7 @@ The organizer can run the whole event from a phone.
 - [Group stage](#group-stage)
 - [Rolling court scheduling](#rolling-court-scheduling)
 - [Court configuration](#court-configuration)
+- [Team level configuration](#team-level-configuration)
 - [Knockout structure](#knockout-structure)
 - [Match numbering](#match-numbering)
 - [Screens](#screens)
@@ -62,13 +63,31 @@ The organizer can run the whole event from a phone.
 | B2 | Gangadhar & Manju | Bhadra |
 | B3 | Praveen & Vinay | Bhadra |
 | B4 | Prabhakar & Phani | Kaveri |
-| B5 | Anil & TBD | Kaveri |
+| B5 | Anil & TBD | Unassigned |
+
+The default distribution is therefore Tunga = 3, Bhadra = 3, Kaveri = 3, Unassigned = 1.
 
 **Two different players are named Vinay** — `RK & Vinay` (A3) and `Praveen & Vinay` (B3).
 They are separate pairs and are never treated as the same player.
 
 **Anil's partner is intentionally `TBD`** and remains editable on the **Teams** screen at any time.
 Pair names, individual player names, and pair levels can all be edited after setup.
+
+**Levels are configurable, not hard-coded.** `Tunga`, `Bhadra` and `Kaveri` are only the *default*
+levels. The organizer can add, rename, disable or remove levels in
+**Settings → Team Level Configuration**, and the distribution can be changed freely — for example
+Tunga = 4 / Bhadra = 3 / Kaveri = 3. The level dropdown on the Teams screen is populated from this
+configuration, so there is a single source of truth.
+
+**Level and Group are independent.** A pair has a `level` (Tunga / Bhadra / Kaveri / a configured
+level / Unassigned) and a `group` (A or B). Changing a pair's level never moves it between groups
+and never regenerates fixtures. Group-stage fixtures are built from Group A/B only.
+
+**Unassigned pairs never block the tournament.** A pair without a level is valid and is reported
+with a warning so the organizer can assign it later. `Anil & TBD` deliberately remains Unassigned
+by default rather than being auto-assigned.
+
+See [Team level configuration](#team-level-configuration) for the full behaviour.
 
 ---
 
@@ -210,6 +229,77 @@ Existing backups remain backwards compatible.
 
 ---
 
+## Team level configuration
+
+Team levels are **not** hard-coded. `Tunga`, `Bhadra` and `Kaveri` are only the initial defaults;
+the organizer controls the levels themselves from **Settings → Team Level Configuration**.
+
+The section lists every configured level with its pair count, plus the always-present
+`Unassigned` row and a total:
+
+```
+Level        Number of Pairs
+Tunga        3
+Bhadra       3
+Kaveri       3
+Unassigned   1
+Total pairs: 10 · Assigned: 9 · Unassigned: 1
+```
+
+**One source of truth.** Levels live in tournament state:
+
+```js
+settings.levels: [
+  { id: "tunga",  name: "Tunga",  enabled: true },
+  { id: "bhadra", name: "Bhadra", enabled: true },
+  { id: "kaveri", name: "Kaveri", enabled: true }
+]
+```
+
+`id` is a stable slug that pairs reference; `name` is the editable label. The Teams dropdown,
+Settings, validation and every display read this one configuration. No screen keeps its own list.
+
+**Counts are derived, never stored.** Each count shown in Settings is calculated from the actual
+`level` on each pair, so Settings can never disagree with the Teams screen. If three pairs have
+`level: "kaveri"`, Settings shows `Kaveri — 3 pairs`.
+
+What the organizer can do:
+
+- **Add** a level (e.g. `Ganga`). It immediately appears in the Teams level dropdown.
+- **Rename** a level — the label updates everywhere.
+- **Enable / disable** a level.
+- **Remove** a level — any pair assigned to it moves to `Unassigned` rather than becoming invalid.
+- **Redistribute freely** — the distribution is not limited to the defaults. Tunga = 4 / Bhadra = 3
+  / Kaveri = 3, or any other split, is allowed.
+
+### Level vs Group
+
+`Level` and `Group` are independent properties:
+
+| Pair | Level | Group |
+|------|-------|-------|
+| Naveen & Chandan | Tunga | A |
+| RK & Vinay | Kaveri | A |
+| Anil & TBD | Unassigned | B |
+| Praveen & Vinay | Bhadra | B |
+
+- Group-stage fixtures are generated from **Group A / Group B**, never from Level.
+- **Changing a pair's level never moves it between groups and never regenerates fixtures.**
+- Changing a group keeps the existing structural safeguards (blocked once matches have started).
+
+### Editing rules
+
+- **Before any results exist:** levels can be changed freely and pairs moved between levels.
+- **After results exist:** level changes are *still* allowed, because level does not affect
+  fixtures. Group and pair-ID changes remain locked until reset.
+- An **unassigned** pair is valid. A warning is shown and the tournament runs normally; level is
+  never required to start a match.
+
+Existing backups remain backwards compatible: old tournaments that stored levels as
+`"Tunga" / "Bhadra" / "Kaveri"` import correctly and are mapped onto the configured level ids.
+
+---
+
 ## Knockout structure
 
 | Round | Match IDs | Format | Sets to |
@@ -259,8 +349,8 @@ When the final is decided the app shows a clear **🏆 CHAMPION** card.
 | **Courts** | Rolling court queue — current match, next eligible match, start/complete, waiting list |
 | **Standings** | Group A and Group B tables with qualifying positions highlighted |
 | **Knockout** | QF → SF → Final bracket plus the champion card |
-| **Teams** | Edit pair names, players and levels; add/remove pairs |
-| **Settings** | Tournament name, **editable court configuration** (count, names, hours, enable/disable), scheduling options, backup, reset |
+| **Teams** | Edit pair names, players, level (dropdown from the configured levels) and group; add/remove pairs |
+| **Settings** | Tournament name, **Team Level Configuration** (levels and derived pair counts), **editable court configuration** (count, names, hours, enable/disable), scheduling options, backup, reset |
 
 Each court card shows the court's configured name, status (*Available / In progress / Closed /
 Disabled*), its availability window, the current match with its match number and teams, the next
@@ -274,6 +364,7 @@ State is saved to `localStorage` under the key `shuttledraw_v4` and includes:
 
 - tournament metadata and name
 - teams, players, levels and group membership
+- the **level configuration** (`settings.levels`) and every pair's level assignment
 - groups and all matches
 - scores, sets, winners and losers
 - court states, **court configuration** (count, names, availability windows, enabled flags) and start/completion timestamps
@@ -418,7 +509,12 @@ lets the UI stay a thin rendering layer.
   courts:    [ { id, name, startTime, endTime, enabled, closed } ],
   //           id is stable identity; preparation/UI editor writes name/times/enabled
   knockout:  { generated, champion, qualifiers },
-  settings:  { allowOutsideAvailability },
+  settings:  {
+    allowOutsideAvailability,
+    levels:  [ { id, name, enabled } ]
+    //       configured levels; each team.level references a level id (or "unassigned")
+    //       pair counts are derived from teams, never stored here
+  },
   meta:      { seq },         // monotonic completion counter for fair rotation
   ui:        { screen }
 }
@@ -457,6 +553,14 @@ It extracts the DOM-free `TM` layer from `index.html` and asserts:
   matches retaining their original court, live matches surviving configuration changes,
   invalid names/times/counts rejected atomically, and config surviving reload and backup
 - migration of the pre-v5 `{ start, end }` court shape onto `{ startTime, endTime, enabled }`
+- **configurable team levels**: the default levels and the default distribution
+  (Tunga 3 / Bhadra 3 / Kaveri 3 / Unassigned 1), the Teams dropdown drawing from the configured
+  levels, counts updating as pairs move between levels, moving a pair to Unassigned, level changes
+  never regenerating fixtures or changing Group A/B, level changes allowed after results while
+  group changes stay blocked, level assignments surviving reload and export/import, duplicate and
+  reserved level ids/names rejected, the two Vinay pairs staying distinct, adding a new level,
+  disabling a level moving its pairs to Unassigned, and old backups that stored levels as
+  `"Tunga"/"Bhadra"/"Kaveri"` still importing
 - corrupt/absent/denied localStorage never throws and defaults rebuild
 
 `tests/core.test.js` is the only file committed for tests because it needs nothing beyond Node.
