@@ -44,16 +44,17 @@ example* the app starts from. Nothing in the tournament engine assumes it.
 
 Everything below is **configuration**, not a constant. The app ships with the default example
 loaded; change any of it and the fixtures and bracket are regenerated accordingly.
+**10 pairs is only the default example** — the app is a general configurable tournament manager.
 
 | Item | Default example | Range / rule |
 |------|-----------------|--------------|
 | Doubles pairs | 10 | 2 – 32 |
-| Groups | 2 (Group A, Group B) | ≥ 1, at least 2 pairs per group |
+| Groups | 2 (Group A, Group B) | 1 – 8, empty groups allowed until fixtures are generated |
 | Pairs per group | 5 / 5 | derived from actual assignments |
-| Qualifiers | top 4 per group | configurable per tournament |
+| Qualifiers | top 4 per group | configurable per group |
 | Courts | 3 (fully editable) | 1 – 8 |
 
-The default example uses this pair list:
+The default example uses this pair list (edit or replace it freely):
 
 ### Group A
 
@@ -107,8 +108,8 @@ See [Team level configuration](#team-level-configuration) for the full behaviour
 | Section | What you configure |
 |---------|--------------------|
 | **Tournament Configuration** | Tournament name, and a read-out of the number of pairs, groups and group matches calculated from your data |
-| **Groups** | The groups that exist, each with its pair count and group-match count, derived from actual assignments |
-| **Qualification** | How many pairs qualify from each group |
+| **Groups** | Add an (empty) group, rename a group's label, remove an empty group; each row shows its pair count and group-match count, derived from actual assignments |
+| **Qualification** | How many pairs qualify from each group, with a per-group breakdown |
 | **Regenerate Fixtures** | Current vs new pair/group/fixture/result counts, and an explicit regenerate action |
 | **Team Level Configuration** | Add, rename, disable or remove levels; pair counts are derived |
 | **Court configuration** | Court count, names, availability windows, enable/disable |
@@ -123,14 +124,31 @@ To run a shorter event, edit the pair list (remove pairs) or add pairs, and the 
 operates as an N-pair tournament automatically. For example, removing two pairs from the default
 10 leaves an 8-pair tournament with no empty/placeholder pairs.
 
+### Adding, removing and renaming groups
+
+Groups are stable containers with ids (`A`, `B`, `C`, …) and an optional friendly label.
+
+- **Add group** (Settings → Groups, or the Teams screen) creates an **empty** group. It never
+  moves an existing pair into it, and it never changes the fixtures.
+- An empty group takes part in nothing until you assign pairs to it: it generates 0 matches and
+  the dashboard keeps showing the real totals. Settings flags it with a warning so you know it
+  needs pairs before fixtures can be generated for it.
+- **Remove** is offered only for an **empty** group. A group that still holds pairs must have them
+  moved out first, so removing a group can never orphan a match.
+- Assign pairs to a group on the **Teams** screen (or in Settings once the group exists). A
+  group with exactly one pair is rejected — a round-robin needs at least two.
+- A group can be relabelled (e.g. `Group C` → `Consolation`). The label is cosmetic and never
+  affects ids, fixtures or results. Clearing it restores the default name.
+
 ### Worked example — changing the tournament size
 
-| Configuration | Groups | Group matches | Knockout (with top 4) | Overall |
-|---------------|--------|---------------|------------------------|---------|
-| 8 pairs | 4 + 4 | 6 + 6 = **12** | 8 qualify → QF → SF → Final (7) | **19** |
-| 9 pairs | 5 + 4 | 10 + 6 = **16** | 8 qualify → QF → SF → Final (7) | **23** |
-| 10 pairs | 5 + 5 | 10 + 10 = **20** | 8 qualify → QF → SF → Final (7) | **27** |
+| Configuration | Groups | Group matches | Knockout | Overall |
+|---------------|--------|---------------|----------|---------|
 | 8 pairs, top 2 qualify | 4 + 4 | 6 + 6 = **12** | 4 qualify → SF → Final (3) | **15** |
+| 9 pairs, top 4 qualify | 5 + 4 | 10 + 6 = **16** | 8 qualify → QF → SF → Final (7) | **23** |
+| 10 pairs, top 4 qualify | 5 + 5 | 10 + 10 = **20** | 8 qualify → QF → SF → Final (7) | **27** |
+| 3 groups of 3 | 3 + 3 + 3 | 3 + 3 + 3 = **9** | depends on qualification | — |
+| 6 qualifiers | any | — | 2 byes + QF → SF → Final (5) | — |
 
 Every number here is computed from the configuration, never stored.
 
@@ -382,11 +400,13 @@ pairs qualify, the engine builds the single-elimination bracket for N:
 | 4 | Semi-finals → Final |
 | 8 | Quarter-finals → Semi-finals → Final |
 | 16 | Round of 16 → Quarter-finals → Semi-finals → Final |
+| 32 | Round of 32 → Round of 16 → Quarter-finals → Semi-finals → Final |
 
 Round formats (best of 3):
 
 | Round | Match IDs | Sets to |
 |-------|-----------|---------|
+| Round of 32 | R32-1 … R32-16 | 11 |
 | Round of 16 | R16-1 … R16-8 | 11 |
 | Quarter-finals | QF-1 … QF-4 | 11 |
 | Semi-finals | SF-1 … SF-2 | 15 |
@@ -407,8 +427,20 @@ top 4 qualifying (`A1`…`A4`, `B1`…`B4`):
 With top 2 qualifying from each group, the engine goes straight to semi-finals (`A1 vs B2`,
 `B1 vs A2`) — no quarter-finals are created. With a different number of qualifiers the bracket is
 built accordingly, and if the qualifier count is not a power of two, **byes** are inserted
-automatically. A bye advances a pair without creating a fake match: it is never schedulable,
-scorable or resettable, and it never counts toward the match total.
+automatically.
+
+### Byes
+
+A bye advances a pair without creating a fake match. A bye:
+
+- never appears as a schedulable match — the rolling scheduler ignores it;
+- cannot be started, scored or reset;
+- never has two real opponents;
+- never counts toward the played or total match counts;
+- automatically advances its real team into the next round.
+
+For example, with **6 qualifiers** the engine creates an 8-slot bracket: 2 byes and 2 real
+quarter-finals, then semi-finals and a final — 5 real knockout matches in total (`6 − 1`).
 
 Each round unlocks automatically as the previous round finishes. Every set score is validated
 (played to the round's target, won by 2 clear points, a set cannot be tied, sets must be filled in
@@ -461,7 +493,7 @@ change. It shows the current state and the result before committing:
 
 ```
 Current: 10 pairs · 5 / 5 groups · 20 fixtures · 7 completed
-After regenerating: 16 group fixtures + 7 knockout matches
+After regenerating: 20 group fixtures + 7 knockout matches
 ```
 
 The confirmation states that regenerating will remove existing match results and standings. Only
@@ -470,12 +502,14 @@ on explicit confirmation are fixtures rebuilt and results cleared.
 ### Editing rules
 
 Before any fixtures/results exist, pairs can be freely added, removed, edited, moved between
-groups and assigned levels.
+groups and assigned levels. Adding or removing an *empty* group is also always safe — it never
+touches a pair or a fixture.
 
 Once results exist, the app distinguishes:
 
-- **Non-structural edits** — renaming a pair, editing players, changing a level — always apply and
-  never disturb fixtures or results.
+- **Non-structural edits** — renaming a pair, editing players, changing a level, renaming a group
+  label, adding an empty group, removing an empty group — always apply and never disturb fixtures
+  or results.
 - **Structural edits** — adding/removing a pair or changing group membership — would invalidate the
   fixtures, so the app warns
   *“Changing the number of pairs or group membership will regenerate fixtures. Existing results
@@ -664,6 +698,10 @@ The core exposes a generic tournament engine — nothing is tied to 10 pairs or 
 createTournament(config)
 addTeam(team)                    removeTeam(teamId)
 updateTeam(teamId, changes)      assignTeamToGroup(teamId, groupId)
+addGroup(groupId?)               removeGroup(groupId)
+renameGroup(groupId, label)      groupLabel(groupId)
+nextGroupId()                    nextTeamId(group)
+validateGroups(groups, teams)    validateTeams(teams)
 regenerateFixtures()             regeneratePlan()
 generateGroupFixtures()          buildGroupMatches()
 getGroupMatchCount(groupId)      getTotalGroupMatchCount()
@@ -679,7 +717,8 @@ getTotalMatchCount()             progress()
   version,                    // schema version for migrations
   tournament: { name, createdAt },
   teams:      [ { id, group, name, players[], level } ],
-  groups:     { /* groupId: [teamId…] */ },   // any number of groups, any size
+  groups:     { /* groupId: [teamId…] */ },   // any number of groups, any size (0 allowed)
+  groupLabels:{ /* groupId: "friendly name" */ },  // cosmetic, optional
   matches:    [ {
       id, stage, group, round,
       teamA, teamB,
@@ -720,9 +759,10 @@ A dependency-free test suite lives in `tests/`:
 
 ```bash
 node tests/core.test.js
+node tests/render.test.js
 ```
 
-It extracts the DOM-free `TM` layer from `index.html` and asserts, among ~990 checks:
+It extracts the DOM-free `TM` layer from `index.html` and asserts, among ~1300 checks:
 
 - **dynamic group stage**: correct round-robin counts for 2/3/4/5/6 pairs (1/3/6/10/15) and for
   8 pairs 4+4 (12), 9 pairs 5+4 (16), 10 pairs 5+5 (20); no duplicate pairings, no self-matches,
@@ -739,8 +779,14 @@ It extracts the DOM-free `TM` layer from `index.html` and asserts, among ~990 ch
 - **qualification**: per-group qualifier count validated against the largest group; refused once
   the bracket exists; 8-pair top-2 yields SF (no QF) and 4 qualifiers
 - **dynamic knockout**: 2 → Final, 4 → SF+Final, 8 → QF onward (7 matches), 16 → R16 onward
-  (15 matches), all played through to a champion; non-power-of-two qualifier counts (6, 12)
-  create byes that auto-advance a real pair and are never schedulable, scorable or resettable
+  (15 matches), 17–32 → Round of 32 onward; every qualifier count from 2 to 16 is played through
+  to a champion; non-power-of-two qualifier counts (3, 5, 6, 7, 9, 10, 12, 14) create byes that
+  auto-advance a real pair and are never schedulable, scorable or resettable
+- **dynamic groups**: add an empty group (never moves a pair, never changes fixtures), remove an
+  empty group, refusal to remove a non-empty group, refusal to remove the last group, stable
+  sequential ids, max-groups cap, and cosmetic group labels that never touch fixtures
+- **pair validation**: duplicate pair names (tournament-wide), empty names, duplicate ids, empty
+  group assignment, too few pairs, a one-pair group, and a pair in an undeclared group
 - **standings** for groups of 3 and 6 rows, with all columns present
 - **scheduler** on a 12-match queue: no team on two courts, no court double booking,
   deterministic selection, distinct matches per court, disabled courts ignored
@@ -748,9 +794,14 @@ It extracts the DOM-free `TM` layer from `index.html` and asserts, among ~990 ch
   `15`/`23`/`27` overall) and partial-progress labels
 - **levels** derived from assignments and independent of groups (survive a group move), and
   **courts** independent of pair count
-- **end-to-end scenarios A/B/C**: 8 pairs (4+4), 9 pairs (5+4) and 10 pairs (5+5) each run from
-  the group stage through qualifiers and the knockout to a champion, using the same generic engine
-  with no special-case code
+- **end-to-end scenarios A–E**: 8 pairs (4+4, top 2 → 15), 9 pairs (5+4, top 4 → 23),
+  10 pairs (5+5, top 4 → 27), three groups of three (9 group matches) and 6 qualifiers (5
+  knockout matches with 2 byes). Each runs from the group stage through qualifiers and the
+  knockout to a champion using the same generic engine with no special-case code
+- **regeneration safety**: the plan's before/after counts; structural changes (add/remove/move)
+  refused after results without explicit confirmation; cancel keeps results; confirming clears
+  results and rebuilds with no orphaned matches; renames and level changes never regenerate
+- **group configuration persistence**: empty groups and labels survive reload and export/import
 - **persistence, export and import** of an arbitrary-size tournament
 - win = 2 points, loss = 0, correct PF / PA / Diff, tie-break ordering
 - score validation (ties, sub-21, non-2-clear, cap)
@@ -777,9 +828,18 @@ It extracts the DOM-free `TM` layer from `index.html` and asserts, among ~990 ch
   `"Tunga"/"Bhadra"/"Kaveri"` still importing
 - corrupt/absent/denied localStorage never throws and defaults rebuild
 
-`tests/core.test.js` is the only file committed for tests because it needs nothing beyond Node.
-The browser/render checks below were run against a real headless Chromium during development and
-are not committed, so the repository keeps zero dependencies:
+Two committed test files, both dependency-free:
+
+- `tests/core.test.js` — extracts the DOM-free `core-logic` script and exercises the whole `TM`
+  engine. Run with `node tests/core.test.js`.
+- `tests/render.test.js` — loads the full single-file app (core + UI) under a minimal DOM shim and
+  renders every screen for the default 10-pair layout, 8 pairs (4+4), 9 pairs (5+4), a
+  6-qualifier bracket with byes, and three groups of three, asserting the dynamic counts appear
+  (e.g. `/ 12` not `/ 20`) and no `undefined`/`NaN` leaks into the markup. Run with
+  `node tests/render.test.js`.
+
+The browser checks below were run against a real headless Chromium during development and are not
+committed, so the repository keeps zero dependencies:
 
 - every screen renders at 375 px, 390 px and 412 px with no page-level horizontal overflow
 - the knockout bracket scrolls inside its own container instead of widening the page
@@ -799,7 +859,8 @@ rejected.
 Tournament/
 ├── index.html          ← entire application (core logic + UI, single file)
 ├── tests/
-│   └── core.test.js    ← dependency-free core rules test suite
+│   ├── core.test.js    ← dependency-free core rules test suite
+│   └── render.test.js  ← dependency-free UI render smoke suite
 └── README.md
 ```
 

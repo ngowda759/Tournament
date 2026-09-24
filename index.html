@@ -291,6 +291,12 @@
   .team-edit-inputs input { min-height: 40px; padding: 8px 11px; font-size: 14px; }
   .remove-btn { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--text3); cursor: pointer; font-size: 16px; line-height: 1; flex-shrink: 0; transition: var(--transition); }
   .remove-btn:hover { background: var(--danger-bg); color: var(--danger); border-color: rgba(255,107,91,0.3); }
+  /* Group configuration row: stable id, optional friendly label, live counts. */
+  .group-cfg-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .group-cfg-id { font-family: var(--font-head); font-size: 13px; font-weight: 800; color: var(--text); min-width: 24px; }
+  .group-cfg-row input { flex: 1; min-width: 0; min-height: 40px; padding: 8px 11px; font-size: 13px; }
+  .group-cfg-count { font-size: 12px; color: var(--text3); white-space: nowrap; }
+  @media (max-width: 420px) { .group-cfg-row { flex-wrap: wrap; } .group-cfg-count { white-space: normal; } }
   .level-chip { font-size: 10px; font-weight: 700; letter-spacing: 0.5px; padding: 2px 8px; border-radius: 20px; border: 1px solid var(--border); color: var(--text2); }
   /* Configured levels get a stable colour from their slug; the three defaults keep
      their original colours and any organizer-added level falls back to a neutral
@@ -506,17 +512,25 @@
   const GROUP_TARGET = 21;
   const GROUP_CAP = 30;
 
-  // Knockout round definitions. `size` is the number of teams in that round's
-  // bracket slice; match ids are `${key}-${n}`. Targets are per round.
+  // Knockout round definitions, largest bracket first. `size` is the number of
+  // teams in that round's bracket slice; match ids are `${key}-${n}`. The table
+  // covers every power of two up to the maximum supported field (32 pairs), so a
+  // bracket can be built for any qualifier count from 2 to 32 without a fixed
+  // QF/SF/Final assumption.
   const KNOCKOUT_ROUNDS = [
+    { key: 'r32', name: 'Round of 32', size: 32, target: 11, setsTo: 11 },
     { key: 'r16', name: 'Round of 16', size: 16, target: 11, setsTo: 11 },
     { key: 'qf', name: 'Quarter-Final', size: 8, target: 11 },
     { key: 'sf', name: 'Semi-Final', size: 4, target: 15 },
     { key: 'final', name: 'Final', size: 2, target: 21 }
   ];
-  const KNOCKOUT_TARGET = { r16: 11, qf: 11, sf: 15, final: 21 };
-  const KNOCKOUT_LABEL = { r16: 'Round of 16', qf: 'Quarter-Final', sf: 'Semi-Final', final: 'Final' };
-  const KNOCKOUT_RANK = { r16: 0, qf: 1, sf: 2, final: 3 }; // r16 = earliest
+  const KNOCKOUT_TARGET = { r32: 11, r16: 11, qf: 11, sf: 15, final: 21 };
+  const KNOCKOUT_LABEL = { r32: 'Round of 32', r16: 'Round of 16', qf: 'Quarter-Final', sf: 'Semi-Final', final: 'Final' };
+  // Rank is derived from bracket size (earliest round first) so adding a round to
+  // the table above never leaves this map out of sync.
+  const KNOCKOUT_RANK = {};
+  KNOCKOUT_ROUNDS.slice().sort(function (a, b) { return b.size - a.size; })
+    .forEach(function (r, i) { KNOCKOUT_RANK[r.key] = i; });
 
   // Default qualification: top 4 from each group (the default 10-pair example).
   const DEFAULT_QUALIFY_PER_GROUP = 4;
@@ -876,6 +890,7 @@
       tournament: { name: 'Badminton Doubles Tournament', createdAt: new Date().toISOString() },
       teams: [],
       groups: groups,
+      groupLabels: {},
       matches: [],
       courts: DEFAULT_COURTS.map(function (c) { return newCourt(c); }),
       knockout: { generated: false, champion: null, qualifiers: null },
@@ -901,6 +916,15 @@
     if (!Object.keys(groups).length) DEFAULT_GROUP_IDS.forEach(function (g) { groups[g] = []; });
     s.groups = groups;
     s.tournament = Object.assign(base.tournament, s.tournament || {});
+    // Group labels are cosmetic (a friendly name per stable group id). They are
+    // normalized so a malformed backup can never wedge the group list.
+    const rawLabels = (s.groupLabels && typeof s.groupLabels === 'object' && !Array.isArray(s.groupLabels)) ? s.groupLabels : {};
+    const labels = {};
+    Object.keys(rawLabels).forEach(function (g) {
+      const v = rawLabels[g];
+      if (typeof v === 'string' && v.trim()) labels[g] = v.trim().slice(0, 40);
+    });
+    s.groupLabels = labels;
     const rawSettings = s.settings || {};
     s.settings = Object.assign({ allowOutsideAvailability: false }, rawSettings);
 
@@ -1102,7 +1126,13 @@
 
     const previous = state;
     state = fresh;
-    const applied = applyTeams(teams, { regenerate: true });
+    // An explicit group list creates those containers (empty ones included); a
+    // tournament configured without one is auto-derived from the pairs, and any
+    // declared-but-empty default group is dropped so it does not linger.
+    const explicitGroups = Array.isArray(config.groups) ? config.groups.map(function (g) { return String(g); }) : null;
+    if (explicitGroups && !explicitGroups.length) return { ok: false, msg: 'A tournament needs at least one group.' };
+    const groupsForApply = explicitGroups || teams.map(function (t) { return t.group; });
+    const applied = applyTeams(teams, { regenerate: true, groups: groupsForApply });
     if (!applied.ok) { state = previous; return applied; }
 
     // A configured qualifier count must fit the largest group. For an auto-derived
@@ -1615,7 +1645,7 @@
 
   // Stable match ids for a knockout round, keeping the familiar short forms used
   // by existing tournaments: QF-1, SF-1, F-1 (and R16-1 for a round of 16).
-  const KNOCKOUT_PREFIX = { r16: 'R16', qf: 'QF', sf: 'SF', final: 'F' };
+  const KNOCKOUT_PREFIX = { r32: 'R32', r16: 'R16', qf: 'QF', sf: 'SF', final: 'F' };
   function knockoutMatchId(stage, n) {
     return (KNOCKOUT_PREFIX[stage] || stage.toUpperCase()) + '-' + n;
   }
@@ -1852,18 +1882,20 @@
   }
 
   /* ── team editing ────────────────────────────────────── */
+  // Signature of the *playing structure*: which pair sits in which group. It is
+  // intentionally independent of the set of empty group containers, so adding or
+  // removing an empty group never counts as a structural change and never discards
+  // results. Renames, player edits and level changes do not appear here either.
   function groupSignature(s) {
-    const ids = groupIds(s);
-    const sig = {};
-    ids.forEach(function (g) { sig[g] = (s.groups[g] || []).slice().sort().join(','); });
-    return JSON.stringify(sig);
+    return (s.teams || []).map(function (t) { return t.id + ':' + t.group; }).sort().join('|');
   }
 
   // Validate a proposed team list without mutating live state. Teams are the
   // source of truth: the number of pairs, their names, players, levels and group
   // assignments all come from here. Groups are dynamic — any group ids present are
-  // accepted as long as every team names a real group and each used group has at
-  // least two pairs (a one-pair group cannot play a round-robin).
+  // accepted as long as every team names a real group and each group that actually
+  // holds pairs has at least two (a one-pair group cannot play a round-robin). A
+  // configured group with zero pairs is allowed; it simply produces no fixtures.
   function validateTeams(newTeams) {
     if (!Array.isArray(newTeams)) return { ok: false, msg: 'Teams must be a list.' };
     if (newTeams.length < MIN_PAIRS) return { ok: false, msg: 'A tournament needs at least ' + MIN_PAIRS + ' pairs.' };
@@ -1877,19 +1909,46 @@
       if (!t.name || !String(t.name).trim()) return { ok: false, msg: 'Every pair needs a name.' };
       if (t.group == null || String(t.group).trim() === '') return { ok: false, msg: 'Every pair must be assigned to a group.' };
     }
-    // Group sizes are computed from actual membership, never assumed.
+    // Pair names must be unique across the whole tournament, not just within a group.
+    const allNames = newTeams.map(function (t) { return String(t.name).trim().toLowerCase(); });
+    if (new Set(allNames).size !== allNames.length) {
+      const seen = {};
+      for (let i = 0; i < allNames.length; i++) {
+        if (seen[allNames[i]]) return { ok: false, msg: 'Duplicate pair name: “' + String(newTeams[i].name).trim() + '”. Pair names must be unique.' };
+        seen[allNames[i]] = true;
+      }
+    }
+    // Group sizes are computed from actual membership, never assumed. Only groups
+    // that hold pairs must satisfy the minimum size.
     const counts = {};
     newTeams.forEach(function (t) { counts[t.group] = (counts[t.group] || 0) + 1; });
-    const usedGroups = Object.keys(counts);
-    if (usedGroups.length > MAX_GROUPS) return { ok: false, msg: 'A tournament supports at most ' + MAX_GROUPS + ' groups.' };
-    for (let i = 0; i < usedGroups.length; i++) {
-      const g = usedGroups[i];
+    for (let i = 0; i < newTeams.length; i++) {
+      const g = newTeams[i].group;
       if (counts[g] < MIN_GROUP_SIZE) {
-        return { ok: false, msg: 'Group ' + g + ' needs at least ' + MIN_GROUP_SIZE + ' pairs (it has ' + counts[g] + ').' };
+        return { ok: false, msg: 'Group ' + g + ' needs at least ' + MIN_GROUP_SIZE + ' pairs (it has ' + counts[g] + '). Move a pair in, or remove the group.' };
       }
-      const names = newTeams.filter(function (t) { return t.group === g; }).map(function (t) { return String(t.name).trim(); });
-      if (new Set(names).size !== names.length) return { ok: false, msg: 'Pair names in Group ' + g + ' must be unique.' };
     }
+    return { ok: true };
+  }
+
+  // Validate a group configuration without mutating live state. Groups are the
+  // stable containers; every pair must live in one of them, and a group that is
+  // being kept must be empty or hold at least two pairs.
+  function validateGroups(groupList, teams) {
+    const list = (groupList || []).map(function (g) { return String(g); });
+    if (!list.length) return { ok: false, msg: 'A tournament needs at least one group.' };
+    if (list.length > MAX_GROUPS) return { ok: false, msg: 'A tournament supports at most ' + MAX_GROUPS + ' groups.' };
+    const set = {};
+    for (let i = 0; i < list.length; i++) {
+      const g = list[i];
+      if (!g.trim()) return { ok: false, msg: 'Group ids cannot be empty.' };
+      if (set[g]) return { ok: false, msg: 'Duplicate group id: ' + g };
+      set[g] = true;
+    }
+    (teams || []).forEach(function (t) {
+      if (!set[t.group]) { set.__missing = t.group; }
+    });
+    if (set.__missing) return { ok: false, msg: 'Pair “' + (teams.find(function (t) { return t.group === set.__missing; }) || {}).name + '” is assigned to group ' + set.__missing + ', which is not configured.' };
     return { ok: true };
   }
 
@@ -1903,6 +1962,17 @@
     opts = opts || {};
     const valid = validateTeams(newTeams);
     if (!valid.ok) return valid;
+    // When an explicit group list is supplied, every pair must live in one of the
+    // declared groups — a typo can never silently spawn an undeclared group.
+    if (Array.isArray(opts.groups)) {
+      const declaredSet = {};
+      opts.groups.forEach(function (g) { declaredSet[String(g)] = true; });
+      for (let i = 0; i < newTeams.length; i++) {
+        if (!declaredSet[String(newTeams[i].group)]) {
+          return { ok: false, msg: 'Pair “' + String(newTeams[i].name).trim() + '” is assigned to group ' + newTeams[i].group + ', which is not configured.' };
+        }
+      }
+    }
 
     // A level must be one of the configured levels or the reserved Unassigned
     // sentinel; anything else is rejected rather than silently coerced. Level is
@@ -1922,12 +1992,23 @@
         level: t.level || UNASSIGNED_ID
       };
     });
-    // Rebuild the group map purely from actual membership. A group with no pairs is
-    // dropped rather than left as an empty shell, so an 8-pair tournament is exactly
-    // an 8-pair tournament — never 10 pairs with two placeholders.
+    // Rebuild the group membership from actual teams, but keep the configured group
+    // containers (including empty ones) so a group the organizer added survives
+    // until they remove it. A group that is neither configured nor used by a team
+    // does not linger.
+    const declared = Array.isArray(opts.groups) ? opts.groups : Object.keys(state.groups || {});
     const nextGroups = {};
-    next.teams.forEach(function (t) { nextGroups[t.group] = nextGroups[t.group] || []; nextGroups[t.group].push(t.id); });
+    declared.forEach(function (g) { if (g != null && g !== '' && !nextGroups[g]) nextGroups[g] = []; });
+    next.teams.forEach(function (t) {
+      if (!nextGroups[t.group]) nextGroups[t.group] = [];
+      nextGroups[t.group].push(t.id);
+    });
     next.groups = nextGroups;
+
+    // Drop any group whose label refers to a group that no longer exists.
+    const nextLabels = {};
+    Object.keys(next.groupLabels || {}).forEach(function (g) { if (nextGroups[g]) nextLabels[g] = next.groupLabels[g]; });
+    next.groupLabels = nextLabels;
 
     const structureChanged = groupSignature(next) !== groupSignature(state);
     const hasResults = state.matches.some(function (m) { return m.status !== 'queued'; });
@@ -1937,6 +2018,7 @@
 
     state.teams = next.teams;
     state.groups = next.groups;
+    state.groupLabels = next.groupLabels;
     if (structureChanged) {
       state.matches = buildGroupMatches(state);
       clearKnockout();
@@ -1981,6 +2063,72 @@
 
   function assignTeamToGroup(teamId, groupId, opts) {
     return updateTeam(teamId, { group: groupId }, opts);
+  }
+
+  // ── group configuration API ──────────────────────────────
+  // Groups are stable ids (A, B, C, …) with an optional friendly label. A group
+  // container can exist with zero pairs; the fixture generator simply produces no
+  // matches for it. Group management never silently moves pairs between groups.
+
+  // The next unused single-letter group id, or a two-letter id once A–Z is spent.
+  function nextGroupId() {
+    const used = groupIds();
+    for (let i = 0; i < 26; i++) {
+      const id = String.fromCharCode(65 + i);
+      if (used.indexOf(id) === -1) return id;
+    }
+    for (let i = 0; i < 26; i++) {
+      for (let j = 0; j < 26; j++) {
+        const id = String.fromCharCode(65 + i) + String.fromCharCode(65 + j);
+        if (used.indexOf(id) === -1) return id;
+      }
+    }
+    return 'G' + (used.length + 1);
+  }
+
+  function groupLabel(groupId) {
+    return (state.groupLabels && state.groupLabels[groupId]) || ('Group ' + groupId);
+  }
+
+  // Add an empty group. Pairs are never moved into it automatically — the
+  // organizer assigns pairs explicitly, so adding a group is always safe and
+  // never regenerates fixtures.
+  function addGroup(groupId) {
+    const ids = groupIds();
+    if (ids.length >= MAX_GROUPS) return { ok: false, msg: 'A tournament supports at most ' + MAX_GROUPS + ' groups.' };
+    let id = groupId ? String(groupId).trim().toUpperCase() : nextGroupId();
+    if (!id) return { ok: false, msg: 'A group needs an id.' };
+    if (state.groups[id]) return { ok: false, msg: 'Group ' + id + ' already exists.' };
+    const teams = state.teams.map(copy);
+    return applyTeams(teams, { groups: ids.concat([id]), regenerate: true });
+  }
+
+  // Remove a group. Only an empty group can be removed — a group that still holds
+  // pairs must have them moved first, so a removal can never orphan a match.
+  function removeGroup(groupId, opts) {
+    const g = String(groupId);
+    if (!state.groups[g]) return { ok: false, msg: 'Group ' + g + ' does not exist.' };
+    const remaining = groupIds().filter(function (x) { return x !== g; });
+    if (remaining.length < 1) return { ok: false, msg: 'A tournament needs at least one group.' };
+    const held = state.teams.filter(function (t) { return t.group === g; });
+    if (held.length) {
+      return { ok: false, msg: 'Group ' + g + ' still holds ' + held.length + ' pair' + (held.length === 1 ? '' : 's') + '. Move them to another group first.' };
+    }
+    // Only the container changes, so this is never structural and never clears
+    // results (there are no matches for an empty group by definition).
+    return applyTeams(state.teams.map(copy), { groups: remaining, regenerate: true });
+  }
+
+  // Set or clear a friendly label for a group. Cosmetic only — it never affects
+  // ids, fixtures or results.
+  function renameGroup(groupId, label) {
+    const g = String(groupId);
+    if (!state.groups[g]) return { ok: false, msg: 'Group ' + g + ' does not exist.' };
+    const clean = label == null ? '' : String(label).trim().slice(0, 40);
+    if (!clean || clean === 'Group ' + g) delete state.groupLabels[g];
+    else state.groupLabels[g] = clean;
+    save();
+    return { ok: true, label: groupLabel(g) };
   }
 
   // Explicit, safe fixture regeneration. Returns enough detail for the
@@ -2190,11 +2338,17 @@
     recentResults: recentResults,
 
     validateTeams: validateTeams,
+    validateGroups: validateGroups,
     applyTeams: applyTeams,
     addTeam: addTeam,
     removeTeam: removeTeam,
     updateTeam: updateTeam,
     assignTeamToGroup: assignTeamToGroup,
+    addGroup: addGroup,
+    removeGroup: removeGroup,
+    renameGroup: renameGroup,
+    groupLabel: groupLabel,
+    nextGroupId: nextGroupId,
     nextTeamId: nextTeamId,
     regeneratePlan: regeneratePlan,
     regenerateFixtures: regenerateFixtures,
@@ -2536,7 +2690,11 @@
 
     html += '<div class="section-title">Live standings <span class="line"></span></div>';
     TM.groupIds().forEach(function (g) {
-      html += '<div class="card"><div class="muted" style="margin-bottom:8px;">Group ' + esc(g) + '</div>' + standingsTable(g, true) + '</div>';
+      const size = TM.teamsInGroup(g).length;
+      html += '<div class="card"><div class="muted" style="margin-bottom:8px;">' + esc(TM.groupLabel(g)) +
+        (size ? '' : ' — no pairs assigned yet') + '</div>' +
+        (size ? standingsTable(g, true) : '<div class="alert alert-info" style="margin:0;">No pairs in this group yet. Assign pairs on the Teams screen.</div>') +
+        '</div>';
     });
 
     html += '<div class="section-title">Recent results <span class="line"></span></div>';
@@ -2758,7 +2916,7 @@
       const gm = TM.groupMatches(g);
       if (!gm.length) return;
       const done = gm.filter(function (m) { return m.status === 'completed'; }).length;
-      html += '<div class="section-title">Group ' + esc(g) + ' · ' + done + '/' + gm.length + '<span class="line"></span></div>';
+      html += '<div class="section-title">' + esc(TM.groupLabel(g)) + ' · ' + done + '/' + gm.length + '<span class="line"></span></div>';
       const byRound = {};
       gm.forEach(function (m) { (byRound[m.round] = byRound[m.round] || []).push(m); });
       Object.keys(byRound).sort(function (a, b) { return a - b; }).forEach(function (r) {
@@ -2811,7 +2969,7 @@
     let html = '<div class="page-title">Standings</div>';
     html += '<div class="page-subtitle">Win = ' + TM.GROUP_WIN_POINTS + ' points · Loss = ' + TM.GROUP_LOSS_POINTS + ' · No draws. Tie-break: points → point difference → points scored.</div>';
     TM.groupIds().forEach(function (g) {
-      html += '<div class="section-title">Group ' + esc(g) + '<span class="line"></span></div>';
+      html += '<div class="section-title">' + esc(TM.groupLabel(g)) + '<span class="line"></span></div>';
       html += standingsTable(g, false);
     });
     html += '<div class="card" style="margin-top:14px;"><div class="muted">Top ' + q.perGroup + ' pairs from each group qualify' +
@@ -2936,10 +3094,21 @@
 
   /* ═══════════════ TEAMS ═══════════════ */
   let draftTeams = null;
+  let draftGroupList = null;
+  let draftSignature = null;
+
+  // A fingerprint of the live tournament structure. If the state changes anywhere
+  // else (e.g. a group is added in Settings) the stale draft is discarded so the
+  // Teams screen always reflects the real configuration.
+  function liveDraftSignature() {
+    return TM.getState().teams.map(function (t) { return t.id + ':' + t.group; }).sort().join('|') +
+      '#' + TM.groupIds().sort().join(',');
+  }
 
   function viewTeams() {
     const st = TM.getState();
-    if (!draftTeams) draftTeams = st.teams.map(function (t) { return JSON.parse(JSON.stringify(t)); });
+    if (draftTeams && draftSignature !== liveDraftSignature()) { draftTeams = null; draftGroupList = null; }
+    if (!draftTeams) resetDraft();
 
     const locked = st.matches.some(function (m) { return m.status !== 'queued'; });
     const groups = draftGroups();
@@ -2957,14 +3126,18 @@
 
     groups.forEach(function (grp) {
       const list = draftTeams.filter(function (t) { return t.group === grp; });
-      html += '<div class="section-title">Group ' + esc(grp) + ' (' + list.length + ') <span class="line"></span>' +
-        '<button class="btn btn-xs" onclick="App.addTeam(\'' + esc(grp) + '\')">+ Add pair</button></div>';
-      html += '<div class="team-edit">' + (list.length ? list.map(function (t) { return teamEditRow(t, groups); }).join('') : '<div class="muted" style="padding:8px 0;">No pairs in this group yet.</div>') + '</div>';
+      const gm = list.length * (list.length - 1) / 2;
+      html += '<div class="section-title">' + esc(TM.groupLabel(grp)) + ' (' + list.length + ' pair' + (list.length === 1 ? '' : 's') + ' · ' + gm + ' match' + (gm === 1 ? '' : 'es') + ') <span class="line"></span>' +
+        '<button class="btn btn-xs" onclick="App.addTeam(\'' + esc(grp) + '\')">+ Add pair</button>' +
+        (list.length === 0 && groups.length > 1
+          ? '<button class="btn btn-xs" onclick="App.removeGroup(\'' + esc(grp) + '\')">− Remove group</button>'
+          : '') +
+        '</div>';
+      html += '<div class="team-edit">' + (list.length ? list.map(function (t) { return teamEditRow(t, groups); }).join('') : '<div class="muted" style="padding:8px 0;">No pairs in this group yet — add a pair here, or remove the group.</div>') + '</div>';
     });
 
     html += '<div class="btn-group" style="margin-top:6px;">' +
       '<button class="btn btn-sm" onclick="App.addGroup()">+ Add group</button>' +
-      '<button class="btn btn-sm" onclick="App.removeGroup()">− Remove last group</button>' +
       '</div>';
 
     html += '<div class="btn-group">' +
@@ -2974,23 +3147,22 @@
     return html;
   }
 
-  // Every group that exists in the draft: configured groups plus any group a draft
-  // pair references, plus the default pair (A/B).
+  // The group ids shown in the Teams draft: every configured group plus any group
+  // a draft pair references. Sorting keeps A, B, C… stable on screen.
   function draftGroups() {
     const ids = [];
     const seen = {};
     const add = function (g) { if (g == null || g === '') return; if (seen[g]) return; seen[g] = true; ids.push(g); };
-    TM.groupIds().forEach(add);
+    (draftGroupList || TM.groupIds()).forEach(add);
     (draftTeams || []).forEach(function (t) { add(t.group); });
     ids.sort();
     return ids;
   }
 
-  function nextGroupId() {
-    const used = draftGroups();
-    let i = 0;
-    while (used.indexOf(String.fromCharCode(65 + i)) !== -1) i++;
-    return String.fromCharCode(65 + i);
+  function resetDraft() {
+    draftTeams = TM.getState().teams.map(function (t) { return JSON.parse(JSON.stringify(t)); });
+    draftGroupList = TM.groupIds();
+    draftSignature = liveDraftSignature();
   }
 
   function teamEditRow(t, groups) {
@@ -3001,7 +3173,7 @@
       return '<option value="' + esc(lv.id) + '"' + (current === lv.id ? ' selected' : '') + '>' + esc(lv.name) + '</option>';
     }).join('');
     const groupOptions = (groups || draftGroups()).map(function (g) {
-      return '<option value="' + esc(g) + '"' + (t.group === g ? ' selected' : '') + '>Group ' + esc(g) + '</option>';
+      return '<option value="' + esc(g) + '"' + (t.group === g ? ' selected' : '') + '>' + esc(TM.groupLabel(g)) + '</option>';
     }).join('');
     const selStyle = 'background:var(--bg4);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:5px 8px;font-size:12px;';
     return '<div class="team-edit-row">' +
@@ -3019,7 +3191,7 @@
         '<input type="text" value="' + esc(t.name) + '" placeholder="Pair name" oninput="App.updateTeam(\'' + esc(t.id) + '\',\'name\',this.value)">' +
         '<input type="text" value="' + esc((t.players || []).join(', ')) + '" placeholder="Players (comma separated)" oninput="App.updateTeam(\'' + esc(t.id) + '\',\'players\',this.value)">' +
       '</div>' +
-      '<div class="muted" style="font-size:11.5px;">Group ' + esc(t.group) + ' · Level ' + esc(TM.levelName(current)) + '</div>' +
+      '<div class="muted" style="font-size:11.5px;">' + esc(TM.groupLabel(t.group)) + ' · Level ' + esc(TM.levelName(current)) + '</div>' +
       '</div>';
   }
 
@@ -3047,21 +3219,23 @@
   }
 
   function addGroup() {
-    const g = nextGroupId();
-    const first = draftTeams[0];
-    if (first) { first.group = g; }
+    const groups = draftGroups();
+    if (groups.length >= TM.MAX_GROUPS) { toast('A tournament supports at most ' + TM.MAX_GROUPS + ' groups.'); return; }
+    const g = TM.nextGroupId();
+    draftGroupList = groups.concat([g]);
     renderTeamsOnly();
-    toast('Group ' + g + ' added — assign pairs to it');
+    toast('Group ' + g + ' added (empty) — assign pairs to it');
   }
 
-  function removeGroup() {
+  function removeGroup(groupId) {
     const groups = draftGroups();
+    const g = groupId || groups[groups.length - 1];
     if (groups.length <= 1) { toast('A tournament needs at least one group.'); return; }
-    const last = groups[groups.length - 1];
-    const moved = draftTeams.filter(function (t) { return t.group === last; }).length;
-    if (moved) { toast('Move the ' + moved + ' pair(s) out of Group ' + last + ' first.'); return; }
+    const held = draftTeams.filter(function (t) { return t.group === g; }).length;
+    if (held) { toast('Group ' + g + ' still holds ' + held + ' pair' + (held === 1 ? '' : 's') + '. Move them out first.'); return; }
+    draftGroupList = groups.filter(function (x) { return x !== g; });
     renderTeamsOnly();
-    toast('Group ' + last + ' is empty and will be dropped on save');
+    toast('Group ' + g + ' removed — save teams to apply');
   }
 
   function renderTeamsOnly() {
@@ -3071,13 +3245,17 @@
 
   function saveTeams(forceRegenerate) {
     const payload = draftTeams.map(function (t) { return { id: t.id, group: t.group, name: t.name, players: t.players, level: t.level }; });
-    const r = TM.applyTeams(payload, { regenerate: !!forceRegenerate });
+    const groups = draftGroups();
+    const validation = TM.validateGroups(groups, payload);
+    if (!validation.ok) { toast(validation.msg); return; }
+    const r = TM.applyTeams(payload, { regenerate: !!forceRegenerate, groups: groups });
     if (!r.ok && r.needsConfirmation) {
       confirm('Regenerate fixtures?', TEAM_WARN(r.msg), function () { saveTeams(true); });
       return;
     }
     if (!r.ok) { toast(r.msg); return; }
     draftTeams = null;
+    draftGroupList = null;
     toast(r.regenerated ? 'Teams saved — fixtures regenerated' : 'Teams saved');
     render();
   }
@@ -3086,6 +3264,7 @@
 
   function revertTeams() {
     draftTeams = null;
+    draftGroupList = null;
     toast('Changes reverted');
     render();
   }
@@ -3273,14 +3452,36 @@
       '<div class="muted" style="font-size:12px;margin-top:10px;">The number of pairs and the group split come from the Pairs / Teams configuration below — there is no fixed 20-player or 10-pair requirement. A tournament needs ' + TM.MIN_PAIRS + '–' + TM.MAX_PAIRS + ' pairs, with at least ' + TM.MIN_GROUP_SIZE + ' pairs per group.</div>' +
       '</div>';
 
-    // Groups: counts are derived from actual pair assignments.
+    // Groups: counts are derived from actual pair assignments. Empty groups are
+    // shown explicitly so the organizer knows they need pairs before fixtures can
+    // be generated. Adding/removing/renaming groups never moves a pair around.
     html += '<div class="section-title">Groups <span class="line"></span></div>';
     html += '<div class="card">';
+    const emptyGroups = [];
     groups.forEach(function (g) {
       const n = dist[g] || 0;
-      html += '<div class="progress-row"><span>Group ' + esc(g) + '</span><span class="mono">' + n + ' pair' + (n === 1 ? '' : 's') + ' · ' + TM.getGroupMatchCount(g) + ' matches</span></div>';
+      const gm = n * (n - 1) / 2;
+      if (n === 0) emptyGroups.push(g);
+      const custom = (st.groupLabels && st.groupLabels[g]) || '';
+      html += '<div class="group-cfg-row">' +
+        '<span class="group-cfg-id">' + esc(g) + '</span>' +
+        '<input type="text" value="' + esc(custom) + '" placeholder="Group ' + esc(g) + '" maxlength="40" ' +
+          'onchange="App.settingsRenameGroup(\'' + esc(g) + '\',this.value)" title="Friendly label (optional)">' +
+        '<span class="group-cfg-count">' + n + ' pair' + (n === 1 ? '' : 's') + ' · ' + gm + ' match' + (gm === 1 ? '' : 'es') + '</span>' +
+        (n === 0 && groups.length > 1
+          ? '<button class="btn btn-xs btn-danger" onclick="App.settingsRemoveGroup(\'' + esc(g) + '\')">Remove</button>'
+          : '') +
+        '</div>';
     });
-    html += '<div class="muted" style="font-size:12px;margin-top:10px;">Group membership is edited on the <b>Teams</b> screen. Counts here are calculated from the actual assignments, never stored.</div>';
+    html += '<div class="progress-row" style="border-top:1px solid var(--border);margin-top:6px;padding-top:8px;"><span><b>Total</b></span><span class="mono"><b>' + st.teams.length + ' pairs · ' + totalGroup + ' group matches</b></span></div>';
+    if (emptyGroups.length) {
+      html += '<div class="alert alert-warn" style="margin-top:10px;">⚠️ ' + emptyGroups.map(function (g) { return esc(TM.groupLabel(g)); }).join(', ') +
+        ' ' + (emptyGroups.length === 1 ? 'has' : 'have') + ' no pairs yet. Add pairs to ' + (emptyGroups.length === 1 ? 'it' : 'them') + ' or remove the ' + (emptyGroups.length === 1 ? 'group' : 'groups') + ' before generating fixtures.</div>';
+    }
+    html += '<div class="btn-group" style="margin-top:8px;">' +
+      '<button class="btn btn-sm" onclick="App.settingsAddGroup()"' + (groups.length >= TM.MAX_GROUPS ? ' disabled' : '') + '>+ Add group</button>' +
+      '</div>';
+    html += '<div class="muted" style="font-size:12px;margin-top:8px;">A group is a stable container (A, B, C…); the label is optional and cosmetic. Add an empty group here, then assign pairs to it on the <b>Teams</b> screen. Only an empty group can be removed — move its pairs first. Counts are calculated from the actual assignments, never stored.</div>';
     html += '</div>';
 
     // Qualification: how many pairs advance from each group. Re-validate the chosen
@@ -3296,9 +3497,20 @@
       html += '<option value="' + n + '"' + (q.perGroup === n ? ' selected' : '') + '>Top ' + n + '</option>';
     }
     html += '</select></div>';
-    html += '<div class="muted" style="font-size:12.5px;margin-top:4px;">' + qualCount + ' pairs qualify' + (koRounds ? ' → ' + koRounds : '') + '. ' +
-      'A group smaller than the configured qualifier count qualifies all of its pairs.</div>';
-    html += '<div class="muted" style="font-size:12px;margin-top:10px;">The knockout bracket is generated from the number of qualifiers. 4 qualifiers → semi-finals + final; 8 → quarter-finals onward; 16 → round of 16 onward. If the count is not a power of two, byes are created automatically.</div>';
+    // Per-group breakdown, so a small group that cannot fill the quota is obvious.
+    html += '<div class="muted" style="font-size:12.5px;margin-top:6px;">';
+    groups.forEach(function (g) {
+      const take = TM.qualifiedPerGroup()[g] || 0;
+      const size = dist[g] || 0;
+      html += esc(TM.groupLabel(g)) + ': <b>' + take + '</b> of ' + size + ' qualify' +
+        (take >= size && size ? ' (all)' : '') + ' · ';
+    });
+    html += '</div>';
+    html += '<div class="muted" style="font-size:12.5px;margin-top:4px;color:var(--text);">' + qualCount + ' pair' + (qualCount === 1 ? '' : 's') + ' qualify' + (koRounds ? ' → ' + koRounds : '') + '.</div>';
+    html += '<div class="muted" style="font-size:12px;margin-top:10px;">The knockout bracket is generated from the number of qualifiers. 2 → final; 4 → semi-finals + final; 8 → quarter-finals onward; 16 → round of 16 onward; more → a larger bracket. If the count is not a power of two, byes are created automatically and never count as matches. A group smaller than the configured qualifier count simply qualifies all of its pairs.</div>';
+    if (qualCount < 2) {
+      html += '<div class="alert alert-warn" style="margin-top:10px;">⚠️ At least 2 pairs must qualify to build a knockout bracket. Increase the qualifier count or add pairs.</div>';
+    }
     html += '</div>';
 
     // Regenerate fixtures: explicit, safe, with before/after counts.
@@ -3386,6 +3598,35 @@
   function groupSummaryText(dist) {
     const parts = Object.keys(dist).map(function (g) { return dist[g]; });
     return parts.join(' / ') + ' group' + (parts.length === 1 ? '' : 's');
+  }
+
+  // Settings group management. A new group is created empty; removal is only
+  // offered for an empty group so no pair (and therefore no fixture) is ever lost.
+  function settingsAddGroup() {
+    const r = TM.addGroup();
+    if (!r.ok) { toast(r.msg); return; }
+    draftTeams = null; draftGroupList = null;
+    toast('Group added (empty) — assign pairs on the Teams screen');
+    render();
+  }
+
+  function settingsRemoveGroup(groupId) {
+    const held = (TM.getState().groups[groupId] || []).length;
+    if (held) { toast('Group ' + groupId + ' still holds ' + held + ' pair' + (held === 1 ? '' : 's') + '. Move them out first.'); return; }
+    confirm('Remove Group ' + groupId + '?', 'Group ' + groupId + ' is empty, so no fixtures or results are affected.', function () {
+      const r = TM.removeGroup(groupId);
+      if (!r.ok) { toast(r.msg); return; }
+      draftTeams = null; draftGroupList = null;
+      toast('Group ' + groupId + ' removed');
+      render();
+    });
+  }
+
+  function settingsRenameGroup(groupId, label) {
+    const r = TM.renameGroup(groupId, label);
+    if (!r.ok) { toast(r.msg); return; }
+    toast('Group label updated');
+    render();
   }
 
   function setQualification(v) {
@@ -3559,6 +3800,9 @@
     removeGroup: removeGroup,
     saveTeams: saveTeams,
     revertTeams: revertTeams,
+    settingsAddGroup: settingsAddGroup,
+    settingsRemoveGroup: settingsRemoveGroup,
+    settingsRenameGroup: settingsRenameGroup,
 
     setName: setName,
     setQualification: setQualification,
