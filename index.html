@@ -292,9 +292,13 @@
   .remove-btn { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--text3); cursor: pointer; font-size: 16px; line-height: 1; flex-shrink: 0; transition: var(--transition); }
   .remove-btn:hover { background: var(--danger-bg); color: var(--danger); border-color: rgba(255,107,91,0.3); }
   .level-chip { font-size: 10px; font-weight: 700; letter-spacing: 0.5px; padding: 2px 8px; border-radius: 20px; border: 1px solid var(--border); color: var(--text2); }
-  .level-Tunga { color: var(--blue); border-color: var(--blue-border); background: var(--blue-bg); }
-  .level-Bhadra { color: var(--pink); border-color: var(--pink-border); background: var(--pink-bg); }
-  .level-Kaveri { color: var(--accent); border-color: var(--accent-border); background: var(--accent-bg); }
+  /* Configured levels get a stable colour from their slug; the three defaults keep
+     their original colours and any organizer-added level falls back to a neutral
+     chip, so nothing depends on a fixed list of level names. */
+  .level-tunga { color: var(--blue); border-color: var(--blue-border); background: var(--blue-bg); }
+  .level-bhadra { color: var(--pink); border-color: var(--pink-border); background: var(--pink-bg); }
+  .level-kaveri { color: var(--accent); border-color: var(--accent-border); background: var(--accent-bg); }
+  .level-unassigned { color: var(--text3); border-style: dashed; }
 
   /* TOAST */
   #toast {
@@ -499,7 +503,7 @@
       { name: 'Gangadhar & Manju', players: ['Gangadhar', 'Manju'], level: 'Bhadra' },
       { name: 'Praveen & Vinay', players: ['Praveen', 'Vinay'], level: 'Bhadra' },
       { name: 'Prabhakar & Phani', players: ['Prabhakar', 'Phani'], level: 'Kaveri' },
-      { name: 'Anil & TBD', players: ['Anil', 'TBD'], level: 'Kaveri' }
+      { name: 'Anil & TBD', players: ['Anil', 'TBD'], level: 'Unassigned' }
     ]
   };
 
@@ -517,7 +521,18 @@
 
   const QUALIFY_COUNT = 4;
   const KNOCKOUT_TOTAL = 7; // 4 QF + 2 SF + 1 final
-  const LEVELS = ['Tunga', 'Bhadra', 'Kaveri'];
+
+  // Team levels are configuration, not constants: the organizer chooses which
+  // levels exist in Settings → Team Level Configuration. UNASSIGNED is a fixed
+  // virtual level that is never stored in state.settings.levels but is always a
+  // selectable level for a pair, so pairs without a level remain valid.
+  const UNASSIGNED_ID = 'unassigned';
+  const UNASSIGNED_NAME = 'Unassigned';
+  const DEFAULT_LEVELS = [
+    { id: 'tunga', name: 'Tunga', enabled: true },
+    { id: 'bhadra', name: 'Bhadra', enabled: true },
+    { id: 'kaveri', name: 'Kaveri', enabled: true }
+  ];
 
   /* ── helpers ─────────────────────────────────────────── */
   function copy(o) { return JSON.parse(JSON.stringify(o)); }
@@ -689,6 +704,129 @@
     return updateCourt(id, { enabled: !!on });
   }
 
+  /* ── level configuration ─────────────────────────────── */
+  // A level is { id, name, enabled }. `id` is a stable slug the teams reference;
+  // `name` is the organizer-facing label. The set of levels is the single source of
+  // truth read by the Teams dropdown, Settings, validation and display.
+  function newLevel(o) {
+    return Object.assign({ id: '', name: '', enabled: true }, o || {});
+  }
+
+  function slugifyLevel(name) {
+    return String(name == null ? '' : name).trim().toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  }
+
+  // Accept the current { id, name, enabled } shape and the legacy bare string
+  // ('Tunga') or bad shape, mapping everything to a normalized level.
+  function normalizeLevel(l, idx) {
+    if (typeof l === 'string') {
+      const name = l.trim();
+      return newLevel({ id: slugifyLevel(name) || ('level-' + (idx + 1)), name: name || ('Level ' + (idx + 1)), enabled: true });
+    }
+    const name = (l && typeof l.name === 'string' && l.name.trim()) ? l.name.trim() : ('Level ' + (idx + 1));
+    const id = (l && typeof l.id === 'string' && l.id.trim()) ? l.id.trim() : (slugifyLevel(name) || ('level-' + (idx + 1)));
+    return newLevel({ id: id, name: name, enabled: !(l && l.enabled === false) });
+  }
+
+  function levels() { return state.settings.levels; }
+
+  function levelById(id) {
+    return levels().find(function (l) { return l.id === id; }) || null;
+  }
+
+  // The level a pair is actually assigned to. The Unassigned sentinel is a real,
+  // always-available level with a fixed id so counts and display stay uniform.
+  function levelForTeam(t) {
+    const id = (t && t.level) || UNASSIGNED_ID;
+    const found = levelById(id);
+    if (found) return found;
+    if (id === UNASSIGNED_ID) return newLevel({ id: UNASSIGNED_ID, name: UNASSIGNED_NAME, enabled: true });
+    return newLevel({ id: UNASSIGNED_ID, name: UNASSIGNED_NAME, enabled: true });
+  }
+
+  function levelName(id) { return levelForTeam({ level: id }).name; }
+
+  // Every selectable level for a pair: the configured enabled levels, followed by
+  // the virtual Unassigned level. Disabled levels are hidden from the dropdown.
+  function selectableLevels() {
+    const out = levels().filter(function (l) { return l.enabled !== false; }).map(copy);
+    out.push(newLevel({ id: UNASSIGNED_ID, name: UNASSIGNED_NAME, enabled: true }));
+    return out;
+  }
+
+  // The count per level is *derived* from team assignments — never stored — so it
+  // can never disagree with state.teams.
+  function levelCounts() {
+    const counts = {};
+    levels().forEach(function (l) { counts[l.id] = 0; });
+    counts[UNASSIGNED_ID] = 0;
+    state.teams.forEach(function (t) {
+      const id = (t && t.level && levelById(t.level)) ? t.level : UNASSIGNED_ID;
+      counts[id] = (counts[id] || 0) + 1;
+    });
+    return counts;
+  }
+
+  function hasUnassignedTeams() { return levelCounts()[UNASSIGNED_ID] > 0; }
+
+  function levelSummary() {
+    const total = state.teams.length;
+    const counts = levelCounts();
+    const unassigned = counts[UNASSIGNED_ID] || 0;
+    return { total: total, counts: counts, unassigned: unassigned, assigned: total - unassigned };
+  }
+
+  // Validate a proposed level list without mutating live state. Ids must be unique
+  // and names must be unique (case-insensitive).
+  function validateLevels(list) {
+    if (!Array.isArray(list)) return 'Level configuration must be a list.';
+    if (!list.length) return 'At least one level must be configured.';
+    const ids = {}, names = {};
+    for (let i = 0; i < list.length; i++) {
+      const l = list[i];
+      if (!l) return 'Level ' + (i + 1) + ' is missing.';
+      const id = (l.id == null ? '' : String(l.id)).trim();
+      const name = (l.name == null ? '' : String(l.name)).trim();
+      if (!id) return 'Level ' + (i + 1) + ': id cannot be empty.';
+      if (!name) return 'Level ' + (i + 1) + ': name cannot be empty.';
+      if (id === UNASSIGNED_ID) return '“' + UNASSIGNED_NAME + '” is a reserved level name and cannot be reconfigured.';
+      if (ids[id]) return 'Duplicate level id “' + id + '”. Level ids must be unique.';
+      ids[id] = true;
+      const key = name.toLowerCase();
+      if (key === UNASSIGNED_NAME.toLowerCase()) return '“' + UNASSIGNED_NAME + '” is a reserved level name and cannot be reconfigured.';
+      if (names[key]) return 'Two levels are both named “' + name + '”. Give every level a unique name.';
+      names[key] = true;
+    }
+    return null;
+  }
+
+  // A pair assigned to a level that the organizer removes (or disables) is moved
+  // back to Unassigned rather than silently shown as an unknown level. This changes
+  // no fixtures or groups.
+  function reconcileTeamLevels(validIds) {
+    let moved = 0;
+    state.teams.forEach(function (t) {
+      if (!t.level || !validIds[t.level]) { t.level = UNASSIGNED_ID; moved++; }
+    });
+    return moved;
+  }
+
+  function applyLevels(list) {
+    // Validate the organizer's input as-given (so an empty id or name is a real
+    // error, not silently auto-filled), then normalize the accepted entries.
+    const err = validateLevels(list);
+    if (err) return { ok: false, msg: err };
+    const normalized = list.map(function (l, i) { return normalizeLevel(l, i); });
+    state.settings.levels = normalized;
+    const valid = {};
+    normalized.forEach(function (l) { if (l.enabled !== false) valid[l.id] = true; });
+    valid[UNASSIGNED_ID] = true;
+    reconcileTeamLevels(valid);
+    save();
+    return { ok: true, levels: state.settings.levels };
+  }
+
   /* ── state ───────────────────────────────────────────── */
   let state = null;
 
@@ -701,7 +839,7 @@
       matches: [],
       courts: DEFAULT_COURTS.map(function (c) { return newCourt(c); }),
       knockout: { generated: false, champion: null, qualifiers: null },
-      settings: { allowOutsideAvailability: false },
+      settings: { allowOutsideAvailability: false, levels: DEFAULT_LEVELS.map(function (l) { return newLevel(l); }) },
       meta: { seq: 0 },
       ui: { screen: 'dashboard' }
     };
@@ -713,11 +851,41 @@
     s.version = STATE_VERSION;
     s.groups = Object.assign({ A: [], B: [] }, s.groups || {});
     s.tournament = Object.assign(base.tournament, s.tournament || {});
-    s.settings = Object.assign(base.settings, s.settings || {});
-    if (s.settings.enforceTimeWindows !== undefined && s.settings.allowOutsideAvailability === undefined) {
-      s.settings.allowOutsideAvailability = !s.settings.enforceTimeWindows; // pre-upgrade states
+    const rawSettings = s.settings || {};
+    s.settings = Object.assign({ allowOutsideAvailability: false }, rawSettings);
+    if (rawSettings.allowOutsideAvailability === undefined && rawSettings.enforceTimeWindows !== undefined) {
+      s.settings.allowOutsideAvailability = !rawSettings.enforceTimeWindows; // pre-upgrade states
     }
     delete s.settings.enforceTimeWindows;
+    // Level configuration migration. States written before levels were configurable
+    // have no settings.levels, so seed the standard three. A legacy list of bare
+    // strings ('Tunga') or a malformed list is normalized; duplicates and reserved
+    // ids are dropped so an old backup can never wedge the app.
+    if (!Array.isArray(s.settings.levels) || !s.settings.levels.length) {
+      s.settings.levels = DEFAULT_LEVELS.map(function (l) { return newLevel(l); });
+    } else {
+      const seen = {};
+      const clean = [];
+      s.settings.levels.forEach(function (l, i) {
+        const n = normalizeLevel(l, i);
+        if (!n.id || n.id === UNASSIGNED_ID || seen[n.id]) return;
+        seen[n.id] = true;
+        clean.push(n);
+      });
+      s.settings.levels = clean.length ? clean : DEFAULT_LEVELS.map(function (l) { return newLevel(l); });
+    }
+    // A pair whose stored level no longer exists (or was stored as the reserved
+    // sentinel) falls back to Unassigned. Legacy backups stored names like 'Tunga'
+    // as the level, so match by id first and then by name.
+    if (!Array.isArray(s.teams)) s.teams = [];
+    const levelIdByKey = {};
+    s.settings.levels.forEach(function (l) { levelIdByKey[l.id] = l.id; levelIdByKey[String(l.name).toLowerCase()] = l.id; });
+    s.teams.forEach(function (t) {
+      if (!t || typeof t !== 'object') return;
+      const key = String(t.level == null ? '' : t.level).trim();
+      const mapped = levelIdByKey[key] || levelIdByKey[key.toLowerCase()];
+      t.level = mapped || UNASSIGNED_ID;
+    });
     s.knockout = Object.assign(base.knockout, s.knockout || {});
     s.meta = Object.assign({ seq: 0 }, s.meta || {});
     s.ui = Object.assign({ screen: 'dashboard' }, s.ui || {});
@@ -740,10 +908,13 @@
   }
 
   function defaultTeams() {
+    const idByName = {};
+    DEFAULT_LEVELS.forEach(function (l) { idByName[String(l.name).toLowerCase()] = l.id; });
     const teams = [];
     GROUPS.forEach(function (g) {
       DEFAULT_PAIRS[g].forEach(function (p, i) {
-        teams.push({ id: g + (i + 1), group: g, name: p.name, players: p.players.slice(), level: p.level });
+        const level = idByName[String(p.level).toLowerCase()] || UNASSIGNED_ID;
+        teams.push({ id: g + (i + 1), group: g, name: p.name, players: p.players.slice(), level: level });
       });
     });
     return teams;
@@ -1364,12 +1535,22 @@
       if (new Set(names).size !== names.length) return { ok: false, msg: 'Team names in Group ' + g + ' must be unique.' };
     }
 
+    // A level must be one of the configured levels or the reserved Unassigned
+    // sentinel; anything else is rejected rather than silently coerced. Level is
+    // independent of group, so this never affects fixtures.
+    const validLevels = { };
+    selectableLevels().forEach(function (l) { validLevels[l.id] = true; });
+    for (let i = 0; i < newTeams.length; i++) {
+      const lv = newTeams[i].level || UNASSIGNED_ID;
+      if (!validLevels[lv]) return { ok: false, msg: 'Unknown level “' + lv + '”. Use a level configured in Settings.' };
+    }
+
     const next = copy(state);
     next.teams = newTeams.map(function (t) {
       return {
         id: t.id, group: t.group, name: String(t.name).trim(),
         players: Array.isArray(t.players) ? t.players.map(function (p) { return String(p); }) : [],
-        level: LEVELS.indexOf(t.level) !== -1 ? t.level : 'Kaveri'
+        level: t.level || UNASSIGNED_ID
       };
     });
     GROUPS.forEach(function (g) {
@@ -1425,7 +1606,9 @@
     STORAGE_KEY: STORAGE_KEY,
     STATE_VERSION: STATE_VERSION,
     GROUPS: GROUPS,
-    LEVELS: LEVELS,
+    UNASSIGNED_ID: UNASSIGNED_ID,
+    UNASSIGNED_NAME: UNASSIGNED_NAME,
+    DEFAULT_LEVELS: DEFAULT_LEVELS,
     GROUP_WIN_POINTS: GROUP_WIN_POINTS,
     GROUP_LOSS_POINTS: GROUP_LOSS_POINTS,
     GROUP_TARGET: GROUP_TARGET,
@@ -1459,6 +1642,20 @@
     setCourtCount: setCourtCount,
     updateCourt: updateCourt,
     setCourtEnabled: setCourtEnabled,
+
+    newLevel: newLevel,
+    normalizeLevel: normalizeLevel,
+    slugifyLevel: slugifyLevel,
+    levels: levels,
+    levelById: levelById,
+    levelForTeam: levelForTeam,
+    levelName: levelName,
+    selectableLevels: selectableLevels,
+    levelCounts: levelCounts,
+    levelSummary: levelSummary,
+    hasUnassignedTeams: hasUnassignedTeams,
+    validateLevels: validateLevels,
+    applyLevels: applyLevels,
 
     getTeam: getTeam,
     getMatch: getMatch,
@@ -1588,18 +1785,27 @@
     return '<span class="pill">' + esc(c ? c.name : ('Court ' + courtId)) + '</span>';
   }
 
+  // A level chip whose label and colour come from the configured level, never
+  // from a hard-coded name. Unassigned renders distinctly to draw the eye.
+  function levelChip(t) {
+    if (!t) return '';
+    const lv = TM.levelForTeam(t);
+    const cls = 'level-' + esc(TM.slugifyLevel(lv.id) || lv.id);
+    return '<span class="level-chip ' + cls + '">' + esc(lv.name) + '</span>';
+  }
+
   function teamSub(t) {
     if (!t) return '';
     const bits = [];
-    if (t.level) bits.push('<span class="level-chip level-' + esc(t.level) + '">' + esc(t.level) + '</span>');
+    bits.push(levelChip(t));
     if (t.players && t.players.length) bits.push('<span class="muted">' + esc(t.players.join(' · ')) + '</span>');
     return bits.length ? '<div class="team-cell-sub">' + bits.join(' ') + '</div>' : '';
   }
 
   function teamsBlock(m) {
     const tA = TM.getTeam(m.teamA), tB = TM.getTeam(m.teamB);
-    const dA = '<div class="t"><span class="nm">' + esc(tA ? tA.name : 'TBD') + (tA && tA.level ? ' <span class="level-chip level-' + esc(tA.level) + '">' + esc(tA.level) + '</span>' : '') + '</span>' + scoreSpan(m, 'A') + '</div>';
-    const dB = '<div class="t"><span class="nm">' + esc(tB ? tB.name : 'TBD') + (tB && tB.level ? ' <span class="level-chip level-' + esc(tB.level) + '">' + esc(tB.level) + '</span>' : '') + '</span>' + scoreSpan(m, 'B') + '</div>';
+    const dA = '<div class="t"><span class="nm">' + esc(tA ? tA.name : 'TBD') + (tA ? ' ' + levelChip(tA) : '') + '</span>' + scoreSpan(m, 'A') + '</div>';
+    const dB = '<div class="t"><span class="nm">' + esc(tB ? tB.name : 'TBD') + (tB ? ' ' + levelChip(tB) : '') + '</span>' + scoreSpan(m, 'B') + '</div>';
     return dA + dB;
   }
 
@@ -2221,8 +2427,16 @@
 
     const locked = st.matches.some(function (m) { return m.status !== 'queued'; });
     let html = '<div class="page-title">Teams</div>';
-    html += '<div class="page-subtitle">Edit pair names, their players and their group. Renaming a pair keeps results intact; changing groups or IDs regenerates the group fixtures.</div>';
-    if (locked) html += '<div class="alert alert-warn">Matches have already started. You can still rename pairs and edit player names, but groups and pair IDs are locked until you reset.</div>';
+    html += '<div class="page-subtitle">Edit pair names, their players, their level and their group. Renaming a pair or changing its level keeps results intact; changing groups or IDs regenerates the group fixtures.</div>';
+    if (locked) html += '<div class="alert alert-warn">Matches have already started. You can still rename pairs, edit player names and change a pair\'s level, but groups and pair IDs are locked until you reset.</div>';
+
+    // Level is independent of group, so an unassigned pair never blocks the
+    // tournament — it is reported so the organizer can assign it when ready.
+    const unassigned = TM.levelSummary().unassigned;
+    if (unassigned > 0) {
+      html += '<div class="alert alert-warn">⚠️ ' + unassigned + ' ' + (unassigned === 1 ? 'pair is' : 'pairs are') +
+        ' currently unassigned to a level. This does not affect fixtures — assign a level whenever you are ready.</div>';
+    }
 
     TM.GROUPS.forEach(function (grp) {
       const list = draftTeams.filter(function (t) { return t.group === grp; });
@@ -2239,12 +2453,19 @@
   }
 
   function teamEditRow(t, locked) {
+    // The level dropdown is populated from the configured levels (the one source of
+    // truth), not from any in-line list. Level is never locked by match results
+    // because it does not affect fixtures.
+    const current = t.level || TM.UNASSIGNED_ID;
+    const options = TM.selectableLevels().map(function (lv) {
+      return '<option value="' + esc(lv.id) + '"' + (current === lv.id ? ' selected' : '') + '>' + esc(lv.name) + '</option>';
+    }).join('');
     return '<div class="team-edit-row">' +
       '<div class="team-edit-head">' +
         '<span class="team-edit-id">' + esc(t.id) + '</span>' +
         '<div style="display:flex;gap:6px;align-items:center;">' +
-          '<select class="level-select" onchange="App.updateTeam(\'' + t.id + '\',\'level\',this.value)" ' + (locked ? 'disabled' : '') + ' style="background:var(--bg4);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:5px 8px;font-size:12px;">' +
-            TM.LEVELS.map(function (lv) { return '<option value="' + lv + '"' + (t.level === lv ? ' selected' : '') + '>' + lv + '</option>'; }).join('') +
+          '<select class="level-select" onchange="App.updateTeam(\'' + t.id + '\',\'level\',this.value)" title="Level" style="background:var(--bg4);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:5px 8px;font-size:12px;">' +
+            options +
           '</select>' +
           '<button class="remove-btn" onclick="App.removeTeam(\'' + t.id + '\')" title="Remove pair"' + (locked ? ' disabled' : '') + '>×</button>' +
         '</div>' +
@@ -2253,7 +2474,7 @@
         '<input type="text" value="' + esc(t.name) + '" placeholder="Pair name" oninput="App.updateTeam(\'' + t.id + '\',\'name\',this.value)">' +
         '<input type="text" value="' + esc((t.players || []).join(', ')) + '" placeholder="Players (comma separated)" oninput="App.updateTeam(\'' + t.id + '\',\'players\',this.value)">' +
       '</div>' +
-      '<div class="muted" style="font-size:11.5px;">Group ' + t.group + '</div>' +
+      '<div class="muted" style="font-size:11.5px;">Group ' + t.group + ' · Level ' + esc(TM.levelName(current)) + '</div>' +
       '</div>';
   }
 
@@ -2262,13 +2483,16 @@
     if (!t) return;
     if (field === 'players') t.players = value.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
     else t[field] = value;
+    // A level change re-renders so the row's level label follows the dropdown;
+    // draftTeams already holds every field, so no typing is lost.
+    if (field === 'level') renderTeamsOnly();
   }
 
   function addTeam(group) {
     let n = 1;
     let id;
     do { id = group + n; n++; } while (draftTeams.some(function (t) { return t.id === id; }));
-    draftTeams.push({ id: id, group: group, name: 'New Pair ' + n, players: [], level: 'Kaveri' });
+    draftTeams.push({ id: id, group: group, name: 'New Pair ' + n, players: [], level: TM.UNASSIGNED_ID });
     renderTeamsOnly();
   }
 
@@ -2375,6 +2599,90 @@
       r.ok ? (r.court.name + (on ? ' enabled' : ' disabled')) : null);
   }
 
+  /* ═══════════════ TEAM LEVEL CONFIGURATION ═══════════════ */
+  // The counts are read from the live team assignments (TM.levelCounts), never
+  // stored separately, so Settings can never disagree with the Teams screen.
+  function levelSum() { return TM.levelSummary(); }
+
+  function levelConfigBlocks() {
+    const counts = levelSum().counts;
+    let html = '';
+    TM.levels().forEach(function (l) {
+      const on = l.enabled !== false;
+      const count = counts[l.id] || 0;
+      const chip = '<span class="level-chip level-' + esc(TM.slugifyLevel(l.id)) + '">' + esc(l.name) + '</span>';
+      html += '<div class="court-cfg' + (on ? '' : ' inactive') + '">' +
+        '<div class="court-cfg-head">' + chip +
+        '<span class="pill">' + count + ' pair' + (count === 1 ? '' : 's') + '</span>' +
+        '<label class="switch"><input type="checkbox"' + (on ? ' checked' : '') + ' onchange="App.toggleLevelConfig(\'' + esc(l.id) + '\',this.checked)"><span class="slider"></span></label></div>' +
+        '<div class="field" style="margin-bottom:0;"><label>Level name</label><input type="text" value="' + esc(l.name) + '" maxlength="30" ' +
+        'onchange="App.renameLevel(\'' + esc(l.id) + '\',this.value)" onkeydown="if(event.key===\'Enter\'){this.blur();}"></div>' +
+        '<div class="btn-group" style="margin-top:8px;"><button class="btn btn-sm btn-danger" onclick="App.removeLevel(\'' + esc(l.id) + '\')">Remove level</button></div>' +
+        '</div>';
+    });
+    const un = counts[TM.UNASSIGNED_ID] || 0;
+    html += '<div class="court-cfg">' +
+      '<div class="court-cfg-head"><span class="level-chip level-unassigned">' + esc(TM.UNASSIGNED_NAME) + '</span>' +
+      '<span class="pill">' + un + ' pair' + (un === 1 ? '' : 's') + '</span><span class="muted" style="font-size:11.5px;">Always available</span></div>' +
+      '<div class="muted" style="font-size:11.5px;">Pairs without a level live here. Assign them a level on the Teams screen.</div>' +
+      '</div>';
+    return html;
+  }
+
+  function levelConfigMsg(r) {
+    const el = $('#level-msg');
+    if (!el) { if (r && !r.ok) toast(r.msg); return; }
+    el.className = 'cfg-msg ' + (r && r.ok ? 'ok' : 'err');
+    el.textContent = (r && r.msg) ? r.msg : (r && r.ok ? 'Level configuration saved.' : '');
+  }
+
+  function applyLevelCfg(r, okMsg, okToast) {
+    if (!r.ok) { toast(r.msg); render(); levelConfigMsg(r); return; }
+    if (okToast) toast(okToast);
+    render();
+    levelConfigMsg({ ok: true, msg: okMsg });
+  }
+
+  function levelsPayload(patch) {
+    return TM.levels().map(function (l) {
+      const p = patch[l.id] || {};
+      return { id: l.id, name: p.name != null ? p.name : l.name, enabled: p.enabled != null ? p.enabled : l.enabled !== false };
+    });
+  }
+
+  function renameLevel(id, name) {
+    const patch = {}; patch[id] = { name: String(name || '').trim() };
+    applyLevelCfg(TM.applyLevels(levelsPayload(patch)), 'Level renamed.', 'Level renamed');
+  }
+
+  function toggleLevelConfig(id, on) {
+    const patch = {}; patch[id] = { enabled: !!on };
+    const r = TM.applyLevels(levelsPayload(patch));
+    applyLevelCfg(r, r.ok ? ('Level ' + (on ? 'enabled.' : 'disabled — its pairs moved to Unassigned.')) : null,
+      r.ok ? ('Level ' + (on ? 'enabled' : 'disabled')) : null);
+  }
+
+  function addLevel() {
+    const input = $('#new-level-name');
+    const name = input ? String(input.value || '').trim() : '';
+    if (!name) { toast('Enter a level name first.'); return; }
+    const list = levelsPayload({});
+    list.push({ id: TM.slugifyLevel(name), name: name, enabled: true });
+    const r = TM.applyLevels(list);
+    applyLevelCfg(r, r.ok ? ('Added level “' + name + '”.') : null, r.ok ? ('Level “' + name + '” added') : null);
+  }
+
+  function removeLevel(id) {
+    const lv = TM.levelById(id);
+    if (!lv) return;
+    const count = TM.levelCounts()[id] || 0;
+    const list = levelsPayload({}).filter(function (l) { return l.id !== id; });
+    const r = TM.applyLevels(list);
+    applyLevelCfg(r,
+      r.ok ? ('Removed level “' + lv.name + '”.' + (count ? ' ' + count + ' pair' + (count === 1 ? '' : 's') + ' moved to Unassigned.' : '')) : null,
+      r.ok ? ('Level “' + lv.name + '” removed') : null);
+  }
+
   function viewSettings() {
     const st = TM.getState();
     let html = '<div class="page-title">Settings</div>';
@@ -2385,6 +2693,34 @@
       '<div class="field"><label>Tournament name</label><input type="text" value="' + esc(st.tournament.name) + '" onchange="App.setName(this.value)"></div>' +
       '<div class="muted" style="font-size:12px;">Created ' + esc(String(st.tournament.createdAt).slice(0, 10)) + ' · ' + st.teams.length + ' pairs · ' + TM.groupMatches().length + ' group matches</div>' +
       '</div>';
+
+    // Team levels: the levels themselves are configurable, and each count below is
+    // derived from live team assignments. There is deliberately no stored count.
+    const sum = levelSum();
+    html += '<div class="section-title">Team Level Configuration <span class="line"></span></div>';
+    html += '<div class="card">';
+    html += '<div class="tbl-wrap"><table class="standings-table"><thead><tr><th>Level</th><th class="num">Number of Pairs</th></tr></thead><tbody>';
+    TM.levels().forEach(function (l) {
+      html += '<tr><td><span class="level-chip level-' + esc(TM.slugifyLevel(l.id)) + '">' + esc(l.name) + '</span>' +
+        (l.enabled === false ? ' <span class="pill pill-closed">Disabled</span>' : '') + '</td>' +
+        '<td class="num-cell">' + (sum.counts[l.id] || 0) + '</td></tr>';
+    });
+    html += '<tr><td><span class="level-chip level-unassigned">' + esc(TM.UNASSIGNED_NAME) + '</span></td>' +
+      '<td class="num-cell">' + sum.unassigned + '</td></tr>';
+    html += '</tbody></table></div>';
+    html += '<div class="muted" style="font-size:12.5px;margin-top:4px;">Total pairs: ' + sum.total + ' · Assigned: ' + sum.assigned + ' · Unassigned: ' + sum.unassigned + '</div>';
+    if (sum.unassigned > 0) {
+      html += '<div class="alert alert-warn" style="margin-top:10px;">⚠️ ' + sum.unassigned + ' ' + (sum.unassigned === 1 ? 'pair is' : 'pairs are') +
+        ' currently unassigned to a level. The tournament still runs — assign a level on the Teams screen whenever you are ready.</div>';
+    }
+    html += '<div class="muted" style="font-size:12px;margin-top:10px;">Counts are calculated from the actual pair assignments on the Teams screen. Add, rename, disable or remove levels here; disabling or removing a level moves its pairs to ' + esc(TM.UNASSIGNED_NAME) + '. Levels are independent of Group A/B, so this never changes fixtures.</div>';
+    html += '</div>';
+
+    html += '<div class="card" style="margin-top:10px;">' + levelConfigBlocks();
+    html += '<div class="field" style="margin-top:10px;"><label>Add a level</label>' +
+      '<div style="display:flex;gap:8px;"><input type="text" id="new-level-name" maxlength="30" placeholder="e.g. Ganga" style="flex:1;">' +
+      '<button class="btn btn-sm" onclick="App.addLevel()">+ Add level</button></div></div>';
+    html += '<div class="cfg-msg" id="level-msg"></div></div>';
 
     html += '<div class="section-title">Court configuration <span class="line"></span></div>';
     html += '<div class="card">' +
@@ -2583,6 +2919,11 @@
     renameCourt: renameCourt,
     setCourtTime: setCourtTime,
     toggleCourtConfig: toggleCourtConfig,
+
+    addLevel: addLevel,
+    renameLevel: renameLevel,
+    removeLevel: removeLevel,
+    toggleLevelConfig: toggleLevelConfig,
     exportBackup: exportBackup,
     triggerImport: triggerImport,
     handleImport: handleImport,

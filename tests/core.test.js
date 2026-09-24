@@ -779,6 +779,251 @@ const NOON = new Date(2026, 0, 1, 6, 30, 0); // deterministic clock, inside 06:0
 })();
 
 
+/* ── 21. configurable team levels ──────────────────────── */
+(function () {
+  // 1. default levels are Tunga, Bhadra and Kaveri
+  TM.resetTournament();
+  let s = TM.getState();
+  const names = TM.levels().map(l => l.name);
+  eq('default levels are Tunga/Bhadra/Kaveri', names.join(','), 'Tunga,Bhadra,Kaveri');
+  eq('default level ids are slugs', TM.levels().map(l => l.id).join(','), 'tunga,bhadra,kaveri');
+  check('default levels enabled', TM.levels().every(l => l.enabled !== false));
+  eq('levels persisted on state.settings', Array.isArray(s.settings.levels), true);
+
+  // 2. default distribution: Tunga 3, Bhadra 3, Kaveri 3, Unassigned 1
+  let counts = TM.levelCounts();
+  eq('default Tunga count = 3', counts.tunga, 3);
+  eq('default Bhadra count = 3', counts.bhadra, 3);
+  eq('default Kaveri count = 3', counts.kaveri, 3);
+  eq('default Unassigned count = 1', counts[TM.UNASSIGNED_ID], 1);
+  const sum = TM.levelSummary();
+  eq('total pairs 10', sum.total, 10);
+  eq('assigned 9', sum.assigned, 9);
+  eq('unassigned 1', sum.unassigned, 1);
+  check('unassigned warning flag set', TM.hasUnassignedTeams());
+
+  // Anil & TBD is the unassigned pair and remains in Group B (level != group)
+  const anil = s.teams.find(t => t.id === 'B5');
+  eq('Anil & TBD default level is Unassigned', anil.level, TM.UNASSIGNED_ID);
+  eq('Anil & TBD stays in Group B', anil.group, 'B');
+  eq('Anil & TBD level label', TM.levelName(anil.level), 'Unassigned');
+
+  // 3. the Teams dropdown draws from the configured levels (one source of truth)
+  eq('selectable levels = configured + Unassigned',
+    TM.selectableLevels().map(l => l.name).join(','), 'Tunga,Bhadra,Kaveri,Unassigned');
+  check('selectable levels expose ids', TM.selectableLevels().every(l => typeof l.id === 'string' && l.id.length > 0));
+
+  // 4. changing a pair's level updates the displayed count
+  let teams = TM.getState().teams.map(t => ({ id: t.id, group: t.group, name: t.name, players: t.players, level: t.level }));
+  const a1 = teams.find(t => t.id === 'A1'); // Tunga
+  a1.level = 'bhadra';
+  let r = TM.applyTeams(teams);
+  check('level change accepted', r.ok, r.msg);
+  counts = TM.levelCounts();
+  eq('Tunga count drops to 2', counts.tunga, 2);
+  eq('Bhadra count rises to 4', counts.bhadra, 4);
+  eq('total still 10', TM.levelSummary().total, 10);
+
+  // 5. moving a team from Kaveri to Tunga updates both counts
+  TM.resetTournament();
+  teams = TM.getState().teams.map(t => ({ id: t.id, group: t.group, name: t.name, players: t.players, level: t.level }));
+  const a3 = teams.find(t => t.id === 'A3'); // Kaveri
+  a3.level = 'tunga';
+  r = TM.applyTeams(teams);
+  check('Kaveri -> Tunga accepted', r.ok, r.msg);
+  counts = TM.levelCounts();
+  eq('Kaveri count drops to 2', counts.kaveri, 2);
+  eq('Tunga count rises to 4', counts.tunga, 4);
+
+  // 6. moving a team to Unassigned works
+  TM.resetTournament();
+  teams = TM.getState().teams.map(t => ({ id: t.id, group: t.group, name: t.name, players: t.players, level: t.level }));
+  teams.find(t => t.id === 'A1').level = TM.UNASSIGNED_ID;
+  r = TM.applyTeams(teams);
+  check('move to Unassigned accepted', r.ok, r.msg);
+  const after = TM.getState().teams.find(t => t.id === 'A1');
+  eq('A1 now unassigned', after.level, TM.UNASSIGNED_ID);
+  eq('Unassigned count is 2', TM.levelCounts()[TM.UNASSIGNED_ID], 2);
+  check('assigned count is 8', TM.levelSummary().assigned === 8);
+
+  // 7. level changes do not regenerate group fixtures
+  TM.resetTournament();
+  const groupIds = TM.groupMatches().map(m => m.id).join(',');
+  const pairings = TM.groupMatches().map(m => m.teamA + '|' + m.teamB).join(',');
+  teams = TM.getState().teams.map(t => ({ id: t.id, group: t.group, name: t.name, players: t.players, level: t.level }));
+  teams.forEach(t => { t.level = 'bhadra'; });
+  r = TM.applyTeams(teams);
+  check('bulk level change accepted', r.ok, r.msg);
+  eq('fixtures not regenerated', r.regenerated, false);
+  eq('group match ids unchanged', TM.groupMatches().map(m => m.id).join(','), groupIds);
+  eq('group pairings unchanged', TM.groupMatches().map(m => m.teamA + '|' + m.teamB).join(','), pairings);
+  eq('still 20 group matches', TM.groupMatches().length, 20);
+
+  // 8. level changes do not change Group A/B
+  eq('Group A size unchanged', TM.getState().groups.A.length, 5);
+  eq('Group B size unchanged', TM.getState().groups.B.length, 5);
+  eq('A1 still group A', TM.getTeam('A1').group, 'A');
+  eq('B5 still group B', TM.getTeam('B5').group, 'B');
+  const groupOf = {}; TM.getState().teams.forEach(t => { groupOf[t.id] = t.group; });
+  eq('no team moved groups', Object.values(groupOf).filter(g => g !== 'A' && g !== 'B').length, 0);
+
+  // level change allowed even after results exist (level is fixture-independent)
+  TM.resetTournament();
+  TM.saveGroupScore('A-01', 21, 10);
+  teams = TM.getState().teams.map(t => ({ id: t.id, group: t.group, name: t.name, players: t.players, level: t.level }));
+  teams.find(t => t.id === 'A1').level = 'kaveri';
+  r = TM.applyTeams(teams);
+  check('level change allowed after results', r.ok, r.msg);
+  eq('A1 level applied after results', TM.getTeam('A1').level, 'kaveri');
+  eq('result preserved after level change', TM.getMatch('A-01').status, 'completed');
+
+  // 9. group changes keep the existing structural safeguards
+  teams = TM.getState().teams.map(t => ({ id: t.id, group: t.group, name: t.name, players: t.players, level: t.level }));
+  teams.find(t => t.id === 'A1').group = 'B';
+  r = TM.applyTeams(teams);
+  check('group move still blocked after results', !r.ok, r.msg);
+  check('block message still explains the lock', /after matches have started/i.test(r.msg), r.msg);
+
+  // 10. level assignments survive a localStorage reload
+  TM.resetTournament();
+  teams = TM.getState().teams.map(t => ({ id: t.id, group: t.group, name: t.name, players: t.players, level: t.level }));
+  teams.find(t => t.id === 'A2').level = 'kaveri';
+  TM.applyTeams(teams);
+  TM.save();
+  const beforeLevels = TM.getState().teams.map(t => t.id + ':' + t.level).join(',');
+  TM.load();
+  eq('level assignments survive reload', TM.getState().teams.map(t => t.id + ':' + t.level).join(','), beforeLevels);
+  eq('level config survives reload', TM.levels().map(l => l.id).join(','), 'tunga,bhadra,kaveri');
+
+  // 11. level assignments survive export/import
+  const dump = TM.exportJSON();
+  const imp = TM.importJSON(dump);
+  check('import with levels ok', imp.ok, imp.msg);
+  eq('level assignments survive export/import', TM.getState().teams.map(t => t.id + ':' + t.level).join(','), beforeLevels);
+  eq('level config survives export/import', TM.levels().map(l => l.id).join(','), 'tunga,bhadra,kaveri');
+
+  // 12. duplicate/invalid level ids are rejected
+  eq('duplicate level id rejected', TM.applyLevels([
+    { id: 'tunga', name: 'Tunga' }, { id: 'tunga', name: 'Other' }
+  ]).ok, false);
+  eq('duplicate level name rejected', TM.applyLevels([
+    { id: 'one', name: 'Same' }, { id: 'two', name: 'same' }
+  ]).ok, false);
+  eq('empty level id rejected', TM.applyLevels([{ id: '', name: 'X' }]).ok, false);
+  eq('empty level name rejected', TM.applyLevels([{ id: 'x', name: '' }]).ok, false);
+  eq('reserved Unassigned id rejected', TM.applyLevels([{ id: 'unassigned', name: 'Nope' }]).ok, false);
+  eq('reserved Unassigned name rejected', TM.applyLevels([{ id: 'x', name: 'Unassigned' }]).ok, false);
+  check('validateLevels reports a reason', /unique/i.test(TM.validateLevels([{ id: 'a', name: 'N' }, { id: 'a', name: 'M' }])));
+  eq('empty level list rejected', TM.applyLevels([]).ok, false);
+  eq('non-list level config rejected', TM.applyLevels('Tunga').ok, false);
+  // an unknown level on a pair is rejected rather than silently kept
+  TM.resetTournament();
+  teams = TM.getState().teams.map(t => ({ id: t.id, group: t.group, name: t.name, players: t.players, level: t.level }));
+  teams[0].level = 'not-a-level';
+  check('unknown pair level rejected', !TM.applyTeams(teams).ok);
+
+  // 13. two Vinay teams remain distinct
+  eq('RK & Vinay distinct from Praveen & Vinay',
+    (TM.getTeam('A3').name === 'RK & Vinay' && TM.getTeam('B3').name === 'Praveen & Vinay'), true);
+  teams = TM.getState().teams.map(t => ({ id: t.id, group: t.group, name: t.name, players: t.players, level: t.level }));
+  teams.find(t => t.id === 'A3').level = 'tunga';
+  teams.find(t => t.id === 'B3').level = 'kaveri';
+  TM.applyTeams(teams);
+  eq('A3 keeps its own level', TM.getTeam('A3').level, 'tunga');
+  eq('B3 keeps its own level', TM.getTeam('B3').level, 'kaveri');
+  eq('both Vinay pairs still exist',
+    TM.getState().teams.filter(t => t.players.includes('Vinay')).length, 2);
+
+  // extra: organizer can redistribute beyond the defaults (Tunga 4, Bhadra 3, Kaveri 3)
+  TM.resetTournament();
+  teams = TM.getState().teams.map(t => ({ id: t.id, group: t.group, name: t.name, players: t.players, level: t.level }));
+  teams.find(t => t.id === 'A3').level = 'tunga';
+  teams.find(t => t.id === 'B5').level = 'kaveri'; // assign the unassigned pair
+  r = TM.applyTeams(teams);
+  check('redistribution accepted', r.ok, r.msg);
+  counts = TM.levelCounts();
+  eq('Tunga 4 after redistribution', counts.tunga, 4);
+  eq('Kaveri 3 after redistribution', counts.kaveri, 3);
+  eq('Bhadra 3 after redistribution', counts.bhadra, 3);
+  eq('nothing unassigned after redistribution', TM.levelSummary().unassigned, 0);
+
+  // extra: adding a brand-new level makes it selectable and assignable
+  TM.resetTournament();
+  r = TM.applyLevels(TM.levels().map(l => ({ id: l.id, name: l.name, enabled: l.enabled })).concat([{ id: 'ganga', name: 'Ganga', enabled: true }]));
+  check('new level added', r.ok, r.msg);
+  check('new level is selectable', TM.selectableLevels().some(l => l.id === 'ganga'));
+  teams = TM.getState().teams.map(t => ({ id: t.id, group: t.group, name: t.name, players: t.players, level: t.level }));
+  teams.find(t => t.id === 'A1').level = 'ganga';
+  check('pair assigned to new level', TM.applyTeams(teams).ok);
+  eq('new level count = 1', TM.levelCounts().ganga, 1);
+
+  // extra: disabling/removing a level moves its pairs to Unassigned (never blocks)
+  TM.resetTournament();
+  const tungaTeams = TM.getState().teams.filter(t => t.level === 'tunga').map(t => t.id);
+  r = TM.applyLevels(TM.levels().map(l => l.id === 'tunga' ? { id: l.id, name: l.name, enabled: false } : { id: l.id, name: l.name, enabled: l.enabled }));
+  check('disable a level', r.ok, r.msg);
+  check('its pairs moved to Unassigned', tungaTeams.every(id => TM.getTeam(id).level === TM.UNASSIGNED_ID));
+  check('disabled level hidden from dropdown', !TM.selectableLevels().some(l => l.id === 'tunga'));
+  eq('fixtures still intact after level removal', TM.groupMatches().length, 20);
+
+  TM.resetTournament();
+})();
+
+/* ── 22. old backups with hard-coded levels still import ─ */
+(function () {
+  // A pre-configuration backup: no settings.levels, teams referencing level names.
+  const legacy = {
+    version: 5,
+    tournament: { name: 'Legacy', createdAt: '2026-01-01T00:00:00.000Z' },
+    teams: [
+      { id: 'A1', group: 'A', name: 'X & Y', players: ['X', 'Y'], level: 'Tunga' },
+      { id: 'A2', group: 'A', name: 'P & Q', players: ['P', 'Q'], level: 'Bhadra' },
+      { id: 'B1', group: 'B', name: 'R & S', players: ['R', 'S'], level: 'Kaveri' },
+      { id: 'B2', group: 'B', name: 'M & N', players: ['M', 'N'], level: 'Kaveri' }
+    ],
+    groups: { A: ['A1', 'A2'], B: ['B1', 'B2'] },
+    matches: []
+  };
+  const mig = TM.migrate(legacy);
+  eq('legacy backup seeds the default levels', mig.settings.levels.map(l => l.name).join(','), 'Tunga,Bhadra,Kaveri');
+  eq('legacy Tunga name maps to tunga id', mig.teams.find(t => t.id === 'A1').level, 'tunga');
+  eq('legacy Bhadra name maps to bhadra id', mig.teams.find(t => t.id === 'A2').level, 'bhadra');
+  eq('legacy Kaveri name maps to kaveri id', mig.teams.find(t => t.id === 'B1').level, 'kaveri');
+
+  // importing the legacy document through the real import path works too
+  const r = TM.importJSON(JSON.stringify(legacy));
+  check('legacy backup imports', r.ok, r.msg);
+  eq('imported Kaveri pair kept its level', TM.getTeam('B2').level, 'kaveri');
+
+  // a legacy list of bare level strings is normalized
+  const mig2 = TM.migrate({ teams: [{ id: 'A1', group: 'A', name: 'X & Y', players: ['X', 'Y'], level: 'Tunga' }], matches: [], settings: { levels: ['Tunga', 'Bhadra', 'Kaveri'] } });
+  eq('string level list normalized to ids', mig2.settings.levels.map(l => l.id).join(','), 'tunga,bhadra,kaveri');
+
+  // a team whose level no longer exists falls back to Unassigned (never breaks)
+  const mig3 = TM.migrate({ teams: [{ id: 'A1', group: 'A', name: 'X & Y', players: ['X', 'Y'], level: 'GhostLevel' }], matches: [] });
+  eq('unknown legacy level -> Unassigned', mig3.teams[0].level, 'unassigned');
+})();
+
+/* ── 23. one source of truth for level options ─────────── */
+(function () {
+  // The UI must not define its own level list. The only level names in the app are
+  // the DEFAULT_LEVELS seed and the two defaults documentations; all rendering reads
+  // TM.selectableLevels()/TM.levels(). Guard against a regression that re-introduces
+  // a hard-coded array in the UI layer.
+  const src = html;
+  check('UI reads configured levels from TM.selectableLevels', /TM\.selectableLevels\(\)/.test(src));
+  check('no legacy TM.LEVELS reference remains', !/TM\.LEVELS\b/.test(src));
+  check('no constant LEVELS array remains', !/const LEVELS = /.test(src));
+
+  // dropdown options equal the configured set in every case
+  TM.resetTournament();
+  const opts = TM.selectableLevels().map(l => l.name);
+  eq('dropdown options come from settings', opts.join(','), TM.levels().map(l => l.name).join(',') + ',Unassigned');
+  // and the settings screen count is the same derived count
+  eq('settings count = assignment count', TM.levelCounts().kaveri,
+    TM.getState().teams.filter(t => t.level === 'kaveri').length);
+})();
+
 /* ── report ─────────────────────────────────────────────── */
 console.log('\n' + (fail === 0 ? '✅ ALL TESTS PASSED' : '❌ FAILURES'));
 console.log('passed: ' + pass + '  failed: ' + fail);
