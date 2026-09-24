@@ -281,11 +281,17 @@ setting in Settings (off by default).
 Courts are **not** hard-coded. Settings → **Court configuration** lets the administrator change,
 at any time, including mid-tournament:
 
+- **Add court / Remove court** — append a new court with defaults, or remove a court slot
+  entirely. `1`–`8` courts.
 - **Number of courts** — `1` to `8`. A row appears for every court.
 - **Name** — e.g. rename `Court 1` to `Main Court`. The new name is used everywhere: Settings,
   Dashboard, Courts screen, match details and the scheduler.
 - **Available from / until** — per-court time windows using native time inputs.
 - **Enabled** — a per-court toggle.
+- **Mark closed / Reopen** — a transient per-session override.
+
+All court management lives in Settings. The **Courts** screen is an operational monitor only —
+it shows status and current/next matches and offers Start and Enter result, never configuration.
 
 The configuration is stored in tournament state, so it survives refresh, restart and
 backup/import:
@@ -306,7 +312,11 @@ Behaviour and safety rules:
   already in progress**. A match that starts at 07:59 on a court closing at 08:00 runs to
   completion; that court then simply stops taking new matches.
 - **Disabling** a court removes it from suggestions and shows it as *Disabled* on the Courts
-  screen. It never receives a new match — not even when the outside-hours override is on.
+  screen. It never receives a new match — not even when the outside-hours override is on. Its
+  configuration, matches and results are all preserved.
+- **Removing** a court deletes only the court slot. Matches, results, teams and groups are
+  untouched, and a completed match keeps the court id it actually played on. Removing a court
+  that currently has a match in progress is refused with a clear warning.
 - **Reducing the count** disables the surplus courts instead of deleting them, so their
   configuration and their completed-match history are preserved and they can be restored by
   raising the count again. **Increasing the count** appends new courts with sensible defaults.
@@ -654,7 +664,7 @@ deleted team ID — the fixtures are regenerated from the surviving pairs.
 |--------|---------|
 | **Dashboard** | Progress (Group Stage `n / <group matches>`, Overall `n / <total>` — both computed from the configuration), court cards, next matches, live standings, recent results |
 | **Matches** | All group and knockout matches with enter/edit/undo actions |
-| **Courts** | Rolling court queue — current match, next eligible match, start/complete, waiting list |
+| **Courts** | Operational monitor — current match, next eligible match, start/complete, waiting list (no configuration controls) |
 | **Standings** | One table per group with qualifying positions highlighted |
 | **Knockout** | The generated bracket (whatever rounds apply) plus the champion card |
 | **Teams** | Edit pair names, players, level (dropdown from the configured levels) and group; add/remove pairs |
@@ -749,14 +759,22 @@ a USB stick, …).
 The UI is mobile-first:
 
 - Full-width, large-touch-target buttons (44 px+).
-- Horizontally scrollable tab bar — no cramped icons.
+- **One compact header row on desktop** — branding, every navigation destination
+  (Dashboard, Matches, Courts, Standings, Knockout, Teams, Settings) and the Theme/Help
+  actions share a single flex row. No second navigation row and no duplicate Settings button.
+- On mobile the nav collapses to the primary screens (Dashboard, Matches, Courts) plus a
+  **More** menu holding Standings, Knockout, Teams and Settings.
 - Modals slide up from the bottom of the screen as sheets.
 - Large numeric score inputs with numeric keyboards (`inputmode="numeric"`).
-- Court cards stack on phones and go N-across on tablets/desktop.
+- Courts are an operational monitor: status/current/next per court, no configuration controls.
+- Match tiles use a slightly larger, more readable card — match id/stage, group/round, both
+  teams with a VS divider, then status/court/level and the score or action. They sit in a
+  responsive grid that is two columns on desktop and a single column on phones.
 - The bracket scrolls horizontally (intentional) so all four stages stay readable.
 - Standings tables scroll horizontally inside their card, so the page itself never overflows.
 
-Layouts are checked at 375 px, 390 px and 412 px widths.
+Layouts are checked at 375 px, 390 px and 412 px widths, and the desktop header is checked for
+single-row, no-horizontal-overflow behaviour.
 
 ---
 

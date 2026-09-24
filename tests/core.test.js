@@ -2842,6 +2842,85 @@ function assertRoundRobin(label, groupId, n) {
   eq('leader is standings top', leaders[0].team.id, standby[0].team.id);
 })();
 
+/* ── 60. add / remove court keep matches, results, teams and groups intact ── */
+(function () {
+  // Add appends with defaults and never touches existing configuration or history.
+  TM.resetTournament();
+  TM.updateCourt(1, { name: 'Main Court' });
+  const fixtureSig = () => TM.groupMatches().map(m => m.id + ':' + m.teamA + ':' + m.teamB).join(',');
+  const teamsSig = () => JSON.stringify(TM.getState().teams);
+  const groupsSig = () => JSON.stringify(TM.getState().groups);
+  const fixturesBefore = fixtureSig();
+  const teamsBefore = teamsSig();
+  const groupsBefore = groupsSig();
+
+  const add = TM.addCourt();
+  check('addCourt ok', add.ok, add.msg);
+  eq('court count grows', TM.getState().courts.length, 4);
+  eq('new court is enabled', add.court.enabled, true);
+  eq('new court has a unique id', new Set(TM.getState().courts.map(c => c.id)).size, 4);
+  eq('existing rename preserved', TM.courtName(1), 'Main Court');
+  eq('add left fixtures intact', fixtureSig(), fixturesBefore);
+  eq('add left teams intact', teamsSig(), teamsBefore);
+  eq('add left groups intact', groupsSig(), groupsBefore);
+
+  // Up to MAX_COURTS, then refused.
+  while (TM.getState().courts.length < TM.MAX_COURTS) TM.addCourt();
+  const over = TM.addCourt();
+  eq('add beyond the maximum refused', over.ok, false);
+  check('max-court refusal explained', /maximum/i.test(over.msg), over.msg);
+  eq('still at the maximum', TM.getState().courts.length, TM.MAX_COURTS);
+
+  // Remove deletes only the court slot; a completed match keeps its court history.
+  TM.resetTournament();
+  TM.getState().settings.allowOutsideAvailability = true;
+  const doneMatch = TM.groupMatches()[0];
+  const teamsBeforeRemove = teamsSig();
+  const groupsBeforeRemove = groupsSig();
+  TM.startMatch(doneMatch.id, 3);
+  TM.saveGroupScore(doneMatch.id, 21, 17);
+  const rm = TM.removeCourt(3);
+  check('removeCourt ok', rm.ok, rm.msg);
+  eq('court removed from config', TM.getState().courts.some(c => c.id === 3), false);
+  eq('completed match still exists', !!TM.getMatch(doneMatch.id), true);
+  eq('completed match keeps status', TM.getMatch(doneMatch.id).status, 'completed');
+  eq('completed match keeps its court id', TM.getMatch(doneMatch.id).court, 3);
+  eq('completed match keeps its score', TM.getMatch(doneMatch.id).scoreA, 21);
+  eq('removal left teams intact', teamsSig(), teamsBeforeRemove);
+  eq('removal left groups intact', groupsSig(), groupsBeforeRemove);
+
+  // A live match must block removal; after it finishes, removal is allowed.
+  TM.resetTournament();
+  TM.getState().settings.allowOutsideAvailability = true;
+  const liveMatch = TM.groupMatches()[0];
+  TM.startMatch(liveMatch.id, 2);
+  const busy = TM.removeCourt(2);
+  eq('cannot remove a busy court', busy.ok, false);
+  check('busy removal explained', /in progress/i.test(busy.msg), busy.msg);
+  eq('busy court still configured', TM.getState().courts.some(c => c.id === 2), true);
+  eq('live match untouched', TM.getMatch(liveMatch.id).status, 'in_progress');
+  eq('live match still on its court', TM.getMatch(liveMatch.id).court, 2);
+  TM.saveGroupScore(liveMatch.id, 21, 18);
+  const rm2 = TM.removeCourt(2);
+  check('remove allowed once free', rm2.ok, rm2.msg);
+  eq('late removal keeps the result', TM.getMatch(liveMatch.id).status, 'completed');
+
+  // The minimum is enforced and the last enabled court is never left disabled.
+  TM.resetTournament();
+  TM.removeCourt(2);
+  TM.removeCourt(3);
+  eq('one court remains', TM.getState().courts.length, 1);
+  eq('cannot remove the last court', TM.removeCourt(1).ok, false);
+  // Removing an enabled court when the rest are disabled re-enables one.
+  TM.resetTournament();
+  TM.setCourtEnabled(2, false);
+  TM.setCourtEnabled(3, false);
+  TM.removeCourt(1);
+  check('removal never leaves zero enabled courts', TM.enabledCourts().length >= 1, 'no enabled court left');
+  const survivors = TM.getState().courts.filter(c => c.enabled !== false);
+  check('a survivor was re-enabled', survivors.length >= 1, 'none enabled');
+})();
+
 /* ── report ─────────────────────────────────────────────── */
 console.log('\n' + (fail === 0 ? '✅ ALL TESTS PASSED' : '❌ FAILURES'));
 console.log('passed: ' + pass + '  failed: ' + fail);

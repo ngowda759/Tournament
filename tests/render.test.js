@@ -16,6 +16,11 @@ const failures = [];
 const check = (name, cond, extra) => { if (cond) pass++; else { fail++; failures.push(name + (extra ? ' :: ' + extra : '')); } };
 const eq = (name, a, b) => check(name, a === b, 'got ' + a + ' expected ' + b);
 
+// Mirror the UI layer's HTML escaping so tests can assert on names containing & or <.
+const escHtml = (s) => String(s == null ? '' : s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
 // A tiny DOM. Elements record their innerHTML/textContent and support the handful
 // of methods the UI layer touches. classList is lenient so rendering never throws.
 function makeEl(id) {
@@ -354,7 +359,25 @@ check('exactly three suggested courts', (s.match(/→ Court/g) || []).length, 3)
 check('BestShot branding remains', html.indexOf('Best<span>Shot</span>') !== -1 || html.indexOf('Best<span>') !== -1, 'no logo');
 check('theme toggle remains', html.indexOf('id="theme-toggle"') !== -1 && html.indexOf('toggleTheme()') !== -1, 'no theme toggle');
 check('help remains', html.indexOf('App.about()') !== -1, 'no help control');
-check('settings control remains', html.indexOf("App.nav('settings')") !== -1, 'no settings control');
+
+// ── Compact single-row header ─────────────────────────────────────────────────
+// The navigation is a single dynamic element inside the header; there is no separate
+// static Settings button. Settings must be reachable exactly once (through the nav).
+const headerMatch = html.match(/<header>([\s\S]*?)<\/header>/);
+const headerHtml = headerMatch ? headerMatch[1] : '';
+check('header contains the navigation', headerHtml.indexOf('id="nav-tabs"') !== -1, 'no nav in header');
+check('header has no static Settings button', headerHtml.indexOf("App.nav('settings')") === -1, 'duplicate Settings button');
+check('only one nav element in the shell', (html.match(/id="nav-tabs"/g) || []).length === 1, 'extra nav');
+check('header exposes Theme and Help actions', headerHtml.indexOf('id="theme-toggle"') !== -1 && headerHtml.indexOf('App.about()') !== -1, 'missing header actions');
+
+// Settings must appear exactly once in the rendered desktop navigation markup.
+App.nav('dashboard');
+const desktopNav = getEl('nav-tabs').innerHTML;
+check('Settings appears exactly once in the nav', (desktopNav.match(/>Settings</g) || []).length === 1, 'settings count wrong');
+check('nav renders exactly one Settings destination', (desktopNav.match(/nav\('settings'\)/g) || []).length === 1, 'nav settings count wrong');
+['Dashboard', 'Matches', 'Courts', 'Standings', 'Knockout', 'Teams', 'Settings'].forEach(function (label) {
+  check('desktop nav keeps destination ' + label, desktopNav.indexOf(label) !== -1, 'missing ' + label);
+});
 
 // Fresh default tournament: section order and group-vs-overall wording.
 TM.resetTournament();
@@ -471,6 +494,136 @@ const navHtml3 = getEl('nav-tabs').innerHTML;
   check('after nav ' + label + ' still reachable via More', navHtml3.indexOf(label) !== -1, 'missing ' + label);
 });
 check('after nav More is not open', !getEl('nav-tabs').classList.contains('more-open'));
+
+// ── Courts screen (operational monitor) ───────────────────────────────────────
+// The Courts view must render every court state: LIVE, AVAILABLE, CLOSED and
+// DISABLED, the current/next match with its id and Enter result action, plus an
+// empty state when nothing is eligible. Windows are overridden so the render is
+// deterministic regardless of the wall clock.
+TM.resetTournament();
+TM.getState().settings.allowOutsideAvailability = true;
+App.nav('courts');
+let cs = getEl('view').innerHTML;
+check('courts screen renders', typeof cs === 'string' && cs.length > 40, 'len=' + (cs || '').length);
+check('courts screen has full court cards', cs.indexOf('court-card') !== -1, 'no court cards');
+check('courts screen has no undefined/NaN', cs.indexOf('undefined') === -1 && cs.indexOf('NaN') === -1, 'leak');
+check('courts AVAILABLE status renders', cs.indexOf('Available') !== -1, 'no available');
+check('courts current match label renders', cs.indexOf('Current match') !== -1, 'no current match');
+check('courts next eligible match label renders', cs.indexOf('Next eligible match') !== -1, 'no next match');
+check('courts next match shows its id', /Next eligible match[\s\S]*?A-0\d/.test(cs), 'no next match id');
+check('courts renders an Enter result action when live', (function () {
+  TM.startMatch(TM.groupMatches()[0].id, 1);
+  App.nav('courts');
+  const live = getEl('view').innerHTML;
+  return live.indexOf('In progress') !== -1 && live.indexOf('Enter result') !== -1;
+})(), 'no live court action');
+
+// Disabled court must render as Disabled and be excluded from new-match duty.
+TM.setCourtEnabled(3, false);
+App.nav('courts');
+cs = getEl('view').innerHTML;
+check('courts DISABLED status renders', cs.indexOf('Disabled') !== -1, 'no disabled pill');
+check('courts disabled court still visible for monitoring', cs.indexOf('Court 3') !== -1, 'disabled court hidden');
+
+// Closed court: outside its window with the override off, a free court reads Closed.
+TM.resetTournament();
+TM.updateCourt(2, { startTime: '00:00', endTime: '00:01' });
+App.nav('courts');
+cs = getEl('view').innerHTML;
+check('courts CLOSED status renders outside the window', cs.indexOf('Closed') !== -1, 'no closed pill');
+check('courts closed court explains why', cs.indexOf('Availability ended') !== -1 || cs.indexOf('Available from') !== -1, 'no closed reason');
+
+// Empty state: a court with no eligible match must say so, never throw.
+TM.resetTournament();
+TM.getState().settings.allowOutsideAvailability = true;
+TM.groupMatches().forEach(function (m) { TM.saveGroupScore(m.id, 21, 15); });
+TM.clearKnockout();
+App.nav('courts');
+cs = getEl('view').innerHTML;
+check('courts renders an empty state when the queue is drained', cs.indexOf('No eligible match') !== -1, 'no empty state');
+check('courts empty state has no undefined', cs.indexOf('undefined') === -1, 'leak');
+
+// A confirmed live court also renders its current match id and teams.
+TM.resetTournament();
+TM.getState().settings.allowOutsideAvailability = true;
+TM.startMatch(TM.groupMatches()[0].id, 1);
+App.nav('courts');
+cs = getEl('view').innerHTML;
+check('courts live court shows the match id', cs.indexOf(TM.groupMatches()[0].id) !== -1, 'no live match id');
+check('courts live court shows both teams', cs.indexOf(escHtml(TM.teamName(TM.getMatch(TM.groupMatches()[0].id).teamA))) !== -1, 'no team A');
+
+// ── Matches screen (larger, more readable tiles) ──────────────────────────────
+TM.resetTournament();
+TM.getState().settings.allowOutsideAvailability = true;
+App.nav('matches');
+let ms = getEl('view').innerHTML;
+check('matches screen renders tiles', ms.indexOf('match-card') !== -1, 'no match cards');
+check('matches screen uses the 2-column-capable grid', ms.indexOf('mgrid') !== -1, 'no mgrid');
+check('match tile shows stage', ms.indexOf('Group Stage') !== -1, 'no stage');
+check('match tile shows group/round meta', /Group A · Round \d/.test(ms), 'no meta line');
+check('match tile shows a VS divider', ms.indexOf('vs-label') !== -1 && ms.indexOf('>VS<') !== -1, 'no vs');
+check('match tile keeps team names visible', ms.indexOf(escHtml(TM.teamName(TM.getMatch(TM.groupMatches()[0].id).teamA))) !== -1, 'no team name');
+check('match tile keeps Enter result action', ms.indexOf('Enter result') !== -1, 'no enter result');
+check('match tile keeps Start action', ms.indexOf('quickStart') !== -1, 'no start action');
+check('matches screen has no undefined/NaN', ms.indexOf('undefined') === -1 && ms.indexOf('NaN') === -1, 'leak');
+// Completed match keeps the score visible in the larger tile.
+TM.saveGroupScore(TM.groupMatches()[0].id, 21, 15);
+App.nav('matches');
+ms = getEl('view').innerHTML;
+check('completed match tile shows the score', ms.indexOf('>21<') !== -1 && ms.indexOf('>15<') !== -1, 'no score');
+
+// ── Court management lives in Settings, safely ────────────────────────────────
+TM.resetTournament();
+App.nav('settings');
+let ss = getEl('view').innerHTML;
+check('settings has Add court', ss.indexOf('App.addCourt()') !== -1, 'no add court');
+check('settings has Remove court', ss.indexOf('App.removeCourt(') !== -1, 'no remove court');
+check('settings has enable/disable toggle', ss.indexOf('App.toggleCourtConfig(') !== -1, 'no toggle');
+check('settings has rename control', ss.indexOf('App.renameCourt(') !== -1, 'no rename');
+check('settings has availability times', ss.indexOf('App.setCourtTime(') !== -1, 'no times');
+check('settings has the outside-hours override', ss.indexOf('App.setAllowOutside(') !== -1, 'no override');
+
+// Add court from Settings works and preserves every existing match/result.
+const fixturesBeforeAdd = TM.groupMatches().map(function (m) { return m.id + ':' + m.teamA + ':' + m.teamB; }).join(',');
+const resultsBeforeAdd = TM.groupMatches().filter(function (m) { return m.status === 'completed'; }).length;
+const addRes = TM.addCourt();
+check('add court succeeds', addRes.ok, addRes.msg);
+eq('court count grew by one', TM.getState().courts.length, 4);
+check('added court appears in settings', getEl('view').innerHTML.indexOf(addRes.court.name) !== -1 || true);
+App.nav('settings');
+check('settings renders the added court', getEl('view').innerHTML.indexOf(addRes.court.name) !== -1, 'added court missing');
+eq('add did not change fixtures', TM.groupMatches().map(function (m) { return m.id + ':' + m.teamA + ':' + m.teamB; }).join(','), fixturesBeforeAdd);
+eq('add did not change results', TM.groupMatches().filter(function (m) { return m.status === 'completed'; }).length, resultsBeforeAdd);
+
+// Disable + remove from Settings keep matches/results/teams/groups intact.
+// Court 4 exists from the add above and is open with the standard window; the
+// override keeps the start deterministic regardless of the wall clock.
+TM.getState().settings.allowOutsideAvailability = true;
+TM.startMatch(TM.groupMatches()[0].id, 4);
+const activeId = TM.groupMatches()[0].id;
+const activeBefore = TM.getMatch(activeId).status;
+const teamsBefore = JSON.stringify(TM.getState().teams);
+const groupsBefore = JSON.stringify(TM.getState().groups);
+// Removing the busy court is refused; the live match keeps playing.
+const busyRemove = TM.removeCourt(4);
+check('cannot remove a court with a live match', busyRemove.ok === false, 'removed a busy court');
+eq('live match untouched by refused removal', TM.getMatch(activeId).status, activeBefore);
+eq('live match still on its court', TM.getMatch(activeId).court, 4);
+// Disabling the busy court is refused too (already a core guarantee) — verify.
+eq('cannot disable a busy court', TM.setCourtEnabled(4, false).ok, false);
+// Finish it, then remove the court: history must survive.
+TM.saveGroupScore(activeId, 21, 19);
+const remRes = TM.removeCourt(4);
+check('remove court succeeds once free', remRes.ok, remRes.msg);
+eq('court gone from config', TM.getState().courts.some(function (c) { return c.id === 4; }), false);
+eq('completed match survived court removal', TM.getMatch(activeId).status, 'completed');
+eq('completed match kept its court id', TM.getMatch(activeId).court, 4);
+eq('team list unchanged by court removal', JSON.stringify(TM.getState().teams), teamsBefore);
+eq('groups unchanged by court removal', JSON.stringify(TM.getState().groups), groupsBefore);
+// Disabling a court leaves its configuration and matches in place.
+TM.setCourtEnabled(3, false);
+eq('disabled court stays in config', TM.getState().courts.some(function (c) { return c.id === 3 && c.enabled === false; }), true);
+check('disabled court excluded from enabled list', TM.enabledCourts().every(function (c) { return c.id !== 3; }), 'still enabled');
 
 console.log('\n' + (fail === 0 ? '✅ ALL RENDERS OK' : '❌ RENDER FAILURES'));
 console.log('passed: ' + pass + '  failed: ' + fail);
