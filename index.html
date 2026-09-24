@@ -427,12 +427,20 @@
 <div class="modal-overlay" id="about-modal">
   <div class="modal">
     <h3>How ShuttleDraw works</h3>
-    <p>A lightweight badminton doubles tournament manager for 2 groups, 10 pairs and 3 courts. Everything runs in the browser — no server, no accounts.</p>
+    <p>A configurable badminton doubles tournament manager. Run any number of pairs across one or more groups — the 10-pair, 2-group, 3-court setup is just the default example. Everything runs in the browser — no server, no accounts.</p>
+    <div class="about-card">
+      <h3>Tournament configuration</h3>
+      <ul class="rules-list">
+        <li>The pair list is the source of truth — add, remove, rename or move pairs at any time</li>
+        <li>The group split is read from actual membership (e.g. 4 + 4 or 5 + 4), never fixed</li>
+        <li>Fixtures are generated automatically from the real groups</li>
+      </ul>
+    </div>
     <div class="about-card">
       <h3>Group stage</h3>
       <ul class="rules-list">
         <li>Round-robin inside each group — every pair plays every other pair once</li>
-        <li>5 pairs per group → 10 matches per group → 20 group matches</li>
+        <li>A group of N pairs produces <b>N × (N − 1) / 2</b> matches (4 → 6, 5 → 10, 6 → 15)</li>
         <li>Single game to 21. Win = 2 points, loss = 0. No draws.</li>
         <li>Standard badminton scoring: win by 2 clear points, with a 30-point cap (21–20 → play on; 30–29 wins)</li>
         <li>Ranked by points, then point difference, then points scored</li>
@@ -442,7 +450,7 @@
       <h3>Rolling court scheduling</h3>
       <ul class="rules-list">
         <li>No fixed time slots — a court picks up the next eligible match the moment it frees up</li>
-        <li>Each court has its own editable availability window (Settings → Court configuration); defaults are Court 1 6:00 AM–9:00 AM, Courts 2 &amp; 3 6:00 AM–8:00 AM</li>
+        <li>Each court has its own editable availability window (Settings → Court configuration)</li>
         <li>A match already running always finishes, even past its court's closing time</li>
         <li>Teams waiting longest are prioritised; back-to-back matches are avoided where possible</li>
         <li>A team can never be on two courts at once</li>
@@ -451,8 +459,9 @@
     <div class="about-card">
       <h3>Knockout</h3>
       <ul class="rules-list">
-        <li>Top 4 from each group qualify automatically</li>
-        <li>QF (sets to 11) → SF (sets to 15) → Final (sets to 21), all best of 3</li>
+        <li>You choose how many pairs qualify from each group (Settings → Qualification)</li>
+        <li>The bracket is built from the number of qualifiers: 4 → SF + Final, 8 → QF onward, 16 → Round of 16 onward</li>
+        <li>Rounds are best of 3; if the qualifier count is not a power of two, byes advance teams without a fake match</li>
       </ul>
     </div>
     <div class="about-card" style="margin-bottom:1.25rem;">
@@ -479,16 +488,38 @@
   'use strict';
 
   const STORAGE_KEY = 'shuttledraw_v4';
-  const STATE_VERSION = 5;
-  const GROUPS = ['A', 'B'];
+  const STATE_VERSION = 6;
+
+  // Group ids are labels, not a fixed roster. The tournament defaults to A and B
+  // but nothing in the engine assumes only those two exist: every group is read
+  // from state.groups, and the fixtures are generated from actual membership.
+  const DEFAULT_GROUP_IDS = ['A', 'B'];
+
+  // Configuration limits (legitimate caps, not tournament counts).
+  const MIN_PAIRS = 2;
+  const MAX_PAIRS = 32;
+  const MIN_GROUP_SIZE = 2;
+  const MAX_GROUPS = 8;
 
   const GROUP_WIN_POINTS = 2;
   const GROUP_LOSS_POINTS = 0;
   const GROUP_TARGET = 21;
   const GROUP_CAP = 30;
 
-  const KNOCKOUT_TARGET = { qf: 11, sf: 15, final: 21 };
-  const KNOCKOUT_LABEL = { qf: 'Quarter-Final', sf: 'Semi-Final', final: 'Final' };
+  // Knockout round definitions. `size` is the number of teams in that round's
+  // bracket slice; match ids are `${key}-${n}`. Targets are per round.
+  const KNOCKOUT_ROUNDS = [
+    { key: 'r16', name: 'Round of 16', size: 16, target: 11, setsTo: 11 },
+    { key: 'qf', name: 'Quarter-Final', size: 8, target: 11 },
+    { key: 'sf', name: 'Semi-Final', size: 4, target: 15 },
+    { key: 'final', name: 'Final', size: 2, target: 21 }
+  ];
+  const KNOCKOUT_TARGET = { r16: 11, qf: 11, sf: 15, final: 21 };
+  const KNOCKOUT_LABEL = { r16: 'Round of 16', qf: 'Quarter-Final', sf: 'Semi-Final', final: 'Final' };
+  const KNOCKOUT_RANK = { r16: 0, qf: 1, sf: 2, final: 3 }; // r16 = earliest
+
+  // Default qualification: top 4 from each group (the default 10-pair example).
+  const DEFAULT_QUALIFY_PER_GROUP = 4;
 
   const DEFAULT_PAIRS = {
     A: [
@@ -518,9 +549,6 @@
     { id: 2, name: 'Court 2', startTime: '06:00', endTime: '08:00', enabled: true },
     { id: 3, name: 'Court 3', startTime: '06:00', endTime: '08:00', enabled: true }
   ];
-
-  const QUALIFY_COUNT = 4;
-  const KNOCKOUT_TOTAL = 7; // 4 QF + 2 SF + 1 final
 
   // Team levels are configuration, not constants: the organizer chooses which
   // levels exist in Settings → Team Level Configuration. UNASSIGNED is a fixed
@@ -558,7 +586,7 @@
     return Object.assign({
       id: '', stage: 'group', group: null, round: null,
       teamA: null, teamB: null,
-      court: null, status: 'queued',
+      court: null, status: 'queued', bye: false,
       startedAt: null, completedAt: null, completedSeq: 0,
       scoreA: null, scoreB: null,
       sets: null, setsA: 0, setsB: 0,
@@ -571,6 +599,16 @@
     return Object.assign({
       id: 0, name: '', startTime: '06:00', endTime: '08:00', enabled: true, closed: false
     }, o || {});
+  }
+
+  // A fresh court list of the requested size. Court 1 keeps the longer default
+  // window; the rest use the standard window. Used when creating a tournament config.
+  function defaultCourts(count) {
+    const list = DEFAULT_COURTS.map(function (c) { return newCourt(c); });
+    for (let i = list.length; i < count; i++) {
+      list.push(newCourt({ id: i + 1, name: 'Court ' + (i + 1), startTime: '06:00', endTime: '08:00', enabled: true }));
+    }
+    return list.slice(0, count).map(function (c, i) { return Object.assign(newCourt(c), { id: i + 1 }); });
   }
 
   // Accept both the current shape and the pre-v5 shape ({ start, end, closed }).
@@ -831,15 +869,21 @@
   let state = null;
 
   function newState() {
+    const groups = {};
+    DEFAULT_GROUP_IDS.forEach(function (g) { groups[g] = []; });
     return {
       version: STATE_VERSION,
       tournament: { name: 'Badminton Doubles Tournament', createdAt: new Date().toISOString() },
       teams: [],
-      groups: { A: [], B: [] },
+      groups: groups,
       matches: [],
       courts: DEFAULT_COURTS.map(function (c) { return newCourt(c); }),
       knockout: { generated: false, champion: null, qualifiers: null },
-      settings: { allowOutsideAvailability: false, levels: DEFAULT_LEVELS.map(function (l) { return newLevel(l); }) },
+      settings: {
+        allowOutsideAvailability: false,
+        levels: DEFAULT_LEVELS.map(function (l) { return newLevel(l); }),
+        qualification: { perGroup: DEFAULT_QUALIFY_PER_GROUP }
+      },
       meta: { seq: 0 },
       ui: { screen: 'dashboard' }
     };
@@ -849,10 +893,22 @@
     const base = newState();
     const s = Object.assign(base, raw || {});
     s.version = STATE_VERSION;
-    s.groups = Object.assign({ A: [], B: [] }, s.groups || {});
+    // Groups are a plain map of groupId -> [teamId]. Any group ids found in a
+    // stored document are preserved; an empty/missing map falls back to A and B.
+    const rawGroups = (s.groups && typeof s.groups === 'object' && !Array.isArray(s.groups)) ? s.groups : {};
+    const groups = {};
+    Object.keys(rawGroups).forEach(function (g) { groups[g] = Array.isArray(rawGroups[g]) ? rawGroups[g].slice() : []; });
+    if (!Object.keys(groups).length) DEFAULT_GROUP_IDS.forEach(function (g) { groups[g] = []; });
+    s.groups = groups;
     s.tournament = Object.assign(base.tournament, s.tournament || {});
     const rawSettings = s.settings || {};
     s.settings = Object.assign({ allowOutsideAvailability: false }, rawSettings);
+
+    // Qualification configuration. Old states had a fixed top-4 rule, so seed that
+    // as the default; the organizer can then change it in Settings → Qualification.
+    const rawQ = s.settings.qualification;
+    const perGroup = (rawQ && Number.isInteger(rawQ.perGroup)) ? rawQ.perGroup : DEFAULT_QUALIFY_PER_GROUP;
+    s.settings.qualification = { perGroup: perGroup > 0 ? perGroup : DEFAULT_QUALIFY_PER_GROUP };
     if (rawSettings.allowOutsideAvailability === undefined && rawSettings.enforceTimeWindows !== undefined) {
       s.settings.allowOutsideAvailability = !rawSettings.enforceTimeWindows; // pre-upgrade states
     }
@@ -911,8 +967,8 @@
     const idByName = {};
     DEFAULT_LEVELS.forEach(function (l) { idByName[String(l.name).toLowerCase()] = l.id; });
     const teams = [];
-    GROUPS.forEach(function (g) {
-      DEFAULT_PAIRS[g].forEach(function (p, i) {
+    DEFAULT_GROUP_IDS.forEach(function (g) {
+      (DEFAULT_PAIRS[g] || []).forEach(function (p, i) {
         const level = idByName[String(p.level).toLowerCase()] || UNASSIGNED_ID;
         teams.push({ id: g + (i + 1), group: g, name: p.name, players: p.players.slice(), level: level });
       });
@@ -920,9 +976,30 @@
     return teams;
   }
 
+  // The group ids a state actually uses: every key in state.groups, plus any group
+  // a team references. This is what makes the app group-count agnostic — nothing
+  // downstream assumes exactly A and B exist.
+  function groupIds(s) {
+    s = s || state;
+    const ids = [];
+    const seen = {};
+    const add = function (g) {
+      if (g == null || g === '') return;
+      if (seen[g]) return;
+      seen[g] = true; ids.push(g);
+    };
+    Object.keys(s.groups || {}).forEach(add);
+    (s.teams || []).forEach(function (t) { if (t) add(t.group); });
+    ids.sort();
+    return ids;
+  }
+
+  // Group-stage fixtures are derived from actual group membership. For N pairs in a
+  // group the round-robin produces exactly N × (N-1) / 2 matches, and the ids run
+  // A-01..A-N sequentially — never a fixed A-10/B-10.
   function buildGroupMatches(st) {
     const matches = [];
-    GROUPS.forEach(function (g) {
+    groupIds(st).forEach(function (g) {
       const ids = (st.groups[g] || []).slice();
       const rounds = roundRobin(ids);
       let n = 0;
@@ -940,14 +1017,109 @@
     return matches;
   }
 
+  function groupMatchCountFor(groupId) {
+    const n = (state.groups[groupId] || []).length;
+    return n * (n - 1) / 2;
+  }
+
+  function totalGroupMatchCount() {
+    let total = 0;
+    groupIds().forEach(function (g) { total += groupMatchCountFor(g); });
+    return total;
+  }
+
+  function groupDistribution() {
+    const out = {};
+    groupIds().forEach(function (g) { out[g] = (state.groups[g] || []).length; });
+    return out;
+  }
+
   function buildDefaultTournament() {
     state = newState();
     state.teams = defaultTeams();
-    GROUPS.forEach(function (g) {
+    DEFAULT_GROUP_IDS.forEach(function (g) {
       state.groups[g] = state.teams.filter(function (t) { return t.group === g; }).map(function (t) { return t.id; });
     });
     state.matches = buildGroupMatches(state);
     return state;
+  }
+
+  // Public entry point for building a tournament from configuration. Nothing here is
+  // tied to a fixed pair count: `pairs` is the source of truth, groups are derived,
+  // and the fixtures are generated for however many pairs each group actually has.
+  //
+  //   createTournament({
+  //     name: 'Yelahanka Badminton Tournament',
+  //     pairs: [ { name, players, level, group }, … ],
+  //     qualification: { perGroup },   // optional
+  //     courts: 3,                     // optional (number or full court list)
+  //     levels: [ { id, name, enabled } ] // optional
+  //   })
+  function createTournament(config) {
+    config = config || {};
+    const pairs = Array.isArray(config.pairs) ? config.pairs : (Array.isArray(config.teams) ? config.teams : []);
+    const groupCounters = {};
+    const teams = pairs.map(function (p) {
+      const group = (p && p.group) || 'A';
+      groupCounters[group] = (groupCounters[group] || 0) + 1;
+      return {
+        id: (p && p.id) || (group + groupCounters[group]),
+        group: group,
+        name: (p && p.name) || ('Pair ' + (groupCounters[group])),
+        players: (p && Array.isArray(p.players)) ? p.players.map(String) : [],
+        level: (p && p.level) || UNASSIGNED_ID
+      };
+    });
+
+    // Build the fresh state, then apply the teams through the same validated path used
+    // by the Teams screen so all the structural rules apply consistently.
+    const fresh = newState();
+    if (config.name) fresh.tournament.name = String(config.name);
+
+    if (config.levels) {
+      const levelErr = validateLevels(config.levels.map(function (l) { return newLevel(l); }));
+      if (levelErr) return { ok: false, msg: levelErr };
+      fresh.settings.levels = config.levels.map(function (l) { return newLevel(l); });
+    }
+    if (config.qualification != null) {
+      const per = Number(config.qualification && config.qualification.perGroup != null ? config.qualification.perGroup : config.qualification);
+      if (!isFinite(per) || per < 1) return { ok: false, msg: 'Qualifiers per group must be a positive number.' };
+      fresh.settings.qualification = { perGroup: Math.floor(per) };
+    }
+    const explicitQualification = config.qualification != null;
+
+    if (config.courts != null) {
+      if (Array.isArray(config.courts)) {
+        fresh.courts = config.courts.map(function (c) { return newCourt(c); });
+      } else {
+        const count = Number(config.courts);
+        if (!isFinite(count) || count < MIN_COURTS || count > MAX_COURTS) {
+          return { ok: false, msg: 'Number of courts must be between ' + MIN_COURTS + ' and ' + MAX_COURTS + '.' };
+        }
+        fresh.courts = defaultCourts(count);
+      }
+    }
+
+    const previous = state;
+    state = fresh;
+    const applied = applyTeams(teams, { regenerate: true });
+    if (!applied.ok) { state = previous; return applied; }
+
+    // A configured qualifier count must fit the largest group. For an auto-derived
+    // count (no explicit config) clamp it to the largest group instead of failing —
+    // there is no reason a 6-pair, 3-group tournament cannot be created.
+    const maxGroup = groupIds().reduce(function (m, g) { return Math.max(m, (state.groups[g] || []).length); }, 0);
+    const qualPer = state.settings.qualification.perGroup;
+    if (qualPer > maxGroup) {
+      if (explicitQualification) {
+        state = previous;
+        return { ok: false, msg: 'Top ' + qualPer + ' per group exceeds the largest group (' + maxGroup + ' pairs).' };
+      }
+      state.settings.qualification = { perGroup: Math.max(1, maxGroup) };
+    }
+
+    save();
+    return { ok: true, state: state };
   }
 
   /* ── accessors ───────────────────────────────────────── */
@@ -1185,6 +1357,7 @@
   function startMatch(matchId, courtId, now) {
     const m = getMatch(matchId);
     if (!m) return { ok: false, msg: 'Match not found.' };
+    if (m.bye) return { ok: false, msg: 'That is a bye — the pair advances automatically.' };
     if (m.status === 'in_progress') return { ok: false, msg: 'That match is already in progress.' };
     if (m.status === 'completed') return { ok: false, msg: 'That match is already completed. Reset it first to replay it.' };
     if (!m.teamA || !m.teamB) return { ok: false, msg: 'Both teams must be known before the match can start.' };
@@ -1310,6 +1483,7 @@
   function saveKnockoutScore(matchId, sets) {
     const m = getMatch(matchId);
     if (!m || m.stage === 'group') return { ok: false, msg: 'Knockout match not found.' };
+    if (m.bye) return { ok: false, msg: 'That is a bye — the pair advances automatically.' };
     const err = validateKnockoutSets(matchId, sets);
     if (err) return { ok: false, msg: err };
 
@@ -1362,10 +1536,11 @@
     if (m.stage === 'group') {
       const ko = state.matches.filter(function (x) { return x.stage !== 'group'; });
       if (ko.length) impact.push('The knockout bracket (' + ko.length + ' match' + (ko.length === 1 ? '' : 'es') + ') will be cleared.');
-    } else if (m.stage === 'qf') {
-      if (getMatch('SF-1')) impact.push('The semi-finals and final will be cleared.');
-    } else if (m.stage === 'sf') {
-      if (getMatch('F-1')) impact.push('The final will be cleared.');
+    } else {
+      // Knockout matches are generated dynamically; clearing any of them cascades
+      // into every later round, whatever those rounds happen to be.
+      const later = knockoutRoundsAfter(m.stage);
+      if (later.length) impact.push('The ' + later.map(function (r) { return KNOCKOUT_LABEL[r].toLowerCase(); }).join(', ') + ' will be cleared.');
     }
     return impact;
   }
@@ -1377,15 +1552,12 @@
     if (m.stage === 'group') {
       clearKnockout();
       resetOne(m);
-    } else if (m.stage === 'qf') {
-      removeMatches(function (x) { return x.stage === 'sf' || x.stage === 'final'; });
-      state.knockout.champion = null;
-      resetOne(m);
-    } else if (m.stage === 'sf') {
-      removeMatches(function (x) { return x.stage === 'final'; });
-      state.knockout.champion = null;
-      resetOne(m);
+    } else if (m.bye) {
+      return { ok: false, msg: 'A bye cannot be reset — it advances the pair automatically.' };
     } else {
+      // Remove every knockout match in a later round than the one being reset.
+      const rank = KNOCKOUT_RANK[m.stage];
+      removeMatches(function (x) { return x.stage !== 'group' && KNOCKOUT_RANK[x.stage] > rank; });
       resetOne(m);
       state.knockout.champion = null;
     }
@@ -1394,92 +1566,247 @@
   }
 
   /* ── knockout ────────────────────────────────────────── */
-  function generateQF() {
+  // The rounds strictly after `stage` in bracket order.
+  function knockoutRoundsAfter(stage) {
+    const rank = KNOCKOUT_RANK[stage];
+    return KNOCKOUT_ROUNDS.filter(function (r) { return r.size < (KNOCKOUT_ROUNDS.find(function (x) { return x.key === stage; }) || { size: 0 }).size; })
+      .map(function (r) { return r.key; });
+  }
+
+  // Rounds that make up the bracket for a given number of qualified teams. A
+  // 4-team bracket is SF + Final; 8 teams adds QF; 16 adds Round of 16. The last
+  // slice is the final, whose match is always F-1.
+  function bracketRounds(qualifiers) {
+    const rounds = [];
+    let slice = qualifiers;
+    while (slice >= 2) {
+      const def = KNOCKOUT_ROUNDS.find(function (r) { return r.size === Math.pow(2, Math.ceil(Math.log2(slice))); });
+      if (!def) break;
+      rounds.push(def);
+      if (slice <= 2) break;
+      slice = Math.ceil(slice / 2);
+    }
+    // Order from earliest round to the final.
+    rounds.sort(function (a, b) { return b.size - a.size; });
+    return rounds;
+  }
+
+  // Qualification rule: top {perGroup} from each group. A group smaller than the
+  // configured qualifier count qualifies all of its teams (there is no meaningful
+  // way to find extra teams), so a 4-pair group with "top 4" still yields 4.
+  function qualifiedPerGroup() {
+    const per = (state.settings.qualification && state.settings.qualification.perGroup) || DEFAULT_QUALIFY_PER_GROUP;
+    const out = {};
+    groupIds().forEach(function (g) {
+      out[g] = Math.min(per, (state.groups[g] || []).length);
+    });
+    return out;
+  }
+
+  function getQualifiedTeams() {
+    const per = qualifiedPerGroup();
+    const qualifiers = {};
+    groupIds().forEach(function (g) {
+      const rows = computeStandings(g);
+      qualifiers[g] = rows.slice(0, per[g]).map(function (r) { return r.team.id; });
+    });
+    return qualifiers;
+  }
+
+  // Stable match ids for a knockout round, keeping the familiar short forms used
+  // by existing tournaments: QF-1, SF-1, F-1 (and R16-1 for a round of 16).
+  const KNOCKOUT_PREFIX = { r16: 'R16', qf: 'QF', sf: 'SF', final: 'F' };
+  function knockoutMatchId(stage, n) {
+    return (KNOCKOUT_PREFIX[stage] || stage.toUpperCase()) + '-' + n;
+  }
+  function matchNumber(id) {
+    const i = String(id).lastIndexOf('-');
+    return i === -1 ? 0 : (parseInt(String(id).slice(i + 1), 10) || 0);
+  }
+  function byMatchNumber(a, b) { return matchNumber(a.id) - matchNumber(b.id); }
+
+  // Seed the knockout from real group standings. Seeding follows the classic
+  // bracket pattern: A1 v Bk, B1 v Ak, A2 v B(k-1), B2 v A(k-1), … For example with
+  // top 4 from two groups: A1 v B4, B1 v A4, A2 v B3, B2 v A3. With top 2 from two
+  // groups: A1 v B2, B1 v A2. This generalises across group counts and sizes.
+  // Returns a flat slot list in bracket order; a null slot is a bye.
+  function seedBracket(qualifiers) {
+    const gs = groupIds().filter(function (g) { return (qualifiers[g] || []).length; });
+    if (!gs.length) return [];
+    if (gs.length < 2) {
+      return (qualifiers[gs[0]] || []).slice();
+    }
+    const a = qualifiers[gs[0]] || [], b = qualifiers[gs[1]] || [];
+    const k = Math.max(a.length, b.length);
+    const slots = [];
+    for (let i = 0; i < k; i++) {
+      let x, y;
+      if (i % 2 === 0) {
+        const h = i / 2;
+        x = a[h] || null; y = b[k - 1 - h] || null;
+      } else {
+        const h = (i - 1) / 2;
+        x = b[h] || null; y = a[k - 1 - h] || null;
+      }
+      if (x === null && y === null) continue;
+      slots.push(x); slots.push(y);
+    }
+    return slots;
+  }
+
+  // Build the knockout bracket dynamically. Rounds are derived from the number of
+  // qualifiers; byes are inserted automatically when the count is not a power of
+  // two. A bye advances the team without creating a fake match.
+  function generateKnockout() {
     if (!groupStageComplete()) return { ok: false, msg: 'All group matches must be completed first.' };
-    if (getMatch('QF-1')) return { ok: false, msg: 'Quarter-finals are already generated.' };
-    const sa = computeStandings('A'), sb = computeStandings('B');
-    if (sa.length < QUALIFY_COUNT || sb.length < QUALIFY_COUNT) {
-      return { ok: false, msg: 'Each group needs at least ' + QUALIFY_COUNT + ' teams to build the quarter-finals.' };
+    if (state.matches.some(function (m) { return m.stage !== 'group'; })) {
+      return { ok: false, msg: 'The knockout bracket is already generated.' };
     }
-    const pairs = [
-      ['QF-1', sa[0].team.id, sb[3].team.id],
-      ['QF-2', sb[0].team.id, sa[3].team.id],
-      ['QF-3', sa[1].team.id, sb[2].team.id],
-      ['QF-4', sb[1].team.id, sa[2].team.id]
-    ];
-    pairs.forEach(function (p, i) {
-      state.matches.push(newMatch({
-        id: p[0], stage: 'qf', round: i + 1, teamA: p[1], teamB: p[2],
-        target: KNOCKOUT_TARGET.qf,
-        sets: [{ a: null, b: null }, { a: null, b: null }, { a: null, b: null }]
-      }));
-    });
+    const qualifiers = getQualifiedTeams();
+    let count = 0;
+    Object.keys(qualifiers).forEach(function (g) { count += qualifiers[g].length; });
+    if (count < 2) return { ok: false, msg: 'At least two pairs must qualify to build a knockout bracket.' };
+
+    const seeded = seedBracket(qualifiers);
+    const rounds = bracketRounds(seeded.length);
+    if (!rounds.length) return { ok: false, msg: 'Not enough qualifiers to build a bracket.' };
+
+    const first = rounds[0];
+    const size = first.size;
+    // Distribute byes across the first round so a bye team meets a first-round
+    // winner next, rather than two bye teams meeting each other. `byeAt[i]` marks
+    // the i-th first-round pairing as a bye. Distribution uses the standard
+    // "spread evenly" rule so byes never cluster at one end of the bracket.
+    const firstRoundMatches = size / 2;
+    const byes = size - seeded.length;
+    const byeAt = {};
+    if (byes > 0) {
+      let last = 0;
+      for (let i = 0; i < firstRoundMatches; i++) {
+        const frac = Math.floor(((i + 1) * byes) / firstRoundMatches);
+        if (frac > last) { byeAt[i] = true; last = frac; }
+      }
+    }
+    // Byes go to the highest-ranked qualifiers, interleaved across groups
+    // (A1, B1, A2, B2, …). The remaining teams keep their seeded bracket order so
+    // the group-vs-group balance of the draw is preserved.
+    const rankOrder = [];
+    const maxRank = Object.keys(qualifiers).reduce(function (m, g) { return Math.max(m, qualifiers[g].length); }, 0);
+    for (let r = 0; r < maxRank; r++) {
+      Object.keys(qualifiers).forEach(function (g) { if (qualifiers[g][r]) rankOrder.push(qualifiers[g][r]); });
+    }
+    const byeTeams = rankOrder.slice(0, byes);
+    const byeSet = {};
+    byeTeams.forEach(function (t) { byeSet[t] = true; });
+    const playing = seeded.filter(function (t) { return !byeSet[t]; });
+
+    const created = [];
+    let byeCursor = 0, playCursor = 0;
+    for (let i = 0; i < firstRoundMatches; i++) {
+      const id = knockoutMatchId(first.key, i + 1);
+      if (byeAt[i]) {
+        const slot = byeTeams[byeCursor++];
+        // A bye advances the team without a fake opponent. It is recorded as an
+        // already-decided match, never a made-up fixture.
+        created.push(newMatch({
+          id: id, stage: first.key, round: 1,
+          teamA: slot, teamB: null, target: first.target, bye: true,
+          status: 'completed', winner: slot, completedAt: new Date().toISOString(),
+          sets: [{ a: null, b: null }, { a: null, b: null }, { a: null, b: null }]
+        }));
+      } else {
+        const a = playing[playCursor++];
+        const b = playing[playCursor++] || null;
+        created.push(newMatch({
+          id: id, stage: first.key, round: 1,
+          teamA: a, teamB: b, target: first.target,
+          bye: !b,
+          sets: [{ a: null, b: null }, { a: null, b: null }, { a: null, b: null }]
+        }));
+      }
+    }
+    created.forEach(function (m) { state.matches.push(m); });
+
     state.knockout.generated = true;
-    state.knockout.qualifiers = {
-      A: sa.slice(0, QUALIFY_COUNT).map(function (r) { return r.team.id; }),
-      B: sb.slice(0, QUALIFY_COUNT).map(function (r) { return r.team.id; })
-    };
+    state.knockout.qualifiers = qualifiers;
     save();
+    // A bye advances automatically, which may immediately open the next round.
+    ensureKnockout();
     return { ok: true };
   }
 
-  function generateSF() {
-    if (getMatch('SF-1')) return { ok: false, msg: 'Semi-finals are already generated.' };
-    const qf = ['QF-1', 'QF-2', 'QF-3', 'QF-4'].map(getMatch);
-    if (qf.some(function (m) { return !m || m.status !== 'completed'; })) {
-      return { ok: false, msg: 'All quarter-finals must be completed first.' };
-    }
-    [['SF-1', qf[0].winner, qf[1].winner], ['SF-2', qf[2].winner, qf[3].winner]].forEach(function (p, i) {
-      state.matches.push(newMatch({
-        id: p[0], stage: 'sf', round: i + 1, teamA: p[1], teamB: p[2],
-        target: KNOCKOUT_TARGET.sf,
-        sets: [{ a: null, b: null }, { a: null, b: null }, { a: null, b: null }]
-      }));
+  // Resolve the teams feeding a match in round `def`, given everything already
+  // generated. Returns null when the round cannot be built yet.
+  function populatedPairing(prevRoundKey, targetKey) {
+    const prev = state.matches.filter(function (m) { return m.stage === prevRoundKey; }).sort(byMatchNumber);
+    if (!prev.length) return null;
+    const winners = prev.map(function (m) {
+      if (m.bye && m.teamA) return m.teamA;
+      if (m.bye && m.teamB) return m.teamB;
+      return m.status === 'completed' ? m.winner : null;
     });
-    save();
-    return { ok: true };
-  }
-
-  function generateFinal() {
-    if (getMatch('F-1')) return { ok: false, msg: 'The final is already generated.' };
-    const sf = ['SF-1', 'SF-2'].map(getMatch);
-    if (sf.some(function (m) { return !m || m.status !== 'completed'; })) {
-      return { ok: false, msg: 'All semi-finals must be completed first.' };
+    // Only generate once every feeder has a result (or a bye).
+    if (winners.some(function (w) { return !w; })) return null;
+    const def = KNOCKOUT_ROUNDS.find(function (r) { return r.key === targetKey; });
+    const out = [];
+    for (let i = 0; i < winners.length; i += 2) {
+      out.push({ id: knockoutMatchId(targetKey, (i / 2) + 1), a: winners[i], b: winners[i + 1] || null });
     }
-    state.matches.push(newMatch({
-      id: 'F-1', stage: 'final', round: 1, teamA: sf[0].winner, teamB: sf[1].winner,
-      target: KNOCKOUT_TARGET.final,
-      sets: [{ a: null, b: null }, { a: null, b: null }, { a: null, b: null }]
-    }));
-    save();
-    return { ok: true };
+    return { def: def, pairs: out };
   }
 
+  // Build whatever knockout round is next once its feeders are decided. This is
+  // idempotent and safe to call after any result is saved. When the group stage is
+  // complete it also creates the first bracket round automatically.
   function ensureKnockout() {
     if (!groupStageComplete()) return;
-    const qf = ['QF-1', 'QF-2', 'QF-3', 'QF-4'].map(getMatch);
-    if (!getMatch('QF-1')) { generateQF(); return; }
-    if (qf.every(function (m) { return m && m.status === 'completed'; }) && !getMatch('SF-1')) { generateSF(); return; }
-    const sf = ['SF-1', 'SF-2'].map(getMatch);
-    if (sf.every(function (m) { return m && m.status === 'completed'; }) && !getMatch('F-1')) { generateFinal(); return; }
+    if (!state.matches.some(function (m) { return m.stage !== 'group'; })) {
+      generateKnockout();
+      return;
+    }
+    // Walk rounds from earliest to latest, building the next one when possible.
+    const ordered = KNOCKOUT_ROUNDS.slice().sort(function (a, b) { return b.size - a.size; });
+    for (let i = 0; i < ordered.length - 1; i++) {
+      const cur = ordered[i], next = ordered[i + 1];
+      const existing = state.matches.filter(function (m) { return m.stage === next.key; });
+      if (existing.length) continue;
+      if (!state.matches.some(function (m) { return m.stage === cur.key; })) continue;
+      const built = populatedPairing(cur.key, next.key);
+      if (!built) continue;
+      built.pairs.forEach(function (p, idx) {
+        state.matches.push(newMatch({
+          id: p.id, stage: next.key, round: idx + 1, teamA: p.a, teamB: p.b,
+          target: built.def.target, bye: (!p.a || !p.b),
+          sets: [{ a: null, b: null }, { a: null, b: null }, { a: null, b: null }]
+        }));
+      });
+    }
     const f = getMatch('F-1');
     state.knockout.champion = (f && f.status === 'completed') ? f.winner : null;
-    state.knockout.generated = !!getMatch('QF-1');
+    state.knockout.generated = state.matches.some(function (m) { return m.stage !== 'group'; });
     save();
   }
 
   function knockoutInfo() {
-    const qf = ['QF-1', 'QF-2', 'QF-3', 'QF-4'].map(getMatch).filter(Boolean);
-    const sf = ['SF-1', 'SF-2'].map(getMatch).filter(Boolean);
+    const koMatches = state.matches.filter(function (m) { return m.stage !== 'group'; });
     const f = getMatch('F-1');
-    const qfDone = qf.length === 4 && qf.every(function (m) { return m.status === 'completed'; });
-    const sfDone = sf.length === 2 && sf.every(function (m) { return m.status === 'completed'; });
     const finalDone = !!f && f.status === 'completed';
+    const rounds = {};
+    KNOCKOUT_ROUNDS.forEach(function (r) {
+      const list = koMatches.filter(function (m) { return m.stage === r.key; });
+      rounds[r.key] = {
+        key: r.key, name: r.name, exists: list.length > 0, count: list.length,
+        done: list.length > 0 && list.every(function (m) { return m.status === 'completed' || m.bye; })
+      };
+    });
     return {
       groupDone: groupStageComplete(),
-      qfExists: qf.length > 0, qfDone: qfDone,
-      sfExists: sf.length > 0, sfDone: sfDone,
-      finalExists: !!f, finalDone: finalDone,
+      exists: koMatches.length > 0,
+      rounds: rounds,
+      // Convenience flags for the common QF/SF/Final layout (also used by the UI).
+      qfExists: rounds.qf.exists, qfDone: rounds.qf.done,
+      sfExists: rounds.sf.exists, sfDone: rounds.sf.done,
+      finalExists: rounds.final.exists, finalDone: rounds.final.done,
       champion: finalDone ? f.winner : null,
       qualifiers: state.knockout.qualifiers
     };
@@ -1490,15 +1817,31 @@
     const gm = groupMatches();
     const gTotal = gm.length;
     const gDone = gm.filter(function (m) { return m.status === 'completed'; }).length;
-    const kDone = state.matches.filter(function (m) { return m.stage !== 'group' && m.status === 'completed'; }).length;
-    const overallTotal = gTotal + KNOCKOUT_TOTAL;
+    // Byes are bracket slots, not matches, so they never count toward progress.
+    const koReal = state.matches.filter(function (m) { return m.stage !== 'group' && !m.bye; });
+    const kDone = koReal.filter(function (m) { return m.status === 'completed'; }).length;
+
+    // Predict the knockout size from the qualification configuration even before
+    // the bracket exists, so the overall total is right from match one.
+    const predictedKo = predictedKnockoutTotal();
+    const kTotal = Math.max(predictedKo, koReal.length);
+    const overallTotal = gTotal + kTotal;
     const overallDone = gDone + kDone;
     return {
       groupDone: gDone, groupTotal: gTotal,
-      knockoutDone: kDone, knockoutTotal: KNOCKOUT_TOTAL,
+      knockoutDone: kDone, knockoutTotal: kTotal,
       overallDone: overallDone, overallTotal: overallTotal,
       pct: overallTotal ? Math.round((overallDone / overallTotal) * 100) : 0
     };
+  }
+
+  // Single-elimination with q qualifiers is always q − 1 matches, whether or not
+  // byes are needed.
+  function predictedKnockoutTotal() {
+    let count = 0;
+    const per = qualifiedPerGroup();
+    groupIds().forEach(function (g) { count += per[g]; });
+    return count < 2 ? 0 : count - 1;
   }
 
   function recentResults(limit) {
@@ -1510,35 +1853,61 @@
 
   /* ── team editing ────────────────────────────────────── */
   function groupSignature(s) {
+    const ids = groupIds(s);
     const sig = {};
-    GROUPS.forEach(function (g) { sig[g] = (s.groups[g] || []).slice().sort().join(','); });
+    ids.forEach(function (g) { sig[g] = (s.groups[g] || []).slice().sort().join(','); });
     return JSON.stringify(sig);
   }
 
-  function applyTeams(newTeams) {
-    if (!Array.isArray(newTeams) || newTeams.length < 4) return { ok: false, msg: 'At least two teams per group are required.' };
+  // Validate a proposed team list without mutating live state. Teams are the
+  // source of truth: the number of pairs, their names, players, levels and group
+  // assignments all come from here. Groups are dynamic — any group ids present are
+  // accepted as long as every team names a real group and each used group has at
+  // least two pairs (a one-pair group cannot play a round-robin).
+  function validateTeams(newTeams) {
+    if (!Array.isArray(newTeams)) return { ok: false, msg: 'Teams must be a list.' };
+    if (newTeams.length < MIN_PAIRS) return { ok: false, msg: 'A tournament needs at least ' + MIN_PAIRS + ' pairs.' };
+    if (newTeams.length > MAX_PAIRS) return { ok: false, msg: 'A tournament supports at most ' + MAX_PAIRS + ' pairs.' };
     const ids = {};
     for (let i = 0; i < newTeams.length; i++) {
       const t = newTeams[i];
-      if (!t.id) return { ok: false, msg: 'Every team needs an ID.' };
-      if (ids[t.id]) return { ok: false, msg: 'Duplicate team ID: ' + t.id };
+      if (!t || t.id == null || String(t.id).trim() === '') return { ok: false, msg: 'Every pair needs an ID.' };
+      if (ids[t.id]) return { ok: false, msg: 'Duplicate pair ID: ' + t.id };
       ids[t.id] = true;
-      if (!t.name || !String(t.name).trim()) return { ok: false, msg: 'Every team needs a name.' };
-      if (GROUPS.indexOf(t.group) === -1) return { ok: false, msg: 'Every team must belong to Group A or B.' };
+      if (!t.name || !String(t.name).trim()) return { ok: false, msg: 'Every pair needs a name.' };
+      if (t.group == null || String(t.group).trim() === '') return { ok: false, msg: 'Every pair must be assigned to a group.' };
     }
-    for (let i = 0; i < GROUPS.length; i++) {
-      const g = GROUPS[i];
-      if (newTeams.filter(function (t) { return t.group === g; }).length < 2) {
-        return { ok: false, msg: 'Group ' + g + ' needs at least 2 teams.' };
+    // Group sizes are computed from actual membership, never assumed.
+    const counts = {};
+    newTeams.forEach(function (t) { counts[t.group] = (counts[t.group] || 0) + 1; });
+    const usedGroups = Object.keys(counts);
+    if (usedGroups.length > MAX_GROUPS) return { ok: false, msg: 'A tournament supports at most ' + MAX_GROUPS + ' groups.' };
+    for (let i = 0; i < usedGroups.length; i++) {
+      const g = usedGroups[i];
+      if (counts[g] < MIN_GROUP_SIZE) {
+        return { ok: false, msg: 'Group ' + g + ' needs at least ' + MIN_GROUP_SIZE + ' pairs (it has ' + counts[g] + ').' };
       }
-      const names = newTeams.filter(function (t) { return t.group === g; }).map(function (t) { return t.name.trim(); });
-      if (new Set(names).size !== names.length) return { ok: false, msg: 'Team names in Group ' + g + ' must be unique.' };
+      const names = newTeams.filter(function (t) { return t.group === g; }).map(function (t) { return String(t.name).trim(); });
+      if (new Set(names).size !== names.length) return { ok: false, msg: 'Pair names in Group ' + g + ' must be unique.' };
     }
+    return { ok: true };
+  }
+
+  const TEAM_LOCK_MSG = 'Changing the number of pairs or group membership will regenerate fixtures. Existing results will be lost.';
+
+  // Apply a full team list. `opts.regenerate` must be true to allow a structural
+  // change (a change to groups/sizes/ids) once results exist; without it the call
+  // reports `needsConfirmation` and changes nothing. Renames, player edits and
+  // level changes are never structural and are always applied.
+  function applyTeams(newTeams, opts) {
+    opts = opts || {};
+    const valid = validateTeams(newTeams);
+    if (!valid.ok) return valid;
 
     // A level must be one of the configured levels or the reserved Unassigned
     // sentinel; anything else is rejected rather than silently coerced. Level is
     // independent of group, so this never affects fixtures.
-    const validLevels = { };
+    const validLevels = {};
     selectableLevels().forEach(function (l) { validLevels[l.id] = true; });
     for (let i = 0; i < newTeams.length; i++) {
       const lv = newTeams[i].level || UNASSIGNED_ID;
@@ -1548,19 +1917,22 @@
     const next = copy(state);
     next.teams = newTeams.map(function (t) {
       return {
-        id: t.id, group: t.group, name: String(t.name).trim(),
+        id: String(t.id), group: t.group, name: String(t.name).trim(),
         players: Array.isArray(t.players) ? t.players.map(function (p) { return String(p); }) : [],
         level: t.level || UNASSIGNED_ID
       };
     });
-    GROUPS.forEach(function (g) {
-      next.groups[g] = next.teams.filter(function (t) { return t.group === g; }).map(function (t) { return t.id; });
-    });
+    // Rebuild the group map purely from actual membership. A group with no pairs is
+    // dropped rather than left as an empty shell, so an 8-pair tournament is exactly
+    // an 8-pair tournament — never 10 pairs with two placeholders.
+    const nextGroups = {};
+    next.teams.forEach(function (t) { nextGroups[t.group] = nextGroups[t.group] || []; nextGroups[t.group].push(t.id); });
+    next.groups = nextGroups;
 
     const structureChanged = groupSignature(next) !== groupSignature(state);
     const hasResults = state.matches.some(function (m) { return m.status !== 'queued'; });
-    if (structureChanged && hasResults) {
-      return { ok: false, msg: 'Cannot change teams or groups after matches have started. Reset the tournament first.' };
+    if (structureChanged && hasResults && !opts.regenerate) {
+      return { ok: false, needsConfirmation: true, msg: TEAM_LOCK_MSG };
     }
 
     state.teams = next.teams;
@@ -1572,6 +1944,100 @@
     }
     save();
     return { ok: true, regenerated: structureChanged };
+  }
+
+  // ── granular team API (operates directly on live state) ──
+  function nextTeamId(group) {
+    const g = group || 'A';
+    let n = 1, id;
+    do { id = g + n; n++; } while (getTeam(id));
+    return id;
+  }
+
+  function addTeam(team) {
+    const t = Object.assign({ id: nextTeamId(team && team.group), group: 'A', name: 'New Pair', players: [], level: UNASSIGNED_ID }, team || {});
+    if (!t.id) t.id = nextTeamId(t.group);
+    const teams = state.teams.map(copy);
+    teams.push(t);
+    return applyTeams(teams, arguments[1]);
+  }
+
+  function removeTeam(teamId, opts) {
+    const teams = state.teams.filter(function (t) { return t.id !== teamId; }).map(copy);
+    if (teams.length === state.teams.length) return { ok: false, msg: 'Pair not found.' };
+    return applyTeams(teams, opts);
+  }
+
+  function updateTeam(teamId, changes, opts) {
+    let found = false;
+    const teams = state.teams.map(function (t) {
+      if (t.id !== teamId) return copy(t);
+      found = true;
+      return Object.assign(copy(t), changes || {});
+    });
+    if (!found) return { ok: false, msg: 'Pair not found.' };
+    return applyTeams(teams, opts);
+  }
+
+  function assignTeamToGroup(teamId, groupId, opts) {
+    return updateTeam(teamId, { group: groupId }, opts);
+  }
+
+  // Explicit, safe fixture regeneration. Returns enough detail for the
+  // confirmation dialog (current vs new counts) before it is committed.
+  function regeneratePlan() {
+    const existingResults = state.matches.filter(function (m) { return m.status === 'completed' || m.status === 'in_progress'; }).length;
+    const newMatches = buildGroupMatches(state);
+    return {
+      pairs: state.teams.length,
+      distribution: groupDistribution(),
+      existingFixtures: groupMatches().length,
+      newFixtures: newMatches.length,
+      existingResults: existingResults
+    };
+  }
+
+  function regenerateFixtures() {
+    state.matches = buildGroupMatches(state);
+    clearKnockout();
+    state.meta.seq = 0;
+    save();
+    return { ok: true, fixtures: state.matches.length };
+  }
+
+  function generateGroupFixtures() {
+    state.matches = buildGroupMatches(state);
+    clearKnockout();
+    state.meta.seq = 0;
+    save();
+    return { ok: true, matches: state.matches.length };
+  }
+
+  function getGroupMatchCount(groupId) { return groupMatchCountFor(groupId); }
+  function getTotalGroupMatchCount() { return totalGroupMatchCount(); }
+  function getTotalMatchCount() {
+    const p = progress();
+    return { group: p.groupTotal, knockout: p.knockoutTotal, total: p.overallTotal };
+  }
+
+  // Update the qualification configuration. Re-validates that the chosen format
+  // produces a valid bracket; a structural change after the bracket exists is
+  // refused (the organizer must regenerate fixtures first).
+  function setQualification(perGroup) {
+    const n = Number(perGroup);
+    if (!Number.isInteger(n) || n < 1) return { ok: false, msg: 'Qualifiers per group must be a whole number of at least 1.' };
+    const maxGroup = Math.max.apply(null, groupIds().map(function (g) { return (state.groups[g] || []).length; }).concat([0]));
+    if (maxGroup && n > maxGroup) return { ok: false, msg: 'Qualifiers per group cannot exceed the largest group size (' + maxGroup + ').' };
+    if (state.matches.some(function (m) { return m.stage !== 'group'; })) {
+      return { ok: false, msg: 'Changing qualification after the knockout bracket exists would invalidate it. Reset the bracket first.' };
+    }
+    state.settings.qualification.perGroup = n;
+    save();
+    return { ok: true, qualification: state.settings.qualification };
+  }
+
+  function getQualification() {
+    return { perGroup: (state.settings.qualification && state.settings.qualification.perGroup) || DEFAULT_QUALIFY_PER_GROUP };
   }
 
   /* ── time helpers ────────────────────────────────────── */
@@ -1593,7 +2059,7 @@
     if (!state && !load()) buildDefaultTournament();
     if (!state.teams.length) {
       state.teams = defaultTeams();
-      GROUPS.forEach(function (g) {
+      DEFAULT_GROUP_IDS.forEach(function (g) {
         state.groups[g] = state.teams.filter(function (t) { return t.group === g; }).map(function (t) { return t.id; });
       });
       if (!state.matches.length) state.matches = buildGroupMatches(state);
@@ -1605,7 +2071,7 @@
   global.TM = {
     STORAGE_KEY: STORAGE_KEY,
     STATE_VERSION: STATE_VERSION,
-    GROUPS: GROUPS,
+    DEFAULT_GROUP_IDS: DEFAULT_GROUP_IDS,
     UNASSIGNED_ID: UNASSIGNED_ID,
     UNASSIGNED_NAME: UNASSIGNED_NAME,
     DEFAULT_LEVELS: DEFAULT_LEVELS,
@@ -1613,10 +2079,15 @@
     GROUP_LOSS_POINTS: GROUP_LOSS_POINTS,
     GROUP_TARGET: GROUP_TARGET,
     GROUP_CAP: GROUP_CAP,
+    KNOCKOUT_ROUNDS: KNOCKOUT_ROUNDS,
     KNOCKOUT_TARGET: KNOCKOUT_TARGET,
     KNOCKOUT_LABEL: KNOCKOUT_LABEL,
-    KNOCKOUT_TOTAL: KNOCKOUT_TOTAL,
-    QUALIFY_COUNT: QUALIFY_COUNT,
+    KNOCKOUT_RANK: KNOCKOUT_RANK,
+    MIN_PAIRS: MIN_PAIRS,
+    MAX_PAIRS: MAX_PAIRS,
+    MIN_GROUP_SIZE: MIN_GROUP_SIZE,
+    MAX_GROUPS: MAX_GROUPS,
+    DEFAULT_QUALIFY_PER_GROUP: DEFAULT_QUALIFY_PER_GROUP,
     MAX_COURTS: MAX_COURTS,
     MIN_COURTS: MIN_COURTS,
     DEFAULT_COURTS: DEFAULT_COURTS,
@@ -1631,6 +2102,15 @@
     buildDefaultTournament: buildDefaultTournament,
     buildGroupMatches: buildGroupMatches,
     roundRobin: roundRobin,
+
+    groupIds: groupIds,
+    groupDistribution: groupDistribution,
+    groupMatchCountFor: groupMatchCountFor,
+    totalGroupMatchCount: totalGroupMatchCount,
+    getGroupMatchCount: getGroupMatchCount,
+    getTotalGroupMatchCount: getTotalGroupMatchCount,
+    getTotalMatchCount: getTotalMatchCount,
+    generateGroupFixtures: generateGroupFixtures,
 
     newCourt: newCourt,
     normalizeCourt: normalizeCourt,
@@ -1668,6 +2148,8 @@
     exportJSON: exportJSON,
     importJSON: importJSON,
     resetTournament: resetTournament,
+    createTournament: createTournament,
+    buildDefaultTournament: buildDefaultTournament,
     clearKnockout: clearKnockout,
 
     computeStandings: computeStandings,
@@ -1694,16 +2176,28 @@
     resetMatch: resetMatch,
     resetImpact: resetImpact,
 
-    generateQF: generateQF,
-    generateSF: generateSF,
-    generateFinal: generateFinal,
+    bracketRounds: bracketRounds,
+    getQualifiedTeams: getQualifiedTeams,
+    generateKnockout: generateKnockout,
     ensureKnockout: ensureKnockout,
     knockoutInfo: knockoutInfo,
+    predictedKnockoutTotal: predictedKnockoutTotal,
+    getQualification: getQualification,
+    setQualification: setQualification,
+    qualifiedPerGroup: qualifiedPerGroup,
 
     progress: progress,
     recentResults: recentResults,
 
+    validateTeams: validateTeams,
     applyTeams: applyTeams,
+    addTeam: addTeam,
+    removeTeam: removeTeam,
+    updateTeam: updateTeam,
+    assignTeamToGroup: assignTeamToGroup,
+    nextTeamId: nextTeamId,
+    regeneratePlan: regeneratePlan,
+    regenerateFixtures: regenerateFixtures,
 
     hhmmToMinutes: hhmmToMinutes,
     formatTime: formatTime
@@ -1835,6 +2329,7 @@
   }
 
   function canStart(m, courtId) {
+    if (m.bye) return { ok: false, msg: 'Bye — advances automatically' };
     if (m.status !== 'queued') return { ok: false, msg: '' };
     if (!m.teamA || !m.teamB) return { ok: false, msg: 'Teams not decided yet' };
     const busy = TM.busyTeamIds();
@@ -2040,8 +2535,9 @@
     html += nextMatchesBlock();
 
     html += '<div class="section-title">Live standings <span class="line"></span></div>';
-    html += '<div class="card"><div class="muted" style="margin-bottom:8px;">Group A</div>' + standingsTable('A', true) + '</div>';
-    html += '<div class="card"><div class="muted" style="margin-bottom:8px;">Group B</div>' + standingsTable('B', true) + '</div>';
+    TM.groupIds().forEach(function (g) {
+      html += '<div class="card"><div class="muted" style="margin-bottom:8px;">Group ' + esc(g) + '</div>' + standingsTable(g, true) + '</div>';
+    });
 
     html += '<div class="section-title">Recent results <span class="line"></span></div>';
     html += recentBlock();
@@ -2209,6 +2705,13 @@
 
   /* ═══════════════ MATCHES ═══════════════ */
   function matchRow(m, from) {
+    if (m.bye) {
+      return '<div class="mrow done">' +
+        '<div class="mrow-top"><span class="mrow-id">' + esc(m.id) + '</span>' + stagePill(m) + '<span class="pill pill-done">Bye</span></div>' +
+        '<div class="court-teams">' + teamsBlockScored(m) + '</div>' +
+        '<div class="mrow-actions"><span class="muted" style="font-size:11.5px;">Advances automatically</span></div>' +
+        '</div>';
+    }
     const cls = m.status === 'completed' ? ' done' : (m.status === 'in_progress' ? ' live' : '');
     let actions = '';
     if (m.status === 'queued') {
@@ -2238,6 +2741,7 @@
     const busy = TM.busyTeamIds();
     const m = TM.getMatch(matchId);
     if (!m) return;
+    if (m.bye) { toast('That is a bye — the pair advances automatically.'); return; }
     if (busy[m.teamA] || busy[m.teamB]) { toast('One of those teams is already on court.'); return; }
     const free = st.courts.find(function (c) { return TM.courtAcceptsNewMatch(c) && !TM.matchOnCourt(c.id); });
     if (!free) { toast('No free court right now.'); return; }
@@ -2246,13 +2750,15 @@
 
   function viewMatches() {
     const st = TM.getState();
+    const total = TM.totalGroupMatchCount();
     let html = '<div class="page-title">Matches</div>';
-    html += '<div class="page-subtitle">Group stage round-robin (20 matches) plus the knockout bracket. Tap a match to enter or correct its result.</div>';
+    html += '<div class="page-subtitle">Group stage round-robin (' + total + ' matches) plus the knockout bracket. Tap a match to enter or correct its result.</div>';
 
-    TM.GROUPS.forEach(function (g) {
+    TM.groupIds().forEach(function (g) {
       const gm = TM.groupMatches(g);
+      if (!gm.length) return;
       const done = gm.filter(function (m) { return m.status === 'completed'; }).length;
-      html += '<div class="section-title">Group ' + g + ' · ' + done + '/' + gm.length + '<span class="line"></span></div>';
+      html += '<div class="section-title">Group ' + esc(g) + ' · ' + done + '/' + gm.length + '<span class="line"></span></div>';
       const byRound = {};
       gm.forEach(function (m) { (byRound[m.round] = byRound[m.round] || []).push(m); });
       Object.keys(byRound).sort(function (a, b) { return a - b; }).forEach(function (r) {
@@ -2262,9 +2768,9 @@
     });
 
     const ko = st.matches.filter(function (m) { return m.stage !== 'group'; });
-    html += '<div class="section-title">Knockout · ' + ko.filter(function (m) { return m.status === 'completed'; }).length + '/' + TM.KNOCKOUT_TOTAL + '<span class="line"></span></div>';
+    html += '<div class="section-title">Knockout · ' + ko.filter(function (m) { return m.status === 'completed'; }).length + '/' + TM.progress().knockoutTotal + '<span class="line"></span></div>';
     if (!ko.length) {
-      html += '<div class="card"><div class="alert alert-info" style="margin:0;">Quarter-finals are generated automatically once all 20 group matches are complete.</div></div>';
+      html += '<div class="card"><div class="alert alert-info" style="margin:0;">The knockout bracket is generated automatically once all ' + total + ' group matches are complete.</div></div>';
     } else {
       html += '<div class="mgrid">' + ko.map(function (m) { return matchRow(m, 'matches'); }).join('') + '</div>';
     }
@@ -2274,14 +2780,14 @@
   /* ═══════════════ STANDINGS ═══════════════ */
   function standingsTable(group, compact) {
     const rows = TM.computeStandings(group);
-    const groupComplete = TM.groupStageComplete();
-    const info = TM.knockoutInfo();
+    const per = TM.qualifiedPerGroup();
+    const qualifySlots = per[group] != null ? per[group] : 0;
     let html = '<div class="tbl-wrap"><table class="standings-table"><thead><tr>' +
       '<th>#</th><th>Team</th><th class="num">P</th><th class="num">W</th><th class="num">L</th>' +
       '<th class="num">Pts</th><th class="num">PF</th><th class="num">PA</th><th class="num">Diff</th>' +
       '</tr></thead><tbody>';
     rows.forEach(function (r, i) {
-      const qualifies = (groupComplete || (info.qualifiers && info.qualifiers[group])) && i < TM.QUALIFY_COUNT;
+      const qualifies = i < qualifySlots;
       html += '<tr class="' + (qualifies ? 'qualify' : '') + '">' +
         '<td class="rank-cell ' + (i < 3 && !compact ? 'rank-' + (i + 1) : '') + '">' + (i + 1) + '</td>' +
         '<td><div class="team-cell-name">' + esc(r.team.name) + '</div>' + teamSub(r.team) + '</td>' +
@@ -2299,14 +2805,31 @@
   }
 
   function viewStandings() {
+    const q = TM.getQualification();
+    const ko = TM.bracketRounds(tmQualifierCount());
+    const rounds = ko.map(function (r) { return r.name; }).join(' → ');
     let html = '<div class="page-title">Standings</div>';
     html += '<div class="page-subtitle">Win = ' + TM.GROUP_WIN_POINTS + ' points · Loss = ' + TM.GROUP_LOSS_POINTS + ' · No draws. Tie-break: points → point difference → points scored.</div>';
-    TM.GROUPS.forEach(function (g) {
-      html += '<div class="section-title">Group ' + g + '<span class="line"></span></div>';
+    TM.groupIds().forEach(function (g) {
+      html += '<div class="section-title">Group ' + esc(g) + '<span class="line"></span></div>';
       html += standingsTable(g, false);
     });
-    html += '<div class="card" style="margin-top:14px;"><div class="muted">Top ' + TM.QUALIFY_COUNT + ' pairs from each group qualify for the quarter-finals. Highlighted rows are currently in a qualifying position.</div></div>';
+    html += '<div class="card" style="margin-top:14px;"><div class="muted">Top ' + q.perGroup + ' pairs from each group qualify' +
+      (rounds ? ' (' + rounds + ')' : '') + '. Highlighted rows are currently in a qualifying position.</div></div>';
     return html;
+  }
+
+  function tmQualifierCount() {
+    let count = 0;
+    const per = TM.qualifiedPerGroup();
+    TM.groupIds().forEach(function (g) { count += per[g]; });
+    return count;
+  }
+
+  // Numeric suffix of a match id, so R16-2 orders before R16-10.
+  function matchNum(id) {
+    const i = String(id).lastIndexOf('-');
+    return i === -1 ? 0 : (parseInt(String(id).slice(i + 1), 10) || 0);
   }
 
   /* ═══════════════ KNOCKOUT ═══════════════ */
@@ -2327,65 +2850,68 @@
     }
     return '<div class="bcard' + cls + '">' +
       '<div class="bcard-id"><span>' + esc(m.id) + '</span><span>' + esc(TM.KNOCKOUT_LABEL[m.stage]) + '</span></div>' +
-      row('A') + row('B') +
-      '<div class="mrow-actions">' +
-        (m.status === 'completed'
-          ? '<button class="btn btn-xs" onclick="App.openScore(\'' + m.id + '\',\'knockout\')">✎ Edit</button><button class="btn btn-xs" onclick="App.askReset(\'' + m.id + '\',\'knockout\')">↺</button>'
-          : (m.status === 'in_progress'
-            ? '<button class="btn btn-xs btn-primary" onclick="App.openScore(\'' + m.id + '\',\'knockout\')">Enter result</button>'
-            : (tA && tB
-              ? '<button class="btn btn-xs btn-primary" onclick="App.quickStart(\'' + m.id + '\')">Start</button><button class="btn btn-xs" onclick="App.openScore(\'' + m.id + '\',\'knockout\')">Result</button>'
-              : '<span class="muted" style="font-size:11px;">Awaiting teams</span>'))) +
-      '</div></div>';
+      (m.bye
+        ? row('A') + row('B') + '<div class="bcard-bye muted" style="font-size:11px;padding:0 10px 8px;">Bye — advances automatically</div>'
+        : row('A') + row('B') +
+          '<div class="mrow-actions">' +
+            (m.status === 'completed'
+              ? '<button class="btn btn-xs" onclick="App.openScore(\'' + m.id + '\',\'knockout\')">✎ Edit</button><button class="btn btn-xs" onclick="App.askReset(\'' + m.id + '\',\'knockout\')">↺</button>'
+              : (m.status === 'in_progress'
+                ? '<button class="btn btn-xs btn-primary" onclick="App.openScore(\'' + m.id + '\',\'knockout\')">Enter result</button>'
+                : (tA && tB
+                  ? '<button class="btn btn-xs btn-primary" onclick="App.quickStart(\'' + m.id + '\')">Start</button><button class="btn btn-xs" onclick="App.openScore(\'' + m.id + '\',\'knockout\')">Result</button>'
+                  : '<span class="muted" style="font-size:11px;">Awaiting teams</span>'))) +
+          '</div>') +
+      '</div>';
   }
 
   function viewKnockout() {
     const st = TM.getState();
     const info = TM.knockoutInfo();
     const g = function (id) { return TM.getMatch(id); };
+    const qualifiers = TM.getQualifiedTeams();
+    const count = tmQualifierCount();
+    const rounds = TM.bracketRounds(count);
+    const roundNames = rounds.map(function (r) { return r.name + ' (sets to ' + r.target + ')'; }).join(' → ');
 
     let html = '<div class="page-title">Knockout</div>';
-    html += '<div class="page-subtitle">QF (sets to 11) → SF (sets to 15) → Final (sets to 21). Bracket fills in automatically from group standings.</div>';
+    html += '<div class="page-subtitle">' + (roundNames || 'Knockout') + '. Best of 3, generated automatically from the group standings.</div>';
 
     if (!info.groupDone) {
       const p = TM.progress();
-      html += '<div class="alert alert-warn">Group stage is ' + p.groupDone + '/' + p.groupTotal + ' complete. Quarter-finals unlock automatically when every group match is finished.</div>';
+      html += '<div class="alert alert-warn">Group stage is ' + p.groupDone + '/' + p.groupTotal + ' complete. The bracket unlocks automatically when every group match is finished.</div>';
     }
 
-    if (!info.qfExists) {
+    if (!info.exists) {
       if (info.groupDone) {
-        html += '<div class="card"><div class="alert alert-success" style="margin-bottom:12px;">Group stage complete — the quarter-final bracket is ready.</div>' +
-          '<button class="btn btn-primary btn-block" onclick="App.generateQF()">Generate quarter-finals</button></div>';
+        html += '<div class="card"><div class="alert alert-success" style="margin-bottom:12px;">Group stage complete — ' +
+          count + ' pairs qualify. The bracket is ready.</div>' +
+          '<button class="btn btn-primary btn-block" onclick="App.generateKnockout()">Generate knockout bracket</button></div>';
       }
       return html;
     }
 
-    // Qualifiers summary
+    // Qualifiers summary — one column per group, whatever groups exist.
     if (info.qualifiers) {
-      html += '<div class="card" style="margin-bottom:14px;"><div class="muted" style="margin-bottom:6px;">Qualified</div>' +
+      html += '<div class="card" style="margin-bottom:14px;"><div class="muted" style="margin-bottom:6px;">Qualified (' + count + ')</div>' +
         '<div style="font-size:13px;line-height:1.9;">' +
-        TM.GROUPS.map(function (grp) {
-          return info.qualifiers[grp].map(function (id, i) {
-            return '<div><span class="pill">' + grp + (i + 1) + '</span> ' + esc(TM.teamName(id)) + '</div>';
+        Object.keys(info.qualifiers).map(function (grp) {
+          return (info.qualifiers[grp] || []).map(function (id, i) {
+            return '<div><span class="pill">' + esc(grp) + (i + 1) + '</span> ' + esc(TM.teamName(id)) + '</div>';
           }).join('');
         }).join('') + '</div></div>';
     }
 
     html += '<div class="bracket-scroll"><div class="bracket">';
-    html += '<div class="bracket-col"><div class="bracket-col-head">Quarter-Finals</div><div class="bracket-col-body">' +
-      ['QF-1', 'QF-2', 'QF-3', 'QF-4'].map(function (id) { return bracketCard(g(id)); }).join('') + '</div></div>';
-    html += '<div class="bracket-col"><div class="bracket-col-head">Semi-Finals</div><div class="bracket-col-body">' +
-      (info.sfExists
-        ? ['SF-1', 'SF-2'].map(function (id) { return bracketCard(g(id)); }).join('')
-        : '<div class="card"><div class="muted">Unlock after all four quarter-finals finish.</div>' +
-          (info.qfDone ? '<button class="btn btn-primary btn-sm btn-block" style="margin-top:8px;" onclick="App.generateSF()">Generate semi-finals</button>' : '') + '</div>') +
-      '</div></div>';
-    html += '<div class="bracket-col"><div class="bracket-col-head">Final</div><div class="bracket-col-body">' +
-      (info.finalExists
-        ? bracketCard(g('F-1'))
-        : '<div class="card"><div class="muted">Unlock after both semi-finals finish.</div>' +
-          (info.sfDone ? '<button class="btn btn-primary btn-sm btn-block" style="margin-top:8px;" onclick="App.generateFinal()">Generate final</button>' : '') + '</div>') +
-      '</div></div>';
+    rounds.forEach(function (def) {
+      const list = st.matches.filter(function (m) { return m.stage === def.key; })
+        .slice().sort(function (a, b) { return matchNum(a.id) - matchNum(b.id); });
+      html += '<div class="bracket-col"><div class="bracket-col-head">' + esc(def.name) + '</div><div class="bracket-col-body">' +
+        (list.length
+          ? list.map(function (m) { return bracketCard(m); }).join('')
+          : '<div class="card"><div class="muted">Unlock after the previous round finishes.</div></div>') +
+        '</div></div>';
+    });
     html += '<div class="bracket-col"><div class="bracket-col-head">Champion</div><div class="bracket-col-body">' +
       (info.champion
         ? '<div class="champion-card"><div class="crown">🏆</div><div class="ctitle">Champion</div><div class="cname">' + esc(TM.teamName(info.champion)) + '</div></div>'
@@ -2399,24 +2925,14 @@
     return html;
   }
 
-  function generateQF() {
-    const r = TM.generateQF();
+  function generateKnockout() {
+    const r = TM.generateKnockout();
     if (!r.ok) { toast(r.msg); return; }
-    toast('Quarter-finals generated');
+    toast('Knockout bracket generated');
     render();
   }
-  function generateSF() {
-    const r = TM.generateSF();
-    if (!r.ok) { toast(r.msg); return; }
-    toast('Semi-finals generated');
-    render();
-  }
-  function generateFinal() {
-    const r = TM.generateFinal();
-    if (!r.ok) { toast(r.msg); return; }
-    toast('Final generated');
-    render();
-  }
+
+  function generateQF() { return generateKnockout(); }
 
   /* ═══════════════ TEAMS ═══════════════ */
   let draftTeams = null;
@@ -2426,9 +2942,10 @@
     if (!draftTeams) draftTeams = st.teams.map(function (t) { return JSON.parse(JSON.stringify(t)); });
 
     const locked = st.matches.some(function (m) { return m.status !== 'queued'; });
+    const groups = draftGroups();
     let html = '<div class="page-title">Teams</div>';
-    html += '<div class="page-subtitle">Edit pair names, their players, their level and their group. Renaming a pair or changing its level keeps results intact; changing groups or IDs regenerates the group fixtures.</div>';
-    if (locked) html += '<div class="alert alert-warn">Matches have already started. You can still rename pairs, edit player names and change a pair\'s level, but groups and pair IDs are locked until you reset.</div>';
+    html += '<div class="page-subtitle">Add, edit or remove pairs and assign each to a group and a level. The pair list is the source of truth — the number of pairs drives the fixtures.</div>';
+    if (locked) html += '<div class="alert alert-warn">Matches have already started. Renaming pairs, editing players and changing levels always apply. Adding, removing or moving pairs regenerates the fixtures and will lose existing results — you will be asked to confirm.</div>';
 
     // Level is independent of group, so an unassigned pair never blocks the
     // tournament — it is reported so the organizer can assign it when ready.
@@ -2438,12 +2955,17 @@
         ' currently unassigned to a level. This does not affect fixtures — assign a level whenever you are ready.</div>';
     }
 
-    TM.GROUPS.forEach(function (grp) {
+    groups.forEach(function (grp) {
       const list = draftTeams.filter(function (t) { return t.group === grp; });
-      html += '<div class="section-title">Group ' + grp + ' (' + list.length + ') <span class="line"></span>' +
-        '<button class="btn btn-xs" onclick="App.addTeam(\'' + grp + '\')">+ Add</button></div>';
-      html += '<div class="team-edit">' + list.map(function (t) { return teamEditRow(t, locked); }).join('') + '</div>';
+      html += '<div class="section-title">Group ' + esc(grp) + ' (' + list.length + ') <span class="line"></span>' +
+        '<button class="btn btn-xs" onclick="App.addTeam(\'' + esc(grp) + '\')">+ Add pair</button></div>';
+      html += '<div class="team-edit">' + (list.length ? list.map(function (t) { return teamEditRow(t, groups); }).join('') : '<div class="muted" style="padding:8px 0;">No pairs in this group yet.</div>') + '</div>';
     });
+
+    html += '<div class="btn-group" style="margin-top:6px;">' +
+      '<button class="btn btn-sm" onclick="App.addGroup()">+ Add group</button>' +
+      '<button class="btn btn-sm" onclick="App.removeGroup()">− Remove last group</button>' +
+      '</div>';
 
     html += '<div class="btn-group">' +
       '<button class="btn btn-primary" onclick="App.saveTeams()">Save teams</button>' +
@@ -2452,29 +2974,52 @@
     return html;
   }
 
-  function teamEditRow(t, locked) {
-    // The level dropdown is populated from the configured levels (the one source of
-    // truth), not from any in-line list. Level is never locked by match results
-    // because it does not affect fixtures.
+  // Every group that exists in the draft: configured groups plus any group a draft
+  // pair references, plus the default pair (A/B).
+  function draftGroups() {
+    const ids = [];
+    const seen = {};
+    const add = function (g) { if (g == null || g === '') return; if (seen[g]) return; seen[g] = true; ids.push(g); };
+    TM.groupIds().forEach(add);
+    (draftTeams || []).forEach(function (t) { add(t.group); });
+    ids.sort();
+    return ids;
+  }
+
+  function nextGroupId() {
+    const used = draftGroups();
+    let i = 0;
+    while (used.indexOf(String.fromCharCode(65 + i)) !== -1) i++;
+    return String.fromCharCode(65 + i);
+  }
+
+  function teamEditRow(t, groups) {
+    // The level and group dropdowns are populated from configuration/draft state,
+    // never from a hard-coded list.
     const current = t.level || TM.UNASSIGNED_ID;
     const options = TM.selectableLevels().map(function (lv) {
       return '<option value="' + esc(lv.id) + '"' + (current === lv.id ? ' selected' : '') + '>' + esc(lv.name) + '</option>';
     }).join('');
+    const groupOptions = (groups || draftGroups()).map(function (g) {
+      return '<option value="' + esc(g) + '"' + (t.group === g ? ' selected' : '') + '>Group ' + esc(g) + '</option>';
+    }).join('');
+    const selStyle = 'background:var(--bg4);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:5px 8px;font-size:12px;';
     return '<div class="team-edit-row">' +
       '<div class="team-edit-head">' +
         '<span class="team-edit-id">' + esc(t.id) + '</span>' +
         '<div style="display:flex;gap:6px;align-items:center;">' +
-          '<select class="level-select" onchange="App.updateTeam(\'' + t.id + '\',\'level\',this.value)" title="Level" style="background:var(--bg4);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:5px 8px;font-size:12px;">' +
+          '<select title="Group" onchange="App.updateTeam(\'' + esc(t.id) + '\',\'group\',this.value)" style="' + selStyle + '">' + groupOptions + '</select>' +
+          '<select class="level-select" onchange="App.updateTeam(\'' + esc(t.id) + '\',\'level\',this.value)" title="Level" style="' + selStyle + '">' +
             options +
           '</select>' +
-          '<button class="remove-btn" onclick="App.removeTeam(\'' + t.id + '\')" title="Remove pair"' + (locked ? ' disabled' : '') + '>×</button>' +
+          '<button class="remove-btn" onclick="App.removeTeam(\'' + esc(t.id) + '\')" title="Remove pair">×</button>' +
         '</div>' +
       '</div>' +
       '<div class="team-edit-inputs">' +
-        '<input type="text" value="' + esc(t.name) + '" placeholder="Pair name" oninput="App.updateTeam(\'' + t.id + '\',\'name\',this.value)">' +
-        '<input type="text" value="' + esc((t.players || []).join(', ')) + '" placeholder="Players (comma separated)" oninput="App.updateTeam(\'' + t.id + '\',\'players\',this.value)">' +
+        '<input type="text" value="' + esc(t.name) + '" placeholder="Pair name" oninput="App.updateTeam(\'' + esc(t.id) + '\',\'name\',this.value)">' +
+        '<input type="text" value="' + esc((t.players || []).join(', ')) + '" placeholder="Players (comma separated)" oninput="App.updateTeam(\'' + esc(t.id) + '\',\'players\',this.value)">' +
       '</div>' +
-      '<div class="muted" style="font-size:11.5px;">Group ' + t.group + ' · Level ' + esc(TM.levelName(current)) + '</div>' +
+      '<div class="muted" style="font-size:11.5px;">Group ' + esc(t.group) + ' · Level ' + esc(TM.levelName(current)) + '</div>' +
       '</div>';
   }
 
@@ -2483,16 +3028,16 @@
     if (!t) return;
     if (field === 'players') t.players = value.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
     else t[field] = value;
-    // A level change re-renders so the row's level label follows the dropdown;
-    // draftTeams already holds every field, so no typing is lost.
-    if (field === 'level') renderTeamsOnly();
+    // Group/level changes re-render so counts and labels follow; draftTeams already
+    // holds every field, so no typing is lost.
+    if (field === 'level' || field === 'group') renderTeamsOnly();
   }
 
   function addTeam(group) {
-    let n = 1;
-    let id;
-    do { id = group + n; n++; } while (draftTeams.some(function (t) { return t.id === id; }));
-    draftTeams.push({ id: id, group: group, name: 'New Pair ' + n, players: [], level: TM.UNASSIGNED_ID });
+    const g = group || draftGroups()[0] || 'A';
+    let n = 1, id;
+    do { id = g + n; n++; } while (draftTeams.some(function (t) { return t.id === id; }));
+    draftTeams.push({ id: id, group: g, name: 'New Pair ' + (draftTeams.length + 1), players: [], level: TM.UNASSIGNED_ID });
     renderTeamsOnly();
   }
 
@@ -2501,19 +3046,43 @@
     renderTeamsOnly();
   }
 
+  function addGroup() {
+    const g = nextGroupId();
+    const first = draftTeams[0];
+    if (first) { first.group = g; }
+    renderTeamsOnly();
+    toast('Group ' + g + ' added — assign pairs to it');
+  }
+
+  function removeGroup() {
+    const groups = draftGroups();
+    if (groups.length <= 1) { toast('A tournament needs at least one group.'); return; }
+    const last = groups[groups.length - 1];
+    const moved = draftTeams.filter(function (t) { return t.group === last; }).length;
+    if (moved) { toast('Move the ' + moved + ' pair(s) out of Group ' + last + ' first.'); return; }
+    renderTeamsOnly();
+    toast('Group ' + last + ' is empty and will be dropped on save');
+  }
+
   function renderTeamsOnly() {
     // re-render just the teams screen body while preserving inputs already captured in draftTeams
     $('#view').innerHTML = viewTeams();
   }
 
-  function saveTeams() {
+  function saveTeams(forceRegenerate) {
     const payload = draftTeams.map(function (t) { return { id: t.id, group: t.group, name: t.name, players: t.players, level: t.level }; });
-    const r = TM.applyTeams(payload);
+    const r = TM.applyTeams(payload, { regenerate: !!forceRegenerate });
+    if (!r.ok && r.needsConfirmation) {
+      confirm('Regenerate fixtures?', TEAM_WARN(r.msg), function () { saveTeams(true); });
+      return;
+    }
     if (!r.ok) { toast(r.msg); return; }
     draftTeams = null;
     toast(r.regenerated ? 'Teams saved — fixtures regenerated' : 'Teams saved');
     render();
   }
+
+  function TEAM_WARN(msg) { return msg + ' ' + 'This will delete all recorded results and standings. This cannot be undone.'; }
 
   function revertTeams() {
     draftTeams = null;
@@ -2685,13 +3254,61 @@
 
   function viewSettings() {
     const st = TM.getState();
+    const groups = TM.groupIds();
+    const dist = TM.groupDistribution();
+    const totalGroup = TM.totalGroupMatchCount();
+    const q = TM.getQualification();
+    const plan = TM.regeneratePlan();
     let html = '<div class="page-title">Settings</div>';
-    html += '<div class="page-subtitle">Tournament configuration, backup and reset.</div>';
+    html += '<div class="page-subtitle">The single place to configure the tournament. Everything here is dynamic — the default is a 10-pair, 2-group example.</div>';
 
-    html += '<div class="section-title">Tournament <span class="line"></span></div>';
+    // Tournament configuration: name, pair count and group distribution. All three
+    // are read from live configuration, so the app is never tied to 10 pairs or 2×5.
+    html += '<div class="section-title">Tournament Configuration <span class="line"></span></div>';
     html += '<div class="card">' +
       '<div class="field"><label>Tournament name</label><input type="text" value="' + esc(st.tournament.name) + '" onchange="App.setName(this.value)"></div>' +
-      '<div class="muted" style="font-size:12px;">Created ' + esc(String(st.tournament.createdAt).slice(0, 10)) + ' · ' + st.teams.length + ' pairs · ' + TM.groupMatches().length + ' group matches</div>' +
+      '<div class="muted" style="font-size:12.5px;margin-top:4px;">Created ' + esc(String(st.tournament.createdAt).slice(0, 10)) + ' · ' +
+      st.teams.length + ' pairs · ' + groups.length + ' group' + (groups.length === 1 ? '' : 's') + ' · ' + totalGroup + ' group matches' +
+      '</div>' +
+      '<div class="muted" style="font-size:12px;margin-top:10px;">The number of pairs and the group split come from the Pairs / Teams configuration below — there is no fixed 20-player or 10-pair requirement. A tournament needs ' + TM.MIN_PAIRS + '–' + TM.MAX_PAIRS + ' pairs, with at least ' + TM.MIN_GROUP_SIZE + ' pairs per group.</div>' +
+      '</div>';
+
+    // Groups: counts are derived from actual pair assignments.
+    html += '<div class="section-title">Groups <span class="line"></span></div>';
+    html += '<div class="card">';
+    groups.forEach(function (g) {
+      const n = dist[g] || 0;
+      html += '<div class="progress-row"><span>Group ' + esc(g) + '</span><span class="mono">' + n + ' pair' + (n === 1 ? '' : 's') + ' · ' + TM.getGroupMatchCount(g) + ' matches</span></div>';
+    });
+    html += '<div class="muted" style="font-size:12px;margin-top:10px;">Group membership is edited on the <b>Teams</b> screen. Counts here are calculated from the actual assignments, never stored.</div>';
+    html += '</div>';
+
+    // Qualification: how many pairs advance from each group. Re-validate the chosen
+    // format so an impossible bracket can never be requested.
+    const qualCount = groups.reduce(function (t, g) { return t + (TM.qualifiedPerGroup()[g] || 0); }, 0);
+    const koRounds = TM.bracketRounds(qualCount).map(function (r) { return r.name; }).join(' → ');
+    html += '<div class="section-title">Qualification <span class="line"></span></div>';
+    html += '<div class="card">' +
+      '<div class="field"><label>Qualifiers per group</label>' +
+      '<select onchange="App.setQualification(this.value)">';
+    const maxGroup = Math.max.apply(null, groups.map(function (g) { return dist[g] || 0; }).concat([0]));
+    for (let n = 1; n <= Math.max(maxGroup, 1); n++) {
+      html += '<option value="' + n + '"' + (q.perGroup === n ? ' selected' : '') + '>Top ' + n + '</option>';
+    }
+    html += '</select></div>';
+    html += '<div class="muted" style="font-size:12.5px;margin-top:4px;">' + qualCount + ' pairs qualify' + (koRounds ? ' → ' + koRounds : '') + '. ' +
+      'A group smaller than the configured qualifier count qualifies all of its pairs.</div>';
+    html += '<div class="muted" style="font-size:12px;margin-top:10px;">The knockout bracket is generated from the number of qualifiers. 4 qualifiers → semi-finals + final; 8 → quarter-finals onward; 16 → round of 16 onward. If the count is not a power of two, byes are created automatically.</div>';
+    html += '</div>';
+
+    // Regenerate fixtures: explicit, safe, with before/after counts.
+    html += '<div class="section-title">Regenerate Fixtures <span class="line"></span></div>';
+    html += '<div class="card">' +
+      '<div class="muted" style="margin-bottom:8px;">Current: ' + plan.pairs + ' pairs · ' + groupSummaryText(plan.distribution) + ' · ' +
+      plan.existingFixtures + ' fixtures · ' + plan.existingResults + ' completed</div>' +
+      '<div class="muted" style="margin-bottom:10px;">After regenerating: ' + plan.newFixtures + ' group fixtures' +
+      (TM.getQualification().perGroup && qualCount ? ' + ' + TM.predictedKnockoutTotal() + ' knockout matches' : '') + '.</div>' +
+      '<button class="btn btn-danger" onclick="App.askRegenerate()">Regenerate fixtures</button>' +
       '</div>';
 
     // Team levels: the levels themselves are configurable, and each count below is
@@ -2713,7 +3330,7 @@
       html += '<div class="alert alert-warn" style="margin-top:10px;">⚠️ ' + sum.unassigned + ' ' + (sum.unassigned === 1 ? 'pair is' : 'pairs are') +
         ' currently unassigned to a level. The tournament still runs — assign a level on the Teams screen whenever you are ready.</div>';
     }
-    html += '<div class="muted" style="font-size:12px;margin-top:10px;">Counts are calculated from the actual pair assignments on the Teams screen. Add, rename, disable or remove levels here; disabling or removing a level moves its pairs to ' + esc(TM.UNASSIGNED_NAME) + '. Levels are independent of Group A/B, so this never changes fixtures.</div>';
+    html += '<div class="muted" style="font-size:12px;margin-top:10px;">Counts are calculated from the actual pair assignments on the Teams screen. Add, rename, disable or remove levels here; disabling or removing a level moves its pairs to ' + esc(TM.UNASSIGNED_NAME) + '. Levels are independent of groups, so this never changes fixtures.</div>';
     html += '</div>';
 
     html += '<div class="card" style="margin-top:10px;">' + levelConfigBlocks();
@@ -2754,7 +3371,7 @@
 
     html += '<div class="section-title">Danger zone <span class="line"></span></div>';
     html += '<div class="card">' +
-      '<div class="muted" style="margin-bottom:10px;">Reset returns the app to the default 20-player / 10-pair / 2-group configuration and deletes all results.</div>' +
+      '<div class="muted" style="margin-bottom:10px;">Reset returns the app to the default example configuration (10 pairs, 2 groups, 3 courts) and deletes all results.</div>' +
       '<div class="btn-group" style="margin-top:0;">' +
       '<button class="btn btn-danger" onclick="App.askResetAll()">Reset tournament</button>' +
       '<button class="btn btn-danger" onclick="App.askClearResults()">Clear results only</button>' +
@@ -2763,6 +3380,35 @@
     html += '<div class="section-title">About <span class="line"></span></div>';
     html += '<div class="card"><button class="btn btn-sm" onclick="App.about()">How it works</button></div>';
     return html;
+  }
+
+  // e.g. "5 / 5 groups" — the group split as configured, never assumed.
+  function groupSummaryText(dist) {
+    const parts = Object.keys(dist).map(function (g) { return dist[g]; });
+    return parts.join(' / ') + ' group' + (parts.length === 1 ? '' : 's');
+  }
+
+  function setQualification(v) {
+    const r = TM.setQualification(Number(v));
+    if (!r.ok) { toast(r.msg); render(); return; }
+    toast('Qualification updated — top ' + r.qualification.perGroup + ' per group');
+    render();
+  }
+
+  function askRegenerate() {
+    const plan = TM.regeneratePlan();
+    const koCount = TM.predictedKnockoutTotal();
+    const koText = koCount ? ' + ' + koCount + ' knockout matches' : '';
+    const text = 'Regenerating fixtures will remove existing match results and standings. ' +
+      'Current: ' + plan.pairs + ' pairs · ' + groupSummaryText(plan.distribution) + ' · ' + plan.existingFixtures + ' fixtures · ' + plan.existingResults + ' completed. ' +
+      'After: ' + plan.newFixtures + ' group fixtures' + koText + '.';
+    confirm('Regenerate fixtures?', text, function () {
+      const r = TM.regenerateFixtures();
+      if (!r.ok) { toast(r.msg || 'Could not regenerate.'); return; }
+      draftTeams = null;
+      toast('Fixtures regenerated — ' + r.fixtures + ' group matches');
+      nav('dashboard');
+    });
   }
 
   function setName(v) {
@@ -2817,7 +3463,7 @@
   }
 
   function askResetAll() {
-    confirm('Reset tournament?', 'This deletes all teams, fixtures, results and knockout progress, then restores the default 20-player configuration. This cannot be undone.', function () {
+    confirm('Reset tournament?', 'This deletes all teams, fixtures, results and knockout progress, then restores the default example configuration (10 pairs, 2 groups, 3 courts). This cannot be undone.', function () {
       TM.resetTournament();
       draftTeams = null;
       toast('Tournament reset');
@@ -2904,16 +3550,19 @@
     toggleCourt: toggleCourt,
 
     generateQF: generateQF,
-    generateSF: generateSF,
-    generateFinal: generateFinal,
+    generateKnockout: generateKnockout,
 
     updateTeam: updateTeam,
     addTeam: addTeam,
     removeTeam: removeTeam,
+    addGroup: addGroup,
+    removeGroup: removeGroup,
     saveTeams: saveTeams,
     revertTeams: revertTeams,
 
     setName: setName,
+    setQualification: setQualification,
+    askRegenerate: askRegenerate,
     setAllowOutside: setAllowOutside,
     setCourtCount: setCourtCount,
     renameCourt: renameCourt,
