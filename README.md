@@ -329,17 +329,35 @@ Existing backups remain backwards compatible.
 Team levels are **not** hard-coded. `Tunga`, `Bhadra` and `Kaveri` are only the initial defaults;
 the organizer controls the levels themselves from **Settings → Team Level Configuration**.
 
-The section lists every configured level with its pair count, plus the always-present
-`Unassigned` row and a total:
+The section lists every configured level with its pair count and pairs, plus the always-present
+`Unassigned` group:
 
 ```
-Level        Number of Pairs
-Tunga        3
-Bhadra       3
-Kaveri       3
-Unassigned   1
-Total pairs: 10 · Assigned: 9 · Unassigned: 1
+10 pairs · 9 assigned · 1 unassigned
+
+Tunga        3 pairs
+  Naveen & Chandan            [ Tunga ▼ ]
+  Manjanna & Madhu            [ Tunga ▼ ]
+  Praveen KG & Gagan          [ Tunga ▼ ]
+Bhadra       3 pairs
+  Harshit & Yakshit           [ Bhadra ▼ ]
+  Gangadhar & Manju           [ Bhadra ▼ ]
+  Praveen & Vinay             [ Bhadra ▼ ]
+Kaveri       3 pairs
+  RK & Vinay                  [ Kaveri ▼ ]
+  Nihar & Rajeev              [ Kaveri ▼ ]
+  Prabhakar & Phani           [ Kaveri ▼ ]
+Unassigned   1 pair
+  Anil & TBD                  [ Unassigned ▼ ]
+
+⚠ 1 pair is unassigned: Anil & TBD
+
+[ Repair level assignments ]
 ```
+
+Changing a pair's level with one of those controls updates the counts immediately. It only changes
+that pair's `level` property — it never regenerates fixtures, clears results, changes group
+membership, alters match history or touches the knockout bracket.
 
 **One source of truth.** Levels live in tournament state:
 
@@ -356,7 +374,42 @@ Settings, validation and every display read this one configuration. No screen ke
 
 **Counts are derived, never stored.** Each count shown in Settings is calculated from the actual
 `level` on each pair, so Settings can never disagree with the Teams screen. If three pairs have
-`level: "kaveri"`, Settings shows `Kaveri — 3 pairs`.
+`level: "kaveri"`, Settings shows `Kaveri — 3 pairs`. There is deliberately no separately stored
+count anywhere.
+
+### The canonical level resolver
+
+Every read of a pair's level goes through one resolver, `resolveLevel(value)`, so the Teams screen,
+Settings counts, the level chips and the settings dropdowns can never disagree. Given a stored
+value it resolves, in order:
+
+1. exact canonical id — `kaveri` → `kaveri`
+2. case-insensitive id — `KAVERI` → `kaveri`
+3. exact display name — `Kaveri` → `kaveri`
+4. case-insensitive display name — `kaveri` (as a name) → `kaveri`
+5. normalized slug — ` Kaveri! ` → `kaveri`
+6. only then the `unassigned` sentinel
+
+A validly assigned pair is **never** moved to Unassigned merely because its stored value is a
+display name or a different case. The resolver reads only stored id/name information — it never
+infers a level from a pair's name or players. An unknown value remains `unassigned`.
+
+Migration uses this same resolver against the document's `settings.levels`, so an existing
+tournament with legacy `"Tunga" / "Bhadra" / "Kaveri"` values loads with the correct assignments.
+Migration is idempotent: running it repeatedly produces exactly the same state.
+
+### Repairing existing assignments
+
+**Repair level assignments** is a non-destructive button in the Team Level Configuration section.
+It normalizes legacy stored representations (display names, mixed case, slugs) to canonical ids
+through the same resolver, resolves ids/names case-insensitively, repairs valid existing
+assignments, and leaves genuinely unknown values as Unassigned. It never modifies groups, never
+regenerates fixtures, never deletes results and never touches the knockout bracket — it saves only
+when something actually changed. It reports either `3 level assignments repaired.` or
+`No level assignments required repair.`
+
+The repair path also means an existing browser's localStorage never needs to be cleared: bad
+assignments are fixed on load by migration and can be normalized further with the repair button.
 
 What the organizer can do:
 
@@ -366,6 +419,12 @@ What the organizer can do:
 - **Remove** a level — any pair assigned to it moves to `Unassigned` rather than becoming invalid.
 - **Redistribute freely** — the distribution is not limited to the defaults. Tunga = 4 / Bhadra = 3
   / Kaveri = 3, or any other split, is allowed.
+
+### Teams page
+
+The Teams page keeps its level dropdown and uses exactly the same canonical resolver and configured
+level list as Settings. Every row shows `RK & Vinay · Kaveri`, so the two screens cannot disagree.
+Both derive their information from the same underlying `state.teams`.
 
 ### Level vs Group
 

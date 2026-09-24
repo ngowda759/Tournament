@@ -14,6 +14,7 @@ if (!core || !ui) { console.error('scripts not found'); process.exit(1); }
 let pass = 0, fail = 0;
 const failures = [];
 const check = (name, cond, extra) => { if (cond) pass++; else { fail++; failures.push(name + (extra ? ' :: ' + extra : '')); } };
+const eq = (name, a, b) => check(name, a === b, 'got ' + a + ' expected ' + b);
 
 // A tiny DOM. Elements record their innerHTML/textContent and support the handful
 // of methods the UI layer touches. classList is lenient so rendering never throws.
@@ -199,6 +200,44 @@ App.nav('settings');
 s = getEl('view').innerHTML;
 check('3-group settings shows 9 group matches', s.indexOf('9 group matches') !== -1, 'no 9 group matches');
 check('3-group settings shows 6 qualify', s.indexOf('6 pair') !== -1 || s.indexOf('6 pairs qualify') !== -1, 'no 6 qualify');
+
+// ── Team Level Configuration on Settings ───────────────────────────────────────
+// The default tournament must show every level, the real pair names, a per-pair
+// assignment control, the assigned/unassigned summary and the repair action.
+TM.resetTournament();
+App.nav('settings');
+s = getEl('view').innerHTML;
+['Tunga', 'Bhadra', 'Kaveri', 'Unassigned'].forEach(function (name) {
+  check('settings level shows ' + name, s.indexOf(name) !== -1, 'missing ' + name);
+});
+['Naveen &amp; Chandan', 'RK &amp; Vinay', 'Nihar &amp; Rajeev', 'Prabhakar &amp; Phani', 'Anil &amp; TBD'].forEach(function (nm) {
+  check('settings level lists pair ' + nm, s.indexOf(nm) !== -1, 'missing ' + nm);
+});
+check('settings shows 3 pairs for Kaveri', s.indexOf('Kaveri') !== -1 && s.indexOf('3 pairs') !== -1, 'no 3 pairs');
+check('settings shows 1 pair for Unassigned', s.indexOf('1 pair') !== -1, 'no 1 pair');
+check('settings shows assigned/unassigned summary', s.indexOf('10 pairs · 9 assigned · 1 unassigned') !== -1, 'no summary');
+check('settings warning names the unassigned pair', s.indexOf('unassigned: Anil &amp; TBD') !== -1, 'no named warning');
+check('settings shows assignment controls', s.indexOf('level-select') !== -1, 'no selects');
+check('settings shows repair button', s.indexOf('Repair level assignments') !== -1, 'no repair button');
+check('settings has no stored-count table', s.indexOf('Number of Pairs') === -1, 'old table remains');
+
+// Assigning the last unassigned pair updates the summary to all-assigned.
+App.setTeamLevel('B5', 'kaveri');
+App.nav('settings');
+s = getEl('view').innerHTML;
+check('summary becomes all-assigned', s.indexOf('10 pairs · 10 assigned · 0 unassigned') !== -1, 'no all-assigned summary');
+check('no unassigned warning once assigned', s.indexOf('pair is unassigned') === -1, 'warning remains');
+eq('B5 now kaveri in state', TM.getTeam('B5').level, 'kaveri');
+eq('level counts agree with assignments', TM.levelCounts().kaveri,
+  TM.getState().teams.filter(function (t) { return TM.resolveLevel(t.level).id === 'kaveri'; }).length);
+
+// Repair is idempotent and non-destructive through the UI.
+TM.resetTournament();
+App.nav('settings');
+const fixturesBefore = TM.groupMatches().map(function (m) { return m.id + ':' + m.teamA + ':' + m.teamB; }).join(',');
+App.repairLevels();
+eq('repair left fixtures intact', TM.groupMatches().map(function (m) { return m.id + ':' + m.teamA + ':' + m.teamB; }).join(','), fixturesBefore);
+eq('repair left default Kaveri count at 3', TM.levelCounts().kaveri, 3);
 
 console.log('\n' + (fail === 0 ? '✅ ALL RENDERS OK' : '❌ RENDER FAILURES'));
 console.log('passed: ' + pass + '  failed: ' + fail);

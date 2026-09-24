@@ -2154,6 +2154,310 @@ function assertRoundRobin(label, groupId, n) {
   eq('reload keeps empty group D', TM.getState().groups.D.length, 0);
 })();
 
+/* ══════════════════════════════════════════════════════════
+   54. canonical team-level resolver + repair + assignment UI
+   ══════════════════════════════════════════════════════════ */
+
+/* 54a. default distribution and exact default teams */
+(function () {
+  TM.resetTournament();
+  const counts = TM.levelCounts();
+  eq('default Tunga = 3', counts.tunga, 3);
+  eq('default Bhadra = 3', counts.bhadra, 3);
+  eq('default Kaveri = 3', counts.kaveri, 3);
+  eq('default Unassigned = 1', counts[TM.UNASSIGNED_ID], 1);
+  eq('default total = 10', TM.levelSummary().total, 10);
+  eq('default assigned = 9', TM.levelSummary().assigned, 9);
+  eq('default unassigned = 1', TM.levelSummary().unassigned, 1);
+
+  const byName = {};
+  TM.getState().teams.forEach(t => { byName[t.name] = TM.resolveLevel(t.level).id; });
+  eq('RK & Vinay → kaveri', byName['RK & Vinay'], 'kaveri');
+  eq('Nihar & Rajeev → kaveri', byName['Nihar & Rajeev'], 'kaveri');
+  eq('Prabhakar & Phani → kaveri', byName['Prabhakar & Phani'], 'kaveri');
+  eq('Anil & TBD → unassigned', byName['Anil & TBD'], 'unassigned');
+})();
+
+/* 54b. resolveLevel handles every canonical and legacy representation */
+(function () {
+  TM.resetTournament();
+  eq('exact id kaveri → kaveri', TM.resolveLevel('kaveri').id, 'kaveri');
+  eq('display name Kaveri → kaveri', TM.resolveLevel('Kaveri').id, 'kaveri');
+  eq('upper KAVERI → kaveri', TM.resolveLevel('KAVERI').id, 'kaveri');
+  eq('mixed kAvErI → kaveri', TM.resolveLevel('kAvErI').id, 'kaveri');
+  eq('padded " Kaveri " → kaveri', TM.resolveLevel('  Kaveri ').id, 'kaveri');
+  eq('slug Kaveri- → kaveri', TM.resolveLevel('Kaveri-').id, 'kaveri');
+  eq('legacy id Kaveri → kaveri', TM.resolveLevel('Kaveri').id, 'kaveri');
+  eq('legacy name Kaveri → kaveri', TM.resolveLevel('Kaveri').id, 'kaveri');
+  eq('id Tunga → tunga', TM.resolveLevel('Tunga').id, 'tunga');
+  eq('id bhadra → bhadra', TM.resolveLevel('bhadra').id, 'bhadra');
+  eq('name Bhadra → bhadra', TM.resolveLevel('Bhadra').id, 'bhadra');
+  eq('Unassigned → unassigned', TM.resolveLevel('Unassigned').id, 'unassigned');
+  eq('UNASSIGNED → unassigned', TM.resolveLevel('UNASSIGNED').id, 'unassigned');
+  eq('unknown → unassigned', TM.resolveLevel('GhostLevel').id, 'unassigned');
+  eq('empty → unassigned', TM.resolveLevel('').id, 'unassigned');
+  eq('null → unassigned', TM.resolveLevel(null).id, 'unassigned');
+  eq('number-ish unknown → unassigned', TM.resolveLevel(42).id, 'unassigned');
+  check('unknown never throws', true);
+
+  // levelById / levelForTeam / levelName agree with the resolver
+  eq('levelById Kaveri finds kaveri', TM.levelById('Kaveri').id, 'kaveri');
+  eq('levelById kaveri finds kaveri', TM.levelById('kaveri').id, 'kaveri');
+  eq('levelById unknown → null', TM.levelById('Ghost'), null);
+  eq('levelForTeam Kaveri → kaveri', TM.levelForTeam({ level: 'Kaveri' }).id, 'kaveri');
+  eq('levelForTeam unknown → unassigned', TM.levelForTeam({ level: 'Ghost' }).id, 'unassigned');
+  eq('levelName Kaveri → Kaveri', TM.levelName('Kaveri'), 'Kaveri');
+  eq('levelName unknown → Unassigned', TM.levelName('Ghost'), 'Unassigned');
+
+  // a case/name variant still counts as assigned
+  const teams = TM.getState().teams.map(t => ({ id: t.id, group: t.group, name: t.name, players: t.players, level: t.level }));
+  teams.find(t => t.id === 'A3').level = 'KAVERI';
+  teams.find(t => t.id === 'A5').level = 'Kaveri';
+  teams.find(t => t.id === 'B4').level = 'kaveri';
+  const r = TM.applyTeams(teams);
+  check('legacy-case level change accepted', r.ok, r.msg);
+  const c = TM.levelCounts();
+  eq('all three Kaveri pairs counted', c.kaveri, 3);
+  eq('Unassigned still 1', c[TM.UNASSIGNED_ID], 1);
+  eq('canonical id stored after applyTeams', TM.getTeam('A3').level, 'kaveri');
+  eq('canonical id stored for name form', TM.getTeam('A5').level, 'kaveri');
+})();
+
+/* 54c. migration preserves valid assignments and is idempotent */
+(function () {
+  // A stored document whose Kaveri pairs use a legacy display name, with a mixed
+  // legacy level list (bare-ish ids in caps plus a name). Tunga/Bhadra valid; Anil
+  // genuinely unassigned; one truly unknown pair must stay unassigned.
+  const legacy = {
+    version: 6,
+    teams: [
+      { id: 'A1', group: 'A', name: 'Naveen & Chandan', players: ['Naveen', 'Chandan'], level: 'Tunga' },
+      { id: 'A2', group: 'A', name: 'Harshit & Yakshit', players: ['Harshit', 'Yakshit'], level: 'bhadra' },
+      { id: 'A3', group: 'A', name: 'RK & Vinay', players: ['RK', 'Vinay'], level: 'Kaveri' },
+      { id: 'A4', group: 'A', name: 'Manjanna & Madhu', players: ['Manjanna', 'Madhu'], level: 'Tunga' },
+      { id: 'A5', group: 'A', name: 'Nihar & Rajeev', players: ['Nihar', 'Rajeev'], level: 'KAVERI' },
+      { id: 'B1', group: 'B', name: 'Praveen KG & Gagan', players: ['Praveen KG', 'Gagan'], level: 'tunga' },
+      { id: 'B2', group: 'B', name: 'Gangadhar & Manju', players: ['Gangadhar', 'Manju'], level: 'Bhadra' },
+      { id: 'B3', group: 'B', name: 'Praveen & Vinay', players: ['Praveen', 'Vinay'], level: 'bhadra' },
+      { id: 'B4', group: 'B', name: 'Prabhakar & Phani', players: ['Prabhakar', 'Phani'], level: 'kaveri' },
+      { id: 'B5', group: 'B', name: 'Anil & TBD', players: ['Anil', 'TBD'], level: 'Unassigned' },
+      { id: 'C1', group: 'C', name: 'Ghost & Pair', players: ['Ghost', 'Pair'], level: 'MysteryLevel' }
+    ],
+    groups: { A: ['A1', 'A2', 'A3', 'A4', 'A5'], B: ['B1', 'B2', 'B3', 'B4', 'B5'], C: ['C1'] },
+    matches: [],
+    settings: { levels: ['Tunga', 'Bhadra', 'Kaveri'] }
+  };
+
+  const m1 = TM.migrate(JSON.parse(JSON.stringify(legacy)));
+  const lv = {}; m1.teams.forEach(t => { lv[t.id] = t.level; });
+  eq('migration keeps RK & Vinay → kaveri', lv.A3, 'kaveri');
+  eq('migration keeps Nihar & Rajeev → kaveri', lv.A5, 'kaveri');
+  eq('migration keeps Prabhakar & Phani → kaveri', lv.B4, 'kaveri');
+  eq('migration keeps Tunga', lv.A1, 'tunga');
+  eq('migration keeps Bhadra', lv.A2, 'bhadra');
+  eq('migration keeps genuinely unassigned', lv.B5, 'unassigned');
+  eq('migration sends unknown to unassigned', lv.C1, 'unassigned');
+  const mc = {}; m1.teams.forEach(t => { mc[t.level] = (mc[t.level] || 0) + 1; });
+  eq('migrated Kaveri count = 3', mc.kaveri, 3);
+  eq('migrated Tunga count = 3', mc.tunga, 3);
+  eq('migrated Bhadra count = 3', mc.bhadra, 3);
+  eq('migrated unassigned count = 2', mc.unassigned, 2);
+
+  // idempotence: migrating the migrated document changes nothing
+  const m2 = TM.migrate(JSON.parse(JSON.stringify(m1)));
+  eq('migration is idempotent (teams)', JSON.stringify(m2.teams.map(t => t.level)), JSON.stringify(m1.teams.map(t => t.level)));
+  const m3 = TM.migrate(JSON.parse(JSON.stringify(m2)));
+  eq('migration is idempotent (levels)', JSON.stringify(m3.settings.levels), JSON.stringify(m2.settings.levels));
+
+  // import path preserves the same canonical assignments
+  const imp = TM.importJSON(JSON.stringify(legacy));
+  check('legacy import ok', imp.ok, imp.msg);
+  eq('import keeps Kaveri pair', TM.getTeam('A3').level, 'kaveri');
+  eq('import keeps the other Kaveri pair', TM.getTeam('B4').level, 'kaveri');
+})();
+
+/* 54d. level change safety: results, fixtures, groups, knockout untouched */
+(function () {
+  TM.resetTournament();
+  // finish the whole group stage and build the bracket
+  TM.groupMatches().forEach(m => TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 12, m.teamA < m.teamB ? 12 : 21));
+  TM.ensureKnockout();
+
+  const st0 = TM.getState();
+  const resultsBefore = JSON.stringify(st0.matches.filter(m => m.status === 'completed').map(m => [m.id, m.teamA, m.teamB, m.scoreA, m.scoreB, m.winner]));
+  const fixturesBefore = JSON.stringify(st0.matches.filter(m => m.stage === 'group').map(m => [m.id, m.teamA, m.teamB]));
+  const groupsBefore = JSON.stringify(st0.groups);
+  const koBefore = JSON.stringify(st0.matches.filter(m => m.stage !== 'group').map(m => [m.id, m.stage, m.round, m.teamA, m.teamB, m.status]));
+  const standingsBefore = JSON.stringify(TM.computeStandings('A').map(r => [r.team.id, r.played, r.won, r.lost, r.pts, r.pf, r.pa, r.diff]));
+  const standingsOf = () => JSON.stringify(TM.computeStandings('A').map(r => [r.team.id, r.played, r.won, r.lost, r.pts, r.pf, r.pa, r.diff]));
+
+  const r = TM.setTeamLevel('A1', 'kaveri');
+  check('setTeamLevel accepted after results', r.ok, r.msg);
+  eq('A1 now kaveri', TM.getTeam('A1').level, 'kaveri');
+
+  const st1 = TM.getState();
+  eq('results unchanged after level change', JSON.stringify(st1.matches.filter(m => m.status === 'completed').map(m => [m.id, m.teamA, m.teamB, m.scoreA, m.scoreB, m.winner])), resultsBefore);
+  eq('fixtures unchanged after level change', JSON.stringify(st1.matches.filter(m => m.stage === 'group').map(m => [m.id, m.teamA, m.teamB])), fixturesBefore);
+  eq('groups unchanged after level change', JSON.stringify(st1.groups), groupsBefore);
+  eq('knockout unchanged after level change', JSON.stringify(st1.matches.filter(m => m.stage !== 'group').map(m => [m.id, m.stage, m.round, m.teamA, m.teamB, m.status])), koBefore);
+  eq('standings unchanged after level change', standingsOf(), standingsBefore);
+
+  // setting a legacy name/case through the same API also stays canonical + safe
+  const r2 = TM.setTeamLevel('A2', 'BHADRA');
+  check('setTeamLevel accepts legacy case', r2.ok, r2.msg);
+  eq('A2 canonical bhadra', TM.getTeam('A2').level, 'bhadra');
+  eq('knockout still unchanged', JSON.stringify(TM.getState().matches.filter(m => m.stage !== 'group').map(m => [m.id, m.stage, m.round, m.teamA, m.teamB, m.status])), koBefore);
+
+  // an unknown level through setTeamLevel falls back to Unassigned, never throws
+  const r3 = TM.setTeamLevel('A2', 'NotARealLevel');
+  check('setTeamLevel unknown accepted as unassigned', r3.ok, r3.msg);
+  eq('A2 → unassigned for unknown', TM.getTeam('A2').level, 'unassigned');
+  eq('fixtures still unchanged', JSON.stringify(TM.getState().matches.filter(m => m.stage === 'group').map(m => [m.id, m.teamA, m.teamB])), fixturesBefore);
+})();
+
+/* 54e. counts always equal actual state.teams assignments */
+(function () {
+  TM.resetTournament();
+  const counts = TM.levelCounts();
+  TM.levels().forEach(l => {
+    eq('settings count matches teams for ' + l.id, counts[l.id], TM.getState().teams.filter(t => TM.resolveLevel(t.level).id === l.id).length);
+  });
+  eq('unassigned count matches teams', counts[TM.UNASSIGNED_ID], TM.getState().teams.filter(t => TM.resolveLevel(t.level).id === 'unassigned').length);
+
+  // move one pair and re-check
+  TM.setTeamLevel('A1', 'kaveri');
+  const c2 = TM.levelCounts();
+  eq('counts update after move (tunga)', c2.tunga, TM.getState().teams.filter(t => TM.resolveLevel(t.level).id === 'tunga').length);
+  eq('counts update after move (kaveri)', c2.kaveri, TM.getState().teams.filter(t => TM.resolveLevel(t.level).id === 'kaveri').length);
+  eq('total conserved', c2.tunga + c2.bhadra + c2.kaveri + c2[TM.UNASSIGNED_ID], 10);
+})();
+
+/* 54f. persistence: reload, export/import and migration keep canonical levels */
+(function () {
+  TM.resetTournament();
+  TM.setTeamLevel('A1', 'Kaveri');   // legacy name form through the canonical API
+  TM.setTeamLevel('B5', 'tunga');
+  TM.save();
+  const before = JSON.stringify(TM.getState().teams.map(t => t.id + ':' + t.level));
+
+  TM.load();
+  eq('reload keeps canonical levels', JSON.stringify(TM.getState().teams.map(t => t.id + ':' + t.level)), before);
+
+  const dump = TM.exportJSON();
+  const imp = TM.importJSON(dump);
+  check('export/import ok', imp.ok, imp.msg);
+  eq('export/import keeps canonical levels', JSON.stringify(TM.getState().teams.map(t => t.id + ':' + t.level)), before);
+
+  // re-migrating the exported document is stable
+  const re = TM.migrate(JSON.parse(dump));
+  eq('migration of exported doc stable', JSON.stringify(re.teams.map(t => t.id + ':' + t.level)), before);
+})();
+
+/* 54g. repair: fixes legacy, leaves unknown unassigned, touches nothing else */
+(function () {
+  TM.resetTournament();
+  // Simulate an already-broken live state: three Kaveri pairs stored by display name,
+  // one pair stored in caps, plus results and a bracket already recorded.
+  TM.groupMatches().forEach(m => TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 12, m.teamA < m.teamB ? 12 : 21));
+  TM.ensureKnockout();
+
+  // Force legacy representations directly on the stored teams (bypassing applyTeams).
+  const st = TM.getState();
+  st.teams.find(t => t.id === 'A3').level = 'Kaveri';
+  st.teams.find(t => t.id === 'A5').level = 'KAVERI';
+  st.teams.find(t => t.id === 'B4').level = 'kaveri';
+  st.teams.find(t => t.id === 'A1').level = 'MysteryLevel';
+  st.teams.find(t => t.id === 'B5').level = 'Unassigned';
+
+  const resultsBefore = JSON.stringify(st.matches.map(m => [m.id, m.status, m.teamA, m.teamB, m.scoreA, m.scoreB, m.winner]));
+  const groupsBefore = JSON.stringify(st.groups);
+  const fixturesBefore = JSON.stringify(st.matches.filter(m => m.stage === 'group').map(m => [m.id, m.teamA, m.teamB]));
+
+  // Before repair the counts already route the legacy names correctly via the resolver.
+  eq('pre-repair Kaveri count = 3 (resolver)', TM.levelCounts().kaveri, 3);
+
+  const r = TM.repairTeamLevels();
+  check('repair ok', r.ok);
+  eq('repair reports 4 normalizations', r.repaired, 4); // A3, A5, B4 canonicalized + A1 unknown→unassigned
+  eq('A3 canonicalized', TM.getTeam('A3').level, 'kaveri');
+  eq('A5 canonicalized', TM.getTeam('A5').level, 'kaveri');
+  eq('B4 canonicalized', TM.getTeam('B4').level, 'kaveri');
+  eq('A1 unknown left unassigned', TM.getTeam('A1').level, 'unassigned');
+
+  const st2 = TM.getState();
+  eq('repair did not change fixtures', JSON.stringify(st2.matches.filter(m => m.stage === 'group').map(m => [m.id, m.teamA, m.teamB])), fixturesBefore);
+  eq('repair did not change results', JSON.stringify(st2.matches.map(m => [m.id, m.status, m.teamA, m.teamB, m.scoreA, m.scoreB, m.winner])), resultsBefore);
+  eq('repair did not change groups', JSON.stringify(st2.groups), groupsBefore);
+
+  // idempotent: a second repair reports nothing to do
+  const r2 = TM.repairTeamLevels();
+  eq('second repair reports 0', r2.repaired, 0);
+  eq('repair is idempotent', TM.getTeam('A3').level, 'kaveri');
+})();
+
+/* 54g. existing localStorage is self-healed on load (no manual clear needed) */
+(function () {
+  // Seed the exact shared storage key with a legacy document whose levels are display
+  // names / mixed case, plus one genuinely unassigned pair.
+  const legacyDoc = {
+    version: 6,
+    teams: [
+      { id: 'A1', group: 'A', name: 'Naveen & Chandan', players: ['Naveen', 'Chandan'], level: 'Tunga' },
+      { id: 'A2', group: 'A', name: 'Harshit & Yakshit', players: ['Harshit', 'Yakshit'], level: 'Bhadra' },
+      { id: 'A3', group: 'A', name: 'RK & Vinay', players: ['RK', 'Vinay'], level: 'Kaveri' },
+      { id: 'A4', group: 'A', name: 'Manjanna & Madhu', players: ['Manjanna', 'Madhu'], level: 'Tunga' },
+      { id: 'A5', group: 'A', name: 'Nihar & Rajeev', players: ['Nihar', 'Rajeev'], level: 'KAVERI' },
+      { id: 'B1', group: 'B', name: 'Praveen KG & Gagan', players: ['Praveen KG', 'Gagan'], level: 'tunga' },
+      { id: 'B2', group: 'B', name: 'Gangadhar & Manju', players: ['Gangadhar', 'Manju'], level: 'Bhadra' },
+      { id: 'B3', group: 'B', name: 'Praveen & Vinay', players: ['Praveen', 'Vinay'], level: 'bhadra' },
+      { id: 'B4', group: 'B', name: 'Prabhakar & Phani', players: ['Prabhakar', 'Phani'], level: 'Kaveri' },
+      { id: 'B5', group: 'B', name: 'Anil & TBD', players: ['Anil', 'TBD'], level: 'Unassigned' }
+    ],
+    groups: { A: ['A1', 'A2', 'A3', 'A4', 'A5'], B: ['B1', 'B2', 'B3', 'B4', 'B5'] },
+    matches: [],
+    settings: { levels: [{ id: 'tunga', name: 'Tunga' }, { id: 'bhadra', name: 'Bhadra' }, { id: 'kaveri', name: 'Kaveri' }] }
+  };
+  store['shuttledraw_v4'] = JSON.stringify(legacyDoc);
+  TM.load();
+  const c = TM.levelCounts();
+  eq('live-load Tunga = 3', c.tunga, 3);
+  eq('live-load Bhadra = 3', c.bhadra, 3);
+  eq('live-load Kaveri = 3', c.kaveri, 3);
+  eq('live-load Unassigned = 1', c[TM.UNASSIGNED_ID], 1);
+  // the healed document was written back to storage
+  const healed = JSON.parse(store['shuttledraw_v4']);
+  eq('storage healed: A3 level', healed.teams.find(t => t.id === 'A3').level, 'kaveri');
+  eq('storage healed: A5 level', healed.teams.find(t => t.id === 'A5').level, 'kaveri');
+  eq('storage healed: B4 level', healed.teams.find(t => t.id === 'B4').level, 'kaveri');
+  eq('storage healed: A1 level', healed.teams.find(t => t.id === 'A1').level, 'tunga');
+  eq('storage healed: B5 level', healed.teams.find(t => t.id === 'B5').level, 'unassigned');
+  // a second load is stable and reports nothing further to repair
+  TM.load();
+  const c2 = TM.levelCounts();
+  eq('live-load reload stable (kaveri)', c2.kaveri, 3);
+  eq('live-load reload stable (unassigned)', c2[TM.UNASSIGNED_ID], 1);
+  eq('live-load repair reports nothing', TM.repairTeamLevels().repaired, 0);
+  store['shuttledraw_v4'] = undefined;
+  delete store['shuttledraw_v4'];
+})();
+
+/* ══════════════════════════════════════════════════════════
+   55. Settings + Teams render UI
+   ══════════════════════════════════════════════════════════ */
+(function () {
+  // The Settings Team Level Configuration must show every level, the actual pair
+  // names, a per-pair assignment control and the assigned/unassigned summary.
+  const src = html;
+  check('Settings renders Tunga/Bhadra/Kaveri/Unassigned blocks', /levelAssignmentBlocks/.test(src));
+  check('Settings has assigned/unassigned summary line', /assigned · .*unassigned/.test(src) || /levelSummaryLine/.test(src));
+  check('Settings has a level assignment control', /levelSelect/.test(src));
+  check('Settings calls the repair action', /App\.repairLevels\(\)/.test(src));
+  check('Settings warning names unassigned pairs', /unassigned: /.test(src));
+  check('Teams page shows pair · level in the row', /team-edit-title/.test(src));
+  check('Teams/Settings share the canonical resolver', /TM\.resolveLevel\(/.test(src));
+  check('no separate stored level counts', !/state\.levelCounts\b/.test(src) && !/settings\.levelCounts/.test(src));
+})();
+
 /* ── report ─────────────────────────────────────────────── */
 console.log('\n' + (fail === 0 ? '✅ ALL TESTS PASSED' : '❌ FAILURES'));
 console.log('passed: ' + pass + '  failed: ' + fail);
