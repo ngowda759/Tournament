@@ -19,10 +19,22 @@ const eq = (name, a, b) => check(name, a === b, 'got ' + a + ' expected ' + b);
 // A tiny DOM. Elements record their innerHTML/textContent and support the handful
 // of methods the UI layer touches. classList is lenient so rendering never throws.
 function makeEl(id) {
+  const classes = new Set();
   const el = {
     id, innerHTML: '', textContent: '', value: '', checked: false,
     style: {}, dataset: {}, children: [],
-    classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
+    // Real class tracking so tests can assert on stateful classes (e.g. the mobile
+    // navigation's more-open toggle) rather than only on rendered markup.
+    classList: {
+      add(c) { classes.add(c); },
+      remove(c) { classes.delete(c); },
+      toggle(c, force) {
+        if (force === undefined) { if (classes.has(c)) { classes.delete(c); return false; } classes.add(c); return true; }
+        if (force) { classes.add(c); return true; }
+        classes.delete(c); return false;
+      },
+      contains(c) { return classes.has(c); }
+    },
     setAttribute() {}, getAttribute() { return null; }, removeAttribute() {},
     appendChild(c) { el.children.push(c); return c; }, removeChild() {},
     insertAdjacentHTML() {}, focus() {}, blur() {}, click() {}, remove() {},
@@ -439,6 +451,26 @@ check('mobile nav has More control', navHtml2.indexOf('nav-more-btn') !== -1, 'n
 ['Standings', 'Knockout', 'Teams', 'Settings'].forEach(function (label) {
   check('mobile nav keeps destination ' + label, navHtml2.indexOf(label) !== -1, 'missing ' + label);
 });
+
+// Regression: opening More and then navigating to a primary screen must collapse
+// the menu, and the secondary destinations must still be reachable through More.
+App.nav('dashboard');
+App.toggleNavMore();
+check('More opens the secondary navigation', getEl('nav-tabs').classList.contains('more-open'));
+App.nav('dashboard');
+check('navigating to Dashboard collapses More', !getEl('nav-tabs').classList.contains('more-open'));
+App.nav('settings');
+check('secondary screen still marks More active', getEl('nav-tabs').innerHTML.indexOf('nav-more-btn active') !== -1, 'no active More');
+check('secondary screen keeps More collapsed', !getEl('nav-tabs').classList.contains('more-open'));
+App.nav('dashboard');
+const navHtml3 = getEl('nav-tabs').innerHTML;
+['Dashboard', 'Matches', 'Courts'].forEach(function (label) {
+  check('after nav ' + label + ' remains visible', navHtml3.indexOf(label) !== -1, 'missing ' + label);
+});
+['Standings', 'Knockout', 'Teams', 'Settings'].forEach(function (label) {
+  check('after nav ' + label + ' still reachable via More', navHtml3.indexOf(label) !== -1, 'missing ' + label);
+});
+check('after nav More is not open', !getEl('nav-tabs').classList.contains('more-open'));
 
 console.log('\n' + (fail === 0 ? '✅ ALL RENDERS OK' : '❌ RENDER FAILURES'));
 console.log('passed: ' + pass + '  failed: ' + fail);

@@ -2930,6 +2930,10 @@
     if (!SCREENS.some(function (s) { return s.id === screen; })) screen = 'dashboard';
     st.ui.screen = screen;
     TM.save();
+    // Collapse the mobile "More" menu on every navigation. A secondary screen (e.g.
+    // Settings) still shows the control as active via renderTabs, independent of the
+    // expanded state, so this only closes the menu.
+    navMoreOpen = false;
     render();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
