@@ -95,15 +95,18 @@
 
   /* minmax(0,1fr) stops the single grid column from being forced wider than the
      viewport by wide min-content children (standings table, tab strip). */
-  .app-shell { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto 1fr; min-height: 100vh; }
+  .app-shell { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; min-height: 100vh; }
 
+  /* One compact row on desktop: brand · navigation · theme/help. On phones the
+     navigation wraps naturally onto a second line so the existing primary + More
+     behaviour is preserved. */
   header {
     background: var(--bg2); border-bottom: 1px solid var(--border);
-    padding: 0 1rem; display: flex; align-items: center;
-    justify-content: space-between; height: 56px; position: sticky; top: 0; z-index: 100;
+    padding: 0 1rem; display: flex; align-items: center; flex-wrap: wrap;
+    gap: 4px 8px; min-height: 56px; position: sticky; top: 0; z-index: 100;
   }
   .logo {
-    display: flex; align-items: center; gap: 9px;
+    display: flex; align-items: center; gap: 9px; flex: 0 0 auto;
     font-family: var(--font-head); font-size: 17px; font-weight: 800;
     letter-spacing: -0.3px; color: var(--text); text-decoration: none;
   }
@@ -112,20 +115,20 @@
     border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px;
   }
   .logo span { color: var(--accent); }
-  .header-actions { display: flex; gap: 6px; align-items: center; }
+  .header-actions { display: flex; gap: 6px; align-items: center; flex: 0 0 auto; margin-left: auto; }
   .hide-xs { display: none; }
   @media (min-width: 420px) { .hide-xs { display: inline; } }
 
-  /* NAV */
+  /* NAV — inline in the header on desktop; its own wrapped row on phones. */
   nav.tabs {
-    background: var(--bg2); border-bottom: 1px solid var(--border);
-    display: flex; gap: 4px; overflow-x: auto; padding: 6px 8px;
-    position: sticky; top: 56px; z-index: 99; scrollbar-width: none;
+    display: flex; align-items: center; gap: 4px; flex: 1 1 auto; min-width: 0;
+    padding: 0; background: transparent; border: none;
+    overflow-x: auto; scrollbar-width: none;
   }
   nav.tabs::-webkit-scrollbar { display: none; }
   .tab {
     flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px;
-    padding: 8px 14px; border-radius: 20px; border: 1px solid transparent;
+    padding: 8px 12px; border-radius: 20px; border: 1px solid transparent;
     background: transparent; color: var(--text2); font-family: var(--font-body);
     font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap;
     transition: var(--transition); min-height: 40px;
@@ -133,11 +136,11 @@
   .tab:hover { background: var(--bg3); color: var(--text); }
   .tab.active { background: var(--accent); color: var(--on-accent); font-weight: 700; }
   /* Mobile nav: primary destinations are always visible; secondary ones collapse
-     behind "More". On >=720px the More button hides and every tab is inline, so the
-     desktop navigation is unchanged. */
+     behind "More". The nav takes its own wrapped row under the brand. On >=720px the
+     More button hides and every tab sits inline in the single header row. */
   .nav-more-btn { display: none; }
   @media (max-width: 719px) {
-    nav.tabs { flex-wrap: wrap; overflow-x: visible; }
+    nav.tabs { flex-basis: 100%; flex-wrap: wrap; overflow-x: visible; }
     .nav-more-btn { display: inline-flex; }
     .tab-secondary { display: none; }
     nav.tabs.more-open .tab-secondary { display: inline-flex; }
@@ -348,8 +351,8 @@
   .court-cfg { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; background: var(--bg2); margin-bottom: 10px; }
   .court-cfg:last-child { margin-bottom: 0; }
   .court-cfg.inactive { opacity: 0.72; border-style: dashed; }
-  .court-cfg-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
-  .court-cfg-title { font-family: var(--font-head); font-size: 13.5px; font-weight: 800; }
+  .court-cfg-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+  .court-cfg-title { font-family: var(--font-head); font-size: 13.5px; font-weight: 800; margin-right: auto; }
   .court-cfg-times { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .court-cfg-times .field { margin-bottom: 0; }
   .cfg-msg { font-size: 12.5px; line-height: 1.5; margin-top: 8px; }
@@ -380,21 +383,33 @@
   .court-actions .btn { flex: 1 1 auto; }
   .vs-label { font-family: var(--font-head); font-size: 10px; font-weight: 700; color: var(--text3); letter-spacing: 1px; }
 
-  /* MATCH ROWS */
-  .mgrid { display: flex; flex-direction: column; gap: 6px; }
-  .mrow { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 11px; }
+  /* MATCH ROWS / CARDS */
+  /* Single column by default (mobile/tablet); two comfortable columns on wide
+     desktops where the cards still read cleanly. gap drives the separation. */
+  .mgrid { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  @media (min-width: 820px) { .mgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; } }
+  .mrow { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px 15px; display: flex; flex-direction: column; gap: 10px; }
   .mrow.live { border-color: rgba(245,166,35,0.35); background: rgba(245,166,35,0.04); }
   .mrow.done { border-color: rgba(184,245,74,0.16); }
-  .mrow-top { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; flex-wrap: wrap; }
-  .mrow-id { font-family: var(--font-head); font-size: 11.5px; font-weight: 800; color: var(--text2); letter-spacing: 0.4px; }
+  .mrow-top { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+  .mrow-id { font-family: var(--font-head); font-size: 12px; font-weight: 800; color: var(--text2); letter-spacing: 0.5px; }
+  .mrow-meta { font-size: 11.5px; color: var(--text3); letter-spacing: 0.2px; }
   .mrow-teams { display: flex; flex-direction: column; gap: 2px; }
   .mrow-team { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; font-size: 14px; }
   .mrow-team .nm { overflow-wrap: anywhere; }
   .mrow-team .sc { font-family: var(--font-head); font-weight: 800; font-variant-numeric: tabular-nums; flex-shrink: 0; }
   .mrow-team.win .nm, .mrow-team.win .sc { color: var(--accent); }
   .mrow-team.lose { opacity: 0.5; }
-  .mrow-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .mrow-actions { display: flex; gap: 6px; margin-top: 2px; flex-wrap: wrap; border-top: 1px solid var(--border); padding-top: 10px; }
   .mrow-actions .btn { flex: 0 1 auto; }
+
+  /* Larger match tile hierarchy: id/stage, group/round, teams with a VS divider,
+     then the score/action footer. Team names get more room and wrap safely. */
+  .match-card { gap: 11px; }
+  .match-card .match-teams { font-size: 15px; line-height: 1.6; gap: 6px; }
+  .match-card .match-teams .t .nm { font-weight: 600; }
+  .match-card .vs-label { display: flex; align-items: center; gap: 8px; color: var(--text3); }
+  .match-card .vs-label::before, .match-card .vs-label::after { content: ''; height: 1px; flex: 1; background: var(--border); }
 
   /* TABLE */
   .tbl-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg3); -webkit-overflow-scrolling: touch; }
@@ -555,14 +570,12 @@
       <div class="logo-icon">🏸</div>
       Best<span>Shot</span>
     </a>
+    <nav class="tabs" id="nav-tabs" aria-label="Main navigation"></nav>
     <div class="header-actions">
       <button class="btn btn-xs" id="theme-toggle" onclick="App.toggleTheme()" title="Toggle light/dark theme">🌙<span class="hide-xs"> Theme</span></button>
       <button class="btn btn-xs" onclick="App.about()">? <span class="hide-xs">Help</span></button>
-      <button class="btn btn-xs" onclick="App.nav('settings')">⚙️ <span class="hide-xs">Settings</span></button>
     </div>
   </header>
-
-  <nav class="tabs" id="nav-tabs"></nav>
 
   <main id="view"></main>
 </div>
@@ -919,6 +932,43 @@
 
   function setCourtEnabled(id, on) {
     return updateCourt(id, { enabled: !!on });
+  }
+
+  // Append a new court with defaults. Existing courts (ids, names, hours, history)
+  // are untouched; the new court is enabled and open with the standard window.
+  function addCourt() {
+    if (state.courts.length >= MAX_COURTS) {
+      return { ok: false, msg: 'The maximum is ' + MAX_COURTS + ' courts.' };
+    }
+    const id = nextCourtId();
+    const court = newCourt({ id: id, name: 'Court ' + id, startTime: '06:00', endTime: '08:00', enabled: true });
+    const list = state.courts.concat([court]);
+    const err = validateCourts(list);
+    if (err) return { ok: false, msg: err };
+    state.courts = list;
+    save();
+    return { ok: true, court: court };
+  }
+
+  // Remove a court entirely. Never deletes matches or results — match history keeps
+  // the original court id (rendered as "Court N" if the court no longer exists). A
+  // court with a match in progress is refused so the live match finishes safely.
+  function removeCourt(id) {
+    const court = courtById(id);
+    if (!court) return { ok: false, msg: 'Court not found.' };
+    if (state.courts.length <= MIN_COURTS) {
+      return { ok: false, msg: 'At least ' + MIN_COURTS + ' court is required.' };
+    }
+    if (matchOnCourt(id)) {
+      return { ok: false, msg: 'A match is in progress on ' + court.name + '. Finish or reset it before removing this court.' };
+    }
+    const list = state.courts.filter(function (c) { return c.id !== id; });
+    if (!list.some(function (c) { return c.enabled !== false; })) list[0].enabled = true;
+    const err = validateCourts(list);
+    if (err) return { ok: false, msg: err };
+    state.courts = list;
+    save();
+    return { ok: true };
   }
 
   /* ── level configuration ─────────────────────────────── */
@@ -2776,6 +2826,8 @@
     setCourtCount: setCourtCount,
     updateCourt: updateCourt,
     setCourtEnabled: setCourtEnabled,
+    addCourt: addCourt,
+    removeCourt: removeCourt,
 
     newLevel: newLevel,
     normalizeLevel: normalizeLevel,
@@ -2945,8 +2997,10 @@
   let navMoreOpen = false;
 
   function tabBtn(s, cur) {
-    return '<button class="tab' + (s.id === cur ? ' active' : '') + '" onclick="App.nav(\'' + s.id + '\')">' +
-      '<span>' + s.icon + '</span>' + esc(s.label) + '</button>';
+    const active = s.id === cur;
+    return '<button class="tab' + (active ? ' active' : '') + '"' + (active ? ' aria-current="page"' : '') +
+      ' onclick="App.nav(\'' + s.id + '\')">' +
+      '<span aria-hidden="true">' + s.icon + '</span>' + esc(s.label) + '</button>';
   }
 
   function renderTabs() {
@@ -2956,11 +3010,9 @@
     let html = primary.map(function (s) { return tabBtn(s, cur); }).join('');
     const moreActive = secondary.some(function (s) { return s.id === cur; });
     html += '<button class="tab nav-more-btn' + (navMoreOpen || moreActive ? ' active' : '') +
-      '" onclick="App.toggleNavMore()" aria-expanded="' + (navMoreOpen ? 'true' : 'false') + '">☰ More</button>';
-    html += secondary.map(function (s) {
-      return '<button class="tab tab-secondary' + (s.id === cur ? ' active' : '') + '" onclick="App.nav(\'' + s.id + '\')">' +
-        '<span>' + s.icon + '</span>' + esc(s.label) + '</button>';
-    }).join('');
+      '" onclick="App.toggleNavMore()" aria-expanded="' + (navMoreOpen ? 'true' : 'false') + '">' +
+      '<span aria-hidden="true">☰</span> More</button>';
+    html += secondary.map(function (s) { return tabBtn(s, cur).replace('class="tab', 'class="tab tab-secondary'); }).join('');
     const nav = $('#nav-tabs');
     nav.innerHTML = html;
     nav.classList.toggle('more-open', navMoreOpen);
@@ -3028,12 +3080,6 @@
     if (m.status !== 'completed') return '';
     const id = side === 'A' ? m.teamA : m.teamB;
     return m.winner === id ? ' win' : ' lose';
-  }
-
-  function teamsBlockScored(m) {
-    const tA = TM.getTeam(m.teamA), tB = TM.getTeam(m.teamB);
-    return '<div class="t' + teamRowClass(m, 'A') + '"><span class="nm">' + esc(tA ? tA.name : 'TBD') + '</span>' + scoreSpan(m, 'A') + '</div>' +
-      '<div class="t' + teamRowClass(m, 'B') + '"><span class="nm">' + esc(tB ? tB.name : 'TBD') + '</span>' + scoreSpan(m, 'B') + '</div>';
   }
 
   function canStart(m, courtId) {
@@ -3590,7 +3636,8 @@
     }
     html += '</div>';
 
-    html += '<div class="court-actions"><button class="btn btn-xs btn-ghost" onclick="App.toggleCourt(' + court.id + ')">' + (court.closed ? 'Reopen court' : 'Mark closed') + '</button></div>';
+    // The Courts screen is an operational monitor only. Court configuration
+    // (add/remove/enable/rename/hours/close) lives under Settings → Courts.
     html += '</div>';
     return html;
   }
@@ -3605,7 +3652,10 @@
     const st = TM.getState();
     let html = '<div class="page-title">Courts</div>';
     html += '<div class="page-subtitle">Rolling allocation — a court takes the next eligible match as soon as it frees up. No fixed slots.</div>';
-    html += '<div class="courts-grid">' + st.courts.map(courtCard).join('') + '</div>';
+    // Explicit callback: Array.map would otherwise pass (element, index, array) and
+    // feed the index in as `compact` and the whole array in as the suggestion map,
+    // which crashed courtCard the moment any court had a suggested next match.
+    html += '<div class="courts-grid">' + st.courts.map(function (c) { return courtCard(c); }).join('') + '</div>';
 
     const ranked = TM.rankCandidates(0);
     html += '<div class="section-title">Waiting / queued (' + ranked.length + ' eligible) <span class="line"></span></div>';
@@ -3650,11 +3700,38 @@
   }
 
   /* ═══════════════ MATCHES ═══════════════ */
+  // MATCH ID / STAGE for the card header — separate from stagePill (which folds the
+  // group/round together) so the Matches card can show a clear two-line hierarchy.
+  function matchStagePill(m) {
+    if (m.stage === 'group') return '<span class="pill">Group Stage</span>';
+    return '<span class="pill">' + esc(TM.stageDisplayName(m.stage, TM.KNOCKOUT_LABEL[m.stage])) + '</span>';
+  }
+
+  // The Group / Round line: "Group A · Round 2" for group matches, the bracket round
+  // name for knockout matches.
+  function matchMetaLine(m) {
+    if (m.stage === 'group') return esc(TM.groupLabel(m.group)) + ' · Round ' + esc(String(m.round));
+    return esc(TM.stageDisplayName(m.stage, TM.KNOCKOUT_LABEL[m.stage]));
+  }
+
+  // Team A over a VS divider over Team B, so long names wrap safely and the two
+  // sides read as distinct matchup rows.
+  function matchTeamsWithVs(m) {
+    const tA = TM.getTeam(m.teamA), tB = TM.getTeam(m.teamB);
+    const row = function (t, side) {
+      return '<div class="t' + teamRowClass(m, side) + '"><span class="nm">' + esc(t ? t.name : 'TBD') + '</span>' + scoreSpan(m, side) + '</div>';
+    };
+    return '<div class="court-teams match-teams">' + row(tA, 'A') +
+      '<div class="vs-label">VS</div>' +
+      row(tB, 'B') + '</div>';
+  }
+
   function matchRow(m, from) {
     if (m.bye) {
-      return '<div class="mrow done">' +
-        '<div class="mrow-top"><span class="mrow-id">' + esc(m.id) + '</span>' + stagePill(m) + '<span class="pill pill-done">Bye</span></div>' +
-        '<div class="court-teams">' + teamsBlockScored(m) + '</div>' +
+      return '<div class="mrow done match-card">' +
+        '<div class="mrow-top"><span class="mrow-id">' + esc(m.id) + '</span>' + matchStagePill(m) + '<span class="pill pill-done">Bye</span></div>' +
+        '<div class="mrow-meta">' + matchMetaLine(m) + '</div>' +
+        matchTeamsWithVs(m) +
         '<div class="mrow-actions"><span class="muted" style="font-size:11.5px;">Advances automatically</span></div>' +
         '</div>';
     }
@@ -3675,9 +3752,10 @@
         '<button class="btn btn-xs" onclick="App.askReset(\'' + m.id + '\',\'' + from + '\')">↺ Reset</button>';
     }
 
-    return '<div class="mrow' + cls + '">' +
-      '<div class="mrow-top"><span class="mrow-id">' + esc(m.id) + '</span>' + stagePill(m) + statusPill(m.status) + (m.court ? courtPill(m.court) : '') + '</div>' +
-      '<div class="court-teams">' + teamsBlockScored(m) + '</div>' +
+    return '<div class="mrow match-card' + cls + '">' +
+      '<div class="mrow-top"><span class="mrow-id">' + esc(m.id) + '</span>' + matchStagePill(m) + statusPill(m.status) + (m.court ? courtPill(m.court) : '') + '</div>' +
+      '<div class="mrow-meta">' + matchMetaLine(m) + '</div>' +
+      matchTeamsWithVs(m) +
       '<div class="mrow-actions">' + actions + '</div>' +
       '</div>';
   }
@@ -4085,12 +4163,16 @@
         : (cur ? '<span class="pill pill-live">● In progress</span>' : (TM.courtAcceptsNewMatch(c) ? '<span class="pill pill-free">Available now</span>' : '<span class="pill">Outside window</span>'));
       let html = '<div class="court-cfg' + (on ? '' : ' inactive') + '">';
       html += '<div class="court-cfg-head"><span class="court-cfg-title">' + esc(c.name) + '</span>' + status +
-        '<label class="switch"><input type="checkbox"' + (on ? ' checked' : '') + ' onchange="App.toggleCourtConfig(' + c.id + ',this.checked)"><span class="slider"></span></label></div>';
+        '<label class="switch"><input type="checkbox"' + (on ? ' checked' : '') + ' onchange="App.toggleCourtConfig(' + c.id + ',this.checked)" aria-label="Enable ' + esc(c.name) + '"><span class="slider"></span></label>' +
+        '<button class="btn btn-xs btn-danger" onclick="App.removeCourt(' + c.id + ')" title="Remove this court">Remove</button></div>';
       html += '<div class="field" style="margin-bottom:10px;"><label>Name</label><input type="text" value="' + esc(c.name) + '" maxlength="30" ' +
         'onchange="App.renameCourt(' + c.id + ',this.value)" onkeydown="if(event.key===\'Enter\'){this.blur();}"></div>';
       html += '<div class="court-cfg-times">' +
         '<div class="field"><label>Available from</label><input type="time" value="' + esc(c.startTime) + '" onchange="App.setCourtTime(' + c.id + ',\'startTime\',this.value)"></div>' +
         '<div class="field"><label>Available until</label><input type="time" value="' + esc(c.endTime) + '" onchange="App.setCourtTime(' + c.id + ',\'endTime\',this.value)"></div>' +
+        '</div>';
+      html += '<div class="btn-group" style="margin-top:10px;">' +
+        '<button class="btn btn-xs btn-ghost" onclick="App.toggleCourt(' + c.id + ')">' + (c.closed ? 'Reopen court' : 'Mark closed') + '</button>' +
         '</div>';
       if (cur) html += '<div class="muted" style="font-size:11.5px;margin-top:8px;">' + esc(cur.id) + ' is in progress here. Changes apply to the next match; this one finishes normally.</div>';
       html += '</div>';
@@ -4141,6 +4223,26 @@
     applyCfg(r,
       r.ok ? (r.court.name + (on ? ' enabled.' : ' disabled — it will not receive new matches.')) : null,
       r.ok ? (r.court.name + (on ? ' enabled' : ' disabled')) : null);
+  }
+
+  function addCourt() {
+    const r = TM.addCourt();
+    applyCfg(r, r.ok ? ('Added ' + r.court.name + '. Rename it and set its hours if needed.') : null,
+      r.ok ? (r.court.name + ' added') : null);
+  }
+
+  function removeCourt(id) {
+    const c = TM.courtById(id);
+    if (!c) { toast('Court not found.'); return; }
+    confirm('Remove ' + c.name + '?',
+      'Matches and results stay exactly as they are — only the court slot is removed. A match already in progress on this court is protected; finish or reset it first.',
+      function () {
+        const r = TM.removeCourt(id);
+        if (!r.ok) { toast(r.msg); render(); return; }
+        toast(c.name + ' removed');
+        render();
+        cfgMsg({ ok: true, msg: c.name + ' removed. Matches and results were not changed.' });
+      });
   }
 
   /* ═══════════════ TEAM LEVEL CONFIGURATION ═══════════════ */
@@ -4446,9 +4548,14 @@
     }
     html += '</select></div>';
     html += '<div class="muted" style="font-size:12px;">Courts are listed below. Reducing the count disables the extra courts without deleting their configuration or match history; increasing it adds a new court with defaults.</div>';
+    html += '<div class="btn-group" style="margin-top:10px;">' +
+      '<button class="btn btn-sm" onclick="App.addCourt()"' + (st.courts.length >= TM.MAX_COURTS ? ' disabled' : '') + '>+ Add court</button>' +
+      '</div>';
     html += '</div>';
 
-    html += '<div class="card" style="margin-top:10px;">' + courtConfigBlocks(st) + '<div class="cfg-msg" id="cfg-msg"></div></div>';
+    html += '<div class="card" style="margin-top:10px;">' + courtConfigBlocks(st) + '<div class="cfg-msg" id="cfg-msg"></div>';
+    html += '<div class="muted" style="font-size:12px;margin-top:10px;">Add, rename, re-time, enable/disable or remove courts here. Disabling or removing a court never deletes matches, results, teams or groups, and never regenerates fixtures or touches standings or the knockout bracket. A match already in progress on a court keeps playing to a finish.</div>';
+    html += '</div>';
 
     html += '<div class="section-title">Scheduling <span class="line"></span></div>';
     html += '<div class="card">' +
@@ -4726,6 +4833,8 @@
     renameCourt: renameCourt,
     setCourtTime: setCourtTime,
     toggleCourtConfig: toggleCourtConfig,
+    addCourt: addCourt,
+    removeCourt: removeCourt,
 
     addLevel: addLevel,
     renameLevel: renameLevel,
