@@ -132,6 +132,16 @@
   }
   .tab:hover { background: var(--bg3); color: var(--text); }
   .tab.active { background: var(--accent); color: var(--on-accent); font-weight: 700; }
+  /* Mobile nav: primary destinations are always visible; secondary ones collapse
+     behind "More". On >=720px the More button hides and every tab is inline, so the
+     desktop navigation is unchanged. */
+  .nav-more-btn { display: none; }
+  @media (max-width: 719px) {
+    nav.tabs { flex-wrap: wrap; overflow-x: visible; }
+    .nav-more-btn { display: inline-flex; }
+    .tab-secondary { display: none; }
+    nav.tabs.more-open .tab-secondary { display: inline-flex; }
+  }
 
   main { padding: 1.25rem 1rem calc(3rem + var(--safe-bottom)); max-width: 1080px; margin: 0 auto; width: 100%; }
   @media (min-width: 720px) { main { padding: 1.75rem 1.5rem 3rem; } }
@@ -283,6 +293,23 @@
   .leader-group { font-size: 11px; color: var(--text3); margin-top: 1px; }
   .leader-stat { font-family: var(--font-head); font-size: 12.5px; font-weight: 800; color: var(--accent); white-space: nowrap; flex-shrink: 0; }
   .leader-stat .diff { color: var(--text3); font-weight: 600; }
+  /* Leaders table: team on the left, tabular stat columns on the right. */
+  .leader-cols { display: flex; gap: 10px; flex-shrink: 0; font-family: var(--font-head); font-size: 12.5px; font-weight: 800; color: var(--text2); font-variant-numeric: tabular-nums; }
+  .leader-cols > span { width: 30px; text-align: right; }
+  .leader-cols .diff { color: var(--text3); font-weight: 600; }
+  .leader-row.head { border-bottom: 1px solid var(--border2); padding-bottom: 6px; }
+  .leader-row.head .leader-rank, .leader-row.head .leader-body { font-size: 10px; font-weight: 700; letter-spacing: 0.9px; text-transform: uppercase; color: var(--text3); }
+  .leader-row.head .leader-cols { color: var(--text3); font-size: 10px; letter-spacing: 0.9px; }
+
+  /* Waiting queue summary */
+  .queue-list { display: flex; flex-direction: column; }
+  .queue-row { display: flex; align-items: baseline; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .queue-row:last-child { border-bottom: none; }
+  .queue-id { font-family: var(--font-head); font-size: 11.5px; font-weight: 800; color: var(--text2); letter-spacing: 0.4px; flex-shrink: 0; }
+  .queue-label { font-size: 10.5px; color: var(--text3); flex-shrink: 0; }
+  .queue-teams { font-size: 13px; color: var(--text); overflow-wrap: anywhere; flex: 1 1 100%; min-width: 0; }
+  .queue-teams .vs { color: var(--text3); font-size: 11px; }
+  .queue-more { font-size: 12px; color: var(--text3); margin-top: 8px; }
 
   .dash-actions { margin-top: 12px; }
   .link-btn { background: none; border: none; padding: 0; color: var(--accent); font-family: var(--font-body); font-size: 12.5px; font-weight: 600; cursor: pointer; min-height: 40px; display: inline-flex; align-items: center; }
@@ -2232,7 +2259,7 @@
     const all = [];
     groupIds().forEach(function (g) {
       computeStandings(g).forEach(function (r) {
-        if (r.played > 0) all.push({ team: r.team, group: g, played: r.played, pts: r.pts, diff: r.diff, pf: r.pf });
+        if (r.played > 0) all.push({ team: r.team, group: g, played: r.played, won: r.won, lost: r.lost, pts: r.pts, diff: r.diff, pf: r.pf });
       });
     });
     all.sort(function (a, b) {
@@ -2258,6 +2285,92 @@
     if (info.groupDone && p.groupTotal > 0) return 'ready';
     if (state.teams.length === 0) return 'empty';
     return 'group';
+  }
+
+  // Plural display name for a knockout stage. The stored names are singular
+  // ("Quarter-Final") because they name one match; the dashboard lists the round,
+  // so it shows "Quarter-finals"/"Semi-finals". The map is keyed by stage id so a
+  // dynamically produced round (Round of 16, …) always resolves; unknown keys fall
+  // back to the stored name unchanged.
+  const STAGE_DISPLAY = {
+    r32: 'Round of 32', r16: 'Round of 16',
+    qf: 'Quarter-finals', sf: 'Semi-finals', final: 'Final'
+  };
+  function stageDisplayName(key, fallbackName) {
+    return STAGE_DISPLAY[key] || fallbackName || key || '';
+  }
+
+  // The knockout round the tournament is actually on: the earliest bracket round
+  // (bracket order, not table order) that still has a real match to play. Reads the
+  // live matches, so a not-yet-generated round is never guessed. Returns
+  // { key, name, done, total } or null when no bracket exists.
+  function currentKnockoutRound() {
+    const real = state.matches.filter(function (m) { return m.stage !== 'group' && !m.bye; });
+    if (!real.length) return null;
+    const order = {};
+    KNOCKOUT_ROUNDS.slice().sort(function (a, b) { return b.size - a.size; })
+      .forEach(function (r, i) { order[r.key] = i; });
+    const groups = {};
+    real.forEach(function (m) { (groups[m.stage] = groups[m.stage] || []).push(m); });
+    const keys = Object.keys(groups).sort(function (a, b) { return (order[a] || 0) - (order[b] || 0); });
+    const current = keys.find(function (k) { return groups[k].some(function (m) { return m.status !== 'completed'; }); }) || keys[keys.length - 1];
+    const list = groups[current];
+    const done = list.filter(function (m) { return m.status === 'completed'; }).length;
+    const def = KNOCKOUT_ROUNDS.find(function (r) { return r.key === current; });
+    return { key: current, name: stageDisplayName(current, def && def.name), done: done, total: list.length };
+  }
+
+  // Live scheduler read-out for the top status strip. Counts only what the
+  // scheduler currently holds: running matches, courts free to take a new match,
+  // and queued matches whose teams are both free (i.e. actually startable now).
+  // Nothing here is invented — it is derived from state.matches / state.courts.
+  function schedulerSummary() {
+    const busy = busyTeamIds();
+    const live = state.matches.filter(function (m) { return m.status === 'in_progress'; }).length;
+    const courts = state.courts || [];
+    const available = courts.filter(function (c) { return courtStatus(c) === 'available'; }).length;
+    const queued = queuedMatches().length;
+    const ready = queuedMatches().filter(function (m) { return !busy[m.teamA] && !busy[m.teamB]; }).length;
+    return { live: live, available: available, queued: queued, ready: ready };
+  }
+
+  // Ordered waiting queue for the compact dashboard summary: the scheduler's own
+  // ranking (rankCandidates), so the dashboard only visualises the scheduler's
+  // decisions and never reorders them. Limited to `limit` entries.
+  function waitingQueue(limit) {
+    const ranked = rankCandidates(0);
+    const rows = ranked.map(function (r) {
+      const m = r.match;
+      return {
+        id: m.id, stage: m.stage, group: m.group,
+        teamA: m.teamA, teamB: m.teamB,
+        label: (m.stage === 'group') ? groupLabel(m.group) : stageDisplayName(m.stage, KNOCKOUT_LABEL[m.stage]),
+        reason: r.reason
+      };
+    });
+    return { rows: limit ? rows.slice(0, limit) : rows, total: rows.length };
+  }
+
+  // Human-readable status sentence for the dashboard status strip. Uses group
+  // counts for the group stage and the live knockout round for the bracket, so the
+  // two are never conflated.
+  function statusText(status, p, kpi) {
+    const sched = schedulerSummary();
+    if (status === 'empty') return 'No pairs configured yet. Add pairs to build the draw.';
+    if (status === 'complete') return '🏆 Tournament complete · Champion decided';
+    if (status === 'knockout') {
+      const r = currentKnockoutRound();
+      if (!r) return '🔵 Knockout in progress';
+      return '🔵 ' + r.name + ' in progress · ' + r.done + ' / ' + r.total + ' complete';
+    }
+    if (status === 'ready') return '🟡 Group Stage complete · Knockout stage ready';
+    if (sched.live > 0) {
+      return '🔴 ' + sched.live + (sched.live === 1 ? ' match' : ' matches') + ' live · ' +
+        sched.available + ' court' + (sched.available === 1 ? '' : 's') + ' available · ' +
+        sched.queued + ' match' + (sched.queued === 1 ? '' : 'es') + ' queued';
+    }
+    if (p.groupTotal === 0) return '🟢 Group Stage · no matches generated yet';
+    return '🟢 Group Stage in progress · ' + p.groupDone + ' / ' + p.groupTotal + ' group matches complete';
   }
 
   /* ── team editing ────────────────────────────────────── */
@@ -2740,6 +2853,11 @@
     levelDistribution: levelDistribution,
     groupPerformance: groupPerformance,
     qualifierCount: qualifierCount,
+    statusText: statusText,
+    stageDisplayName: stageDisplayName,
+    currentKnockoutRound: currentKnockoutRound,
+    schedulerSummary: schedulerSummary,
+    waitingQueue: waitingQueue,
 
     validateTeams: validateTeams,
     validateGroups: validateGroups,
@@ -2812,16 +2930,48 @@
     if (!SCREENS.some(function (s) { return s.id === screen; })) screen = 'dashboard';
     st.ui.screen = screen;
     TM.save();
+    // Collapse the mobile "More" menu on every navigation. A secondary screen (e.g.
+    // Settings) still shows the control as active via renderTabs, independent of the
+    // expanded state, so this only closes the menu.
+    navMoreOpen = false;
     render();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
+  // On phones the primary destinations stay visible and the rest live behind a
+  // "More" control so nothing is cut off. On desktop every destination is shown as
+  // before — the More button is hidden by CSS at >=720px.
+  const PRIMARY_NAV = ['dashboard', 'matches', 'courts'];
+  let navMoreOpen = false;
+
+  function tabBtn(s, cur) {
+    return '<button class="tab' + (s.id === cur ? ' active' : '') + '" onclick="App.nav(\'' + s.id + '\')">' +
+      '<span>' + s.icon + '</span>' + esc(s.label) + '</button>';
+  }
+
   function renderTabs() {
     const cur = TM.getState().ui.screen;
-    $('#nav-tabs').innerHTML = SCREENS.map(function (s) {
-      return '<button class="tab' + (s.id === cur ? ' active' : '') + '" onclick="App.nav(\'' + s.id + '\')">' +
+    const primary = SCREENS.filter(function (s) { return PRIMARY_NAV.indexOf(s.id) !== -1; });
+    const secondary = SCREENS.filter(function (s) { return PRIMARY_NAV.indexOf(s.id) === -1; });
+    let html = primary.map(function (s) { return tabBtn(s, cur); }).join('');
+    const moreActive = secondary.some(function (s) { return s.id === cur; });
+    html += '<button class="tab nav-more-btn' + (navMoreOpen || moreActive ? ' active' : '') +
+      '" onclick="App.toggleNavMore()" aria-expanded="' + (navMoreOpen ? 'true' : 'false') + '">☰ More</button>';
+    html += secondary.map(function (s) {
+      return '<button class="tab tab-secondary' + (s.id === cur ? ' active' : '') + '" onclick="App.nav(\'' + s.id + '\')">' +
         '<span>' + s.icon + '</span>' + esc(s.label) + '</button>';
     }).join('');
+    const nav = $('#nav-tabs');
+    nav.innerHTML = html;
+    nav.classList.toggle('more-open', navMoreOpen);
+  }
+
+  function toggleNavMore() {
+    navMoreOpen = !navMoreOpen;
+    const nav = $('#nav-tabs');
+    nav.classList.toggle('more-open', navMoreOpen);
+    const btn = nav.querySelector('.nav-more-btn');
+    if (btn) btn.setAttribute('aria-expanded', navMoreOpen ? 'true' : 'false');
   }
 
   /* ── small view helpers ────────────────────────────── */
@@ -3077,21 +3227,26 @@
     let html = '<div class="page-title">Dashboard</div>';
     html += '<div class="page-subtitle">Live control centre for ' + esc(st.tournament.name) + '</div>';
 
-    html += statusStrip(status, kpi, p);
+    html += statusStrip(status, p, kpi);
     html += kpiCards(kpi);
 
     html += '<div class="section-title">Tournament progress <span class="line"></span></div>';
     html += progressCard(stages, p);
 
+    // Operational blocks come before the analytics so the dashboard reads as a
+    // live control centre: courts, then the next matches, then the waiting queue.
     html += '<div class="section-title">Live courts <span class="line"></span></div>';
     html += liveCourtsBlock(st, kpi);
 
     html += '<div class="section-title">Next matches <span class="line"></span></div>';
     html += nextMatchesBlock();
 
+    html += '<div class="section-title">Waiting queue <span class="line"></span></div>';
+    html += waitingQueueBlock();
+
     html += '<div class="analytics-grid">';
-    html += '<div class="dash-col">' + levelDistributionBlock() + '</div>';
     html += '<div class="dash-col">' + groupPerformanceBlock() + '</div>';
+    html += '<div class="dash-col">' + levelDistributionBlock() + '</div>';
     html += '</div>';
 
     html += '<div class="analytics-grid">';
@@ -3111,15 +3266,12 @@
   function pct(a, b) { return b ? Math.round((a / b) * 100) : 0; }
 
   /* ── status strip ─────────────────────────────────────── */
-  function statusStrip(status, kpi, p) {
-    let cls = '', msg = '';
-    if (status === 'complete') { cls = 'complete'; msg = '🏆 Tournament complete'; }
-    else if (status === 'knockout') { cls = 'live'; msg = 'Knockout in progress · ' + p.knockoutDone + ' / ' + p.knockoutTotal + ' knockout matches complete'; }
-    else if (status === 'ready') { cls = 'ready'; msg = 'Group stage complete — ready for knockout generation.'; }
-    else if (status === 'empty') { cls = ''; msg = 'No pairs configured yet.'; }
-    else if (kpi.live > 0) { cls = 'live'; msg = kpi.live + (kpi.live === 1 ? ' match' : ' matches') + ' in progress · ' + kpi.courts + ' active courts'; }
-    else { cls = ''; msg = 'Group stage in progress · ' + kpi.completed + ' / ' + kpi.totalMatches + ' matches complete'; }
-    return '<div class="status-strip ' + cls + '"><span class="dot"></span><span>' + esc(msg) + '</span></div>';
+  // The visible wording comes from TM.statusText so it is unit-testable and always
+  // uses the group count (not the overall tournament total) during the group stage.
+  function statusStrip(status, p, kpi) {
+    const cls = { complete: 'complete', knockout: 'live', ready: 'ready' }[status] || (kpi.live > 0 ? 'live' : '');
+    return '<div class="status-strip ' + cls + '"><span class="dot"></span><span>' +
+      esc(TM.statusText(status, p, kpi)) + '</span></div>';
   }
 
   /* ── KPI cards ────────────────────────────────────────── */
@@ -3144,11 +3296,11 @@
     html += '<div class="stage-list">';
     html += stageRow('Group Stage', p.groupDone, p.groupTotal, p.groupTotal > 0);
     stages.forEach(function (s) {
-      html += stageRow(s.name, s.done, s.total, s.total > 0);
+      html += stageRow(TM.stageDisplayName(s.key, s.name), s.done, s.total, s.total > 0);
     });
     html += '</div>';
 
-    html += '<div class="progress-row" style="margin-top:16px;"><span>Overall</span><span class="mono">' + p.pct + '%</span></div>';
+    html += '<div class="progress-row" style="margin-top:16px;"><span>Overall</span><span class="mono">' + p.overallDone + ' / ' + p.overallTotal + ' · ' + p.pct + '%</span></div>';
     html += '<div class="progress-bar"><div class="progress-fill" style="width:' + p.pct + '%"></div></div>';
 
     if (!st.teams.length) html += '<div class="alert alert-info" style="margin:12px 0 0;">No pairs configured yet. Add pairs on the Teams screen to generate fixtures.</div>';
@@ -3166,12 +3318,42 @@
       '</div>';
   }
 
+  /* ── waiting queue ────────────────────────────────────── */
+  // Compact operational summary of the scheduler's waiting list. Shows the first
+  // few ranked matches plus a "+ N more waiting" tail; never a full match list.
+  function waitingQueueBlock() {
+    const q = TM.waitingQueue(4);
+    if (!q.total) {
+      const st = TM.getState();
+      if (st.knockout.champion) return '<div class="card"><div class="muted">The tournament is complete — nothing is waiting.</div></div>';
+      return '<div class="card"><div class="muted">No matches waiting.</div></div>';
+    }
+    let html = '<div class="card"><div class="queue-list">';
+    q.rows.forEach(function (r) {
+      const a = TM.getTeam(r.teamA), b = TM.getTeam(r.teamB);
+      html += '<div class="queue-row">' +
+        '<span class="queue-id">' + esc(r.id) + '</span>' +
+        '<span class="queue-label">' + esc(r.label) + '</span>' +
+        '<span class="queue-teams">' + esc(a ? a.name : '—') + ' <span class="vs">vs</span> ' + esc(b ? b.name : '—') + '</span>' +
+        '</div>';
+    });
+    html += '</div>';
+    if (q.total > q.rows.length) html += '<div class="queue-more">+ ' + (q.total - q.rows.length) + ' more waiting</div>';
+    html += '</div>';
+    return html;
+  }
+
   /* ── live courts ──────────────────────────────────────── */
   function liveCourtsBlock(st, kpi) {
-    if (!st.courts.length) return '<div class="card"><div class="muted">No courts configured.</div></div>';
-    let html = '';
-    if (!kpi.live) html += '<div class="muted" style="margin-bottom:10px;">No matches currently in progress.</div>';
-    html += '<div class="courts-grid">' + st.courts.map(function (c) { return courtCard(c, true); }).join('') + '</div>';
+    const enabled = st.courts.filter(function (c) { return c.enabled !== false; });
+    if (!enabled.length) return '<div class="card"><div class="muted">No courts enabled. Enable a court in Settings.</div></div>';
+    const sched = TM.schedulerSummary();
+    let html = '<div class="muted" style="margin-bottom:10px;">' + sched.live + ' live · ' +
+      sched.available + ' available · ' + enabled.length + ' court' + (enabled.length === 1 ? '' : 's') + ' enabled</div>';
+    // Compute the scheduler's suggestions once for the whole grid instead of once
+    // per court card.
+    const suggests = TM.suggestCourts();
+    html += '<div class="courts-grid">' + enabled.map(function (c) { return courtCard(c, true, suggests); }).join('') + '</div>';
     return html;
   }
 
@@ -3233,16 +3415,24 @@
     let html = '<div class="section-title">Current leaders <span class="line"></span></div>';
     html += '<div class="card">';
     if (!leaders.length) {
-      return html + '<div class="muted">Standings will appear after results are recorded.</div></div>';
+      return html + '<div class="muted">No completed matches yet.</div></div>';
     }
     html += '<div class="leader-list">';
+    html += '<div class="leader-row head">' +
+      '<div class="leader-rank">#</div>' +
+      '<div class="leader-body">Team</div>' +
+      '<div class="leader-cols"><span>P</span><span>W</span><span>Pts</span><span>Diff</span></div>' +
+      '</div>';
     leaders.forEach(function (l, i) {
       html += '<div class="leader-row">' +
         '<div class="leader-rank">' + (i + 1) + '</div>' +
         '<div class="leader-body"><div class="leader-name">' + esc(l.team.name) + '</div>' +
         (groups.length > 1 ? '<div class="leader-group">' + esc(TM.groupLabel(l.group)) + '</div>' : '') +
         '</div>' +
-        '<div class="leader-stat">' + l.pts + ' pts <span class="diff">· ' + (l.diff > 0 ? '+' : '') + l.diff + ' diff</span></div>' +
+        '<div class="leader-cols">' +
+          '<span>' + l.played + '</span><span>' + (l.won || 0) + '</span><span>' + l.pts + '</span>' +
+          '<span class="diff">' + (l.diff > 0 ? '+' : '') + l.diff + '</span>' +
+        '</div>' +
         '</div>';
     });
     html += '</div></div>';
@@ -3275,8 +3465,8 @@
   }
 
   function stagePill(m) {
-    if (m.stage === 'group') return '<span class="pill">Group ' + esc(m.group) + ' · R' + m.round + '</span>';
-    return '<span class="pill">' + esc(TM.KNOCKOUT_LABEL[m.stage]) + '</span>';
+    if (m.stage === 'group') return '<span class="pill">' + esc(TM.groupLabel(m.group)) + ' · R' + m.round + '</span>';
+    return '<span class="pill">' + esc(TM.stageDisplayName(m.stage, TM.KNOCKOUT_LABEL[m.stage])) + '</span>';
   }
 
   function recentBlock() {
@@ -3312,11 +3502,11 @@
   }
 
   /* ═══════════════ COURTS ═══════════════ */
-  function courtCard(court, compact) {
+  function courtCard(court, compact, suggestsIn) {
     const cur = TM.matchOnCourt(court.id);
     const enabled = court.enabled !== false;
     const accepts = TM.courtAcceptsNewMatch(court);
-    const suggests = TM.suggestCourts();
+    const suggests = suggestsIn || TM.suggestCourts();
     const sug = suggests[court.id];
     const cstate = TM.courtStatus(court);
 
@@ -3324,24 +3514,27 @@
     if (compact) {
       const cls = cstate === 'in_progress' ? ' live' : (cstate === 'disabled' ? ' disabled' : (cstate === 'closed' ? ' closed' : ' free'));
       let statusPill;
-      if (cstate === 'in_progress') statusPill = '<span class="pill pill-live">● Live</span>';
-      else if (cstate === 'disabled') statusPill = '<span class="pill pill-closed">Disabled</span>';
-      else if (cstate === 'closed') statusPill = '<span class="pill pill-closed">Closed</span>';
-      else statusPill = '<span class="pill pill-free">Available</span>';
+      if (cstate === 'in_progress') statusPill = '<span class="pill pill-live">● LIVE</span>';
+      else if (cstate === 'disabled') statusPill = '<span class="pill pill-closed">DISABLED</span>';
+      else if (cstate === 'closed') statusPill = '<span class="pill pill-closed">CLOSED</span>';
+      else statusPill = '<span class="pill pill-free">AVAILABLE</span>';
 
       let h = '<div class="court-card compact' + cls + '">';
       h += '<div class="court-head"><span class="court-name">' + esc(court.name) + '</span>' + statusPill + '</div>';
       if (cur) {
+        h += '<div class="court-block-label" style="margin:0;">Live now</div>';
         h += '<div class="court-teams">' + teamsBlock(cur) + '</div>';
         h += '<div class="court-reason mono">' + esc(cur.id) + ' · started ' + timeOf(cur.startedAt) + '</div>';
+        h += '<div class="court-actions"><button class="btn btn-primary btn-sm" onclick="App.openScore(\'' + cur.id + '\',\'courts\')">Enter result</button></div>';
       } else if (cstate === 'disabled') {
         h += '<div class="court-empty">Disabled in settings</div>';
       } else if (cstate === 'closed') {
         h += '<div class="court-empty">' + esc(TM.whyCourtUnavailable(court) || 'Court unavailable') + '</div>';
       } else if (sug) {
-        h += '<div class="court-reason" style="margin-top:0;">Next</div>';
+        const queued = TM.schedulerSummary().queued;
+        h += '<div class="court-block-label" style="margin:0;">NEXT · ' + esc(sug.match.id) + '</div>';
         h += '<div class="court-teams">' + teamsBlock(sug.match) + '</div>';
-        h += '<div class="court-reason mono">' + esc(sug.match.id) + '</div>';
+        h += '<div class="court-reason">Waiting: ' + queued + ' match' + (queued === 1 ? '' : 'es') + '</div>';
       } else {
         h += '<div class="court-empty">No eligible match waiting</div>';
       }
@@ -4493,6 +4686,7 @@
     render: render,
     toast: toast,
     toggleTheme: toggleTheme,
+    toggleNavMore: toggleNavMore,
 
     openScore: openScore,
     previewScore: previewScore,
