@@ -48,6 +48,11 @@
        on the accent, and the modal scrim. Both are overridden by the light theme. */
     --on-accent: #0d0f0e;
     --overlay: rgba(0,0,0,0.75);
+    /* Restrained elevation. Kept as tokens so the light theme can soften them
+       without touching any component rule. */
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.35);
+    --shadow: 0 4px 14px rgba(0,0,0,0.32);
+    --shadow-lg: 0 12px 34px rgba(0,0,0,0.5);
   }
 
   /* ── LIGHT THEME ───────────────────────────────────────────
@@ -83,6 +88,9 @@
     --bronze: #a05a2c;
     --on-accent: #ffffff;
     --overlay: rgba(20,24,15,0.45);
+    --shadow-sm: 0 1px 2px rgba(20,24,15,0.06);
+    --shadow: 0 3px 12px rgba(20,24,15,0.08);
+    --shadow-lg: 0 12px 30px rgba(20,24,15,0.16);
   }
 
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -93,22 +101,30 @@
     overscroll-behavior-y: none;
   }
 
+  /* Visible keyboard focus in both themes. Mouse clicks stay clean because only
+     :focus-visible draws the ring. */
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
   /* minmax(0,1fr) stops the single grid column from being forced wider than the
      viewport by wide min-content children (standings table, tab strip). */
   .app-shell { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; min-height: 100vh; }
 
-  /* One compact row on desktop: brand · navigation · theme/help. On phones the
-     navigation wraps naturally onto a second line so the existing primary + More
-     behaviour is preserved. */
+  /* One compact row at every width that fits: brand · navigation · theme/help.
+     A container query would be ideal, but the nav strip is allowed to scroll
+     internally so the row is kept intact (and the page never overflows). On phones
+     the navigation wraps onto its own second line so the primary + More behaviour
+     is preserved. */
   header {
     background: var(--bg2); border-bottom: 1px solid var(--border);
-    padding: 0 1rem; display: flex; align-items: center; flex-wrap: wrap;
-    gap: 4px 8px; min-height: 56px; position: sticky; top: 0; z-index: 100;
+    padding: 0 1rem; display: flex; align-items: center; flex-wrap: nowrap;
+    gap: 4px 10px; min-height: 56px; position: sticky; top: 0; z-index: 100;
+    box-shadow: var(--shadow-sm);
   }
   .logo {
     display: flex; align-items: center; gap: 9px; flex: 0 0 auto;
     font-family: var(--font-head); font-size: 17px; font-weight: 800;
     letter-spacing: -0.3px; color: var(--text); text-decoration: none;
+    min-height: 44px;
   }
   .logo-icon {
     width: 30px; height: 30px; background: var(--accent);
@@ -121,9 +137,9 @@
 
   /* NAV — inline in the header on desktop; its own wrapped row on phones. */
   nav.tabs {
-    display: flex; align-items: center; gap: 4px; flex: 1 1 auto; min-width: 0;
+    display: flex; align-items: center; gap: 3px; flex: 1 1 auto; min-width: 0;
     padding: 0; background: transparent; border: none;
-    overflow-x: auto; scrollbar-width: none;
+    overflow-x: auto; scrollbar-width: none; scroll-behavior: smooth;
   }
   nav.tabs::-webkit-scrollbar { display: none; }
   .tab {
@@ -137,28 +153,37 @@
   .tab.active { background: var(--accent); color: var(--on-accent); font-weight: 700; }
   /* Mobile nav: primary destinations are always visible; secondary ones collapse
      behind "More". The nav takes its own wrapped row under the brand. On >=720px the
-     More button hides and every tab sits inline in the single header row. */
+     More button hides and every tab sits inline in the single header row, scrolling
+     internally if the strip is too wide rather than overflowing the page. */
   .nav-more-btn { display: none; }
   @media (max-width: 719px) {
+    header { flex-wrap: wrap; }
     nav.tabs { flex-basis: 100%; flex-wrap: wrap; overflow-x: visible; }
     .nav-more-btn { display: inline-flex; }
     .tab-secondary { display: none; }
     nav.tabs.more-open .tab-secondary { display: inline-flex; }
+  }
+  /* At narrower desktop widths the nav strip compresses before it scrolls, so the
+     header remains a single row without clipping any destination. */
+  @media (min-width: 720px) and (max-width: 1080px) {
+    .logo { font-size: 16px; }
+    .tab { padding: 8px 10px; gap: 5px; }
   }
 
   main { padding: 1.25rem 1rem calc(3rem + var(--safe-bottom)); max-width: 1080px; margin: 0 auto; width: 100%; }
   @media (min-width: 720px) { main { padding: 1.75rem 1.5rem 3rem; } }
 
   /* TYPOGRAPHY */
-  .page-title { font-family: var(--font-head); font-size: 24px; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 0.35rem; }
-  .page-subtitle { font-size: 13.5px; color: var(--text2); margin-bottom: 1.5rem; font-weight: 300; }
-  .section-title { font-family: var(--font-head); font-size: 12px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: var(--text3); margin: 1.75rem 0 0.85rem; display: flex; align-items: center; gap: 10px; }
+  .page-title { font-family: var(--font-head); font-size: 26px; font-weight: 800; letter-spacing: -0.6px; margin-bottom: 0.3rem; line-height: 1.15; }
+  .page-subtitle { font-size: 13.5px; color: var(--text2); margin-bottom: 1.5rem; font-weight: 300; max-width: 70ch; }
+  .section-title { font-family: var(--font-head); font-size: 12px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: var(--text2); margin: 2rem 0 0.9rem; display: flex; align-items: center; gap: 10px; }
   .section-title:first-child { margin-top: 0; }
   .section-title .line { flex: 1; min-width: 0; height: 1px; background: var(--border); }
 
   /* CARDS */
-  .card { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 1rem; }
+  .card { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 1.1rem 1.15rem; box-shadow: var(--shadow-sm); }
   .card + .card { margin-top: 10px; }
+  .card.flush { padding: 0; overflow: hidden; }
 
   /* BUTTONS */
   .btn {
@@ -210,6 +235,23 @@
     -webkit-appearance: none; appearance: none;
   }
   .court-count-select:focus { border-color: var(--accent-border); box-shadow: 0 0 0 3px rgba(184,245,74,0.08); }
+  /* Selects used in Settings/Teams. Sized to a comfortable touch target so the
+     level/group pickers do not fall below the 44px guideline on phones. */
+  select.level-select, .team-edit-controls select {
+    background: var(--bg4); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); padding: 8px 10px; font-size: 13px; font-family: var(--font-body);
+    min-height: 40px; max-width: 100%; outline: none; transition: var(--transition);
+  }
+  select.level-select:focus, .team-edit-controls select:focus { border-color: var(--accent-border); box-shadow: 0 0 0 3px rgba(184,245,74,0.08); }
+  /* Any bare select inside a card (e.g. qualifiers per group) gets the same
+     comfortable touch target as the styled pickers. */
+  .card select {
+    background: var(--bg4); border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--text); padding: 9px 12px; font-family: var(--font-body); font-size: 14px;
+    min-height: 44px; max-width: 100%; outline: none; transition: var(--transition);
+    -webkit-appearance: none; appearance: none;
+  }
+  .card select:focus { border-color: var(--accent-border); box-shadow: 0 0 0 3px rgba(184,245,74,0.08); }
 
   /* PROGRESS */
   .progress-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.4rem; font-size: 13px; color: var(--text2); }
@@ -225,26 +267,26 @@
   .stat-card.accent-stat .stat-value { color: var(--accent); }
 
   /* DASHBOARD V2 */
-  .status-strip { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: var(--radius); background: var(--bg2); border: 1px solid var(--border); font-size: 13px; color: var(--text2); margin-bottom: 14px; }
-  .status-strip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text3); flex-shrink: 0; }
+  .status-strip { display: flex; align-items: center; gap: 11px; padding: 12px 15px; border-radius: var(--radius); background: var(--bg2); border: 1px solid var(--border); font-size: 13px; font-weight: 600; color: var(--text2); margin-bottom: 14px; box-shadow: var(--shadow-sm); }
+  .status-strip .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--text3); flex-shrink: 0; }
   .status-strip.live { border-color: rgba(245,166,35,0.3); background: var(--warn-bg); color: var(--warn); }
-  .status-strip.live .dot { background: var(--warn); }
+  .status-strip.live .dot { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-bg); }
   .status-strip.ready { border-color: var(--blue-border); background: var(--blue-bg); color: var(--blue); }
   .status-strip.ready .dot { background: var(--blue); }
   .status-strip.complete { border-color: rgba(255,217,61,0.4); background: linear-gradient(135deg, rgba(255,217,61,0.12), var(--accent-bg)); color: var(--gold); }
   .status-strip.complete .dot { background: var(--gold); }
 
   /* Compact KPI cards: 2 cols on phone, 3 on tablet, 6 on desktop. */
-  .kpi-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .kpi-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin-bottom: 4px; }
   @media (min-width: 560px) { .kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
   @media (min-width: 900px) { .kpi-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
-  .kpi-card { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); padding: 11px 13px; min-width: 0; }
+  .kpi-card { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 13px; min-width: 0; box-shadow: var(--shadow-sm); }
   .kpi-card.accent { border-color: var(--accent-border); background: var(--accent-bg); }
   .kpi-card.live { border-color: rgba(245,166,35,0.35); background: var(--warn-bg); }
-  .kpi-value { font-family: var(--font-head); font-size: 24px; font-weight: 800; line-height: 1.1; letter-spacing: -0.5px; color: var(--text); }
+  .kpi-value { font-family: var(--font-head); font-size: 25px; font-weight: 800; line-height: 1.1; letter-spacing: -0.5px; color: var(--text); font-variant-numeric: tabular-nums; }
   .kpi-card.accent .kpi-value { color: var(--accent); }
   .kpi-card.live .kpi-value { color: var(--warn); }
-  .kpi-label { font-size: 10px; font-weight: 700; letter-spacing: 0.9px; text-transform: uppercase; color: var(--text3); margin-top: 3px; }
+  .kpi-label { font-size: 10px; font-weight: 700; letter-spacing: 0.9px; text-transform: uppercase; color: var(--text3); margin-top: 4px; }
 
   /* Stage progress */
   .stage-list { display: flex; flex-direction: column; gap: 12px; }
@@ -303,6 +345,14 @@
   .leader-row.head { border-bottom: 1px solid var(--border2); padding-bottom: 6px; }
   .leader-row.head .leader-rank, .leader-row.head .leader-body { font-size: 10px; font-weight: 700; letter-spacing: 0.9px; text-transform: uppercase; color: var(--text3); }
   .leader-row.head .leader-cols { color: var(--text3); font-size: 10px; letter-spacing: 0.9px; }
+  /* Narrow screens: tighten the stat columns so the leaders table fits inside its
+     card without clipping at 320–375px. The head labels are the widest content, so
+     their letter-spacing is dropped to keep every column readable. */
+  @media (max-width: 430px) {
+    .leader-cols { gap: 5px; font-size: 12px; }
+    .leader-cols > span { width: 27px; }
+    .leader-row.head .leader-cols { letter-spacing: 0; font-size: 9.5px; }
+  }
 
   /* Waiting queue summary */
   .queue-list { display: flex; flex-direction: column; }
@@ -328,33 +378,46 @@
   [data-theme="light"] #toast { box-shadow: 0 8px 32px rgba(20,24,15,0.18); }
   [data-theme="light"] .champion-card { background: linear-gradient(135deg, rgba(255,217,61,0.22), var(--accent-bg)); }
 
-  /* PILLS / BADGES */
-  .pill { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 600; padding: 3px 9px; border-radius: 20px; background: var(--bg4); color: var(--text2); border: 1px solid var(--border); white-space: nowrap; }
+  /* PILLS / BADGES. Status is always carried by an explicit text label, never by
+     colour alone; the colour only reinforces it. */
+  .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: 20px; background: var(--bg4); color: var(--text2); border: 1px solid var(--border); white-space: nowrap; letter-spacing: 0.2px; }
   .pill-live { background: rgba(245,166,35,0.12); color: var(--warn); border-color: rgba(245,166,35,0.3); }
   .pill-done { background: var(--accent-bg); color: var(--accent); border-color: var(--accent-border); }
   .pill-free { background: var(--blue-bg); color: var(--blue); border-color: var(--blue-border); }
   .pill-closed { background: var(--danger-bg); color: var(--danger); border-color: rgba(255,107,91,0.25); }
   .pill-queued { background: var(--bg4); color: var(--text2); }
 
+  /* NOW / NEXT / QUEUE — a consistent visual language across Dashboard, Courts and
+     Matches. Purely a label: the scheduler remains the single source of truth. */
+  .phase-tag { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-head); font-size: 10px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--border); color: var(--text2); background: var(--bg4); }
+  .phase-now { color: var(--warn); border-color: rgba(245,166,35,0.35); background: rgba(245,166,35,0.1); }
+  .phase-next { color: var(--blue); border-color: var(--blue-border); background: var(--blue-bg); }
+  .phase-queue { color: var(--text3); }
+
   /* COURT CARDS */
   .courts-grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
-  @media (min-width: 700px) { .courts-grid { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); } }
-  .court-card { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 1rem; display: flex; flex-direction: column; gap: 10px; }
-  .court-card.live { border-color: rgba(245,166,35,0.35); }
-  .court-card.closed { opacity: 0.68; }
-  .court-card.disabled { opacity: 0.5; border-style: dashed; }
+  @media (min-width: 640px) { .courts-grid { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); } }
+  .court-card { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 1rem; display: flex; flex-direction: column; gap: 10px; box-shadow: var(--shadow-sm); }
+  .court-card.live { border-color: rgba(245,166,35,0.45); box-shadow: 0 0 0 1px rgba(245,166,35,0.12); }
+  .court-card.closed { opacity: 0.72; }
+  .court-card.disabled { opacity: 0.55; border-style: dashed; }
   .court-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .court-name { font-family: var(--font-head); font-size: 15px; font-weight: 800; letter-spacing: -0.2px; }
   .court-window { font-size: 11px; color: var(--text3); }
 
   /* COURT CONFIG (Settings) */
-  .court-cfg { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; background: var(--bg2); margin-bottom: 10px; }
+  .court-cfg { border: 1px solid var(--border); border-radius: var(--radius); padding: 13px; background: var(--bg2); margin-bottom: 10px; }
   .court-cfg:last-child { margin-bottom: 0; }
   .court-cfg.inactive { opacity: 0.72; border-style: dashed; }
-  .court-cfg-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+  .court-cfg-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
   .court-cfg-title { font-family: var(--font-head); font-size: 13.5px; font-weight: 800; margin-right: auto; }
-  .court-cfg-times { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .court-cfg-times .field { margin-bottom: 0; }
+  .court-cfg-times { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; min-width: 0; }
+  .court-cfg-times .field { margin-bottom: 0; min-width: 0; }
+  .court-cfg-times input[type=time] { min-width: 0; }
+  /* At very narrow widths two time inputs cannot share a row without pushing the
+     card wider than the viewport, so they stack. */
+  @media (max-width: 360px) { .court-cfg-times { grid-template-columns: 1fr; } }
+  .court-cfg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
   .cfg-msg { font-size: 12.5px; line-height: 1.5; margin-top: 8px; }
   .cfg-msg.err { color: var(--danger); }
   .cfg-msg.ok { color: var(--accent); }
@@ -366,31 +429,31 @@
   }
   input[type=time]:focus { border-color: var(--accent-border); box-shadow: 0 0 0 3px rgba(184,245,74,0.08); }
   .court-window-tag { font-size: 11px; color: var(--text3); }
-  .court-block { border-radius: var(--radius); padding: 10px 11px; background: var(--bg2); border: 1px solid var(--border); }
-  .court-block.live-block { background: rgba(245,166,35,0.06); border-color: rgba(245,166,35,0.25); }
+  .court-block { border-radius: var(--radius); padding: 11px 12px; background: var(--bg2); border: 1px solid var(--border); }
+  .court-block.live-block { background: rgba(245,166,35,0.06); border-color: rgba(245,166,35,0.28); }
   .court-block.next-block { background: var(--accent-bg); border-color: var(--accent-border); }
-  .court-block-label { font-size: 10px; font-weight: 700; letter-spacing: 0.9px; text-transform: uppercase; color: var(--text3); margin-bottom: 6px; }
+  .court-block-label { font-size: 10px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; color: var(--text3); margin-bottom: 7px; display: flex; align-items: center; gap: 6px; }
   .court-block.next-block .court-block-label { color: var(--accent); }
-  .court-teams { font-size: 14px; font-weight: 500; line-height: 1.55; }
-  .court-teams .t { display: flex; justify-content: space-between; gap: 8px; }
+  .court-teams { font-size: 14.5px; font-weight: 500; line-height: 1.6; }
+  .court-teams .t { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
   .court-teams .t .nm { overflow-wrap: anywhere; }
-  .court-teams .t .sc { font-family: var(--font-head); font-weight: 800; flex-shrink: 0; }
+  .court-teams .t .sc { font-family: var(--font-head); font-weight: 800; flex-shrink: 0; font-variant-numeric: tabular-nums; }
   .court-teams .t.win .nm, .court-teams .t.win .sc { color: var(--accent); }
   .court-teams .t.lose { opacity: 0.5; }
-  .court-reason { font-size: 11px; color: var(--text3); margin-top: 6px; line-height: 1.45; }
+  .court-reason { font-size: 11px; color: var(--text3); margin-top: 7px; line-height: 1.45; }
   .court-empty { font-size: 12.5px; color: var(--text3); font-style: italic; }
-  .court-actions { display: flex; gap: 6px; margin-top: 9px; }
+  .court-actions { display: flex; gap: 6px; margin-top: 10px; }
   .court-actions .btn { flex: 1 1 auto; }
-  .vs-label { font-family: var(--font-head); font-size: 10px; font-weight: 700; color: var(--text3); letter-spacing: 1px; }
+  .vs-label { font-family: var(--font-head); font-size: 10px; font-weight: 800; color: var(--text3); letter-spacing: 1px; }
 
   /* MATCH ROWS / CARDS */
   /* Single column by default (mobile/tablet); two comfortable columns on wide
      desktops where the cards still read cleanly. gap drives the separation. */
   .mgrid { display: grid; grid-template-columns: 1fr; gap: 10px; }
-  @media (min-width: 820px) { .mgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; } }
-  .mrow { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px 15px; display: flex; flex-direction: column; gap: 10px; }
-  .mrow.live { border-color: rgba(245,166,35,0.35); background: rgba(245,166,35,0.04); }
-  .mrow.done { border-color: rgba(184,245,74,0.16); }
+  @media (min-width: 820px) { .mgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; } }
+  .mrow { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px 15px; display: flex; flex-direction: column; gap: 10px; box-shadow: var(--shadow-sm); }
+  .mrow.live { border-color: rgba(245,166,35,0.4); background: rgba(245,166,35,0.04); }
+  .mrow.done { border-color: rgba(184,245,74,0.2); }
   .mrow-top { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
   .mrow-id { font-family: var(--font-head); font-size: 12px; font-weight: 800; color: var(--text2); letter-spacing: 0.5px; }
   .mrow-meta { font-size: 11.5px; color: var(--text3); letter-spacing: 0.2px; }
@@ -400,14 +463,15 @@
   .mrow-team .sc { font-family: var(--font-head); font-weight: 800; font-variant-numeric: tabular-nums; flex-shrink: 0; }
   .mrow-team.win .nm, .mrow-team.win .sc { color: var(--accent); }
   .mrow-team.lose { opacity: 0.5; }
-  .mrow-actions { display: flex; gap: 6px; margin-top: 2px; flex-wrap: wrap; border-top: 1px solid var(--border); padding-top: 10px; }
+  .mrow-actions { display: flex; gap: 6px; margin-top: 2px; flex-wrap: wrap; border-top: 1px solid var(--border); padding-top: 11px; }
   .mrow-actions .btn { flex: 0 1 auto; }
 
   /* Larger match tile hierarchy: id/stage, group/round, teams with a VS divider,
      then the score/action footer. Team names get more room and wrap safely. */
-  .match-card { gap: 11px; }
-  .match-card .match-teams { font-size: 15px; line-height: 1.6; gap: 6px; }
+  .match-card { gap: 12px; padding: 16px 17px; }
+  .match-card .match-teams { font-size: 15.5px; line-height: 1.6; gap: 7px; }
   .match-card .match-teams .t .nm { font-weight: 600; }
+  .match-card .match-teams .t .sc { font-size: 18px; }
   .match-card .vs-label { display: flex; align-items: center; gap: 8px; color: var(--text3); }
   .match-card .vs-label::before, .match-card .vs-label::after { content: ''; height: 1px; flex: 1; background: var(--border); }
 
@@ -467,7 +531,7 @@
     .team-edit-controls { justify-content: flex-start; }
     .team-edit-controls select { flex: 1 1 auto; }
   }
-  .remove-btn { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--text3); cursor: pointer; font-size: 16px; line-height: 1; flex-shrink: 0; transition: var(--transition); }
+  .remove-btn { width: 40px; height: 40px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--text3); cursor: pointer; font-size: 18px; line-height: 1; flex-shrink: 0; transition: var(--transition); }
   .remove-btn:hover { background: var(--danger-bg); color: var(--danger); border-color: rgba(255,107,91,0.3); }
   /* Group configuration row: stable id, optional friendly label, live counts. */
   .group-cfg-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
@@ -564,6 +628,9 @@
   .switch { position: relative; width: 46px; height: 27px; flex-shrink: 0; }
   .switch input { opacity: 0; width: 0; height: 0; }
   .switch .slider { position: absolute; inset: 0; background: var(--bg4); border: 1px solid var(--border2); border-radius: 20px; cursor: pointer; transition: var(--transition); }
+  /* Expand the hit area vertically to a comfortable touch target without changing
+     the visual switch size. */
+  .switch .slider::after { content: ''; position: absolute; inset: -9px 0; }
   .switch .slider::before { content: ''; position: absolute; width: 19px; height: 19px; left: 3px; top: 2.5px; background: var(--text3); border-radius: 50%; transition: var(--transition); }
   .switch input:checked + .slider { background: var(--accent-bg); border-color: var(--accent-border); }
   .switch input:checked + .slider::before { transform: translateX(19px); background: var(--accent); }
@@ -3037,9 +3104,19 @@
   }
 
   /* ── small view helpers ────────────────────────────── */
+  // NOW / NEXT / QUEUE — a single, consistent visual label used wherever the
+  // scheduler's phases are shown. It is only a label; the scheduler stays the
+  // single source of truth and no ordering is computed here.
+  const PHASE_LABEL = { now: 'NOW', next: 'NEXT', queue: 'QUEUE' };
+  function phaseTag(phase, extra) {
+    const cls = phase === 'now' ? 'phase-now' : (phase === 'next' ? 'phase-next' : 'phase-queue');
+    return '<span class="phase-tag ' + cls + '">' + esc(PHASE_LABEL[phase] || '') +
+      (extra ? ' · ' + esc(extra) : '') + '</span>';
+  }
+
   function statusPill(status) {
     if (status === 'in_progress') return '<span class="pill pill-live">● Live</span>';
-    if (status === 'completed') return '<span class="pill pill-done">✓ Done</span>';
+    if (status === 'completed') return '<span class="pill pill-done">✓ Completed</span>';
     return '<span class="pill pill-queued">Queued</span>';
   }
 
@@ -3291,13 +3368,13 @@
 
     // Operational blocks come before the analytics so the dashboard reads as a
     // live control centre: courts, then the next matches, then the waiting queue.
-    html += '<div class="section-title">Live courts <span class="line"></span></div>';
+    html += '<div class="section-title">' + phaseTag('now') + ' Live courts <span class="line"></span></div>';
     html += liveCourtsBlock(st, kpi);
 
-    html += '<div class="section-title">Next matches <span class="line"></span></div>';
+    html += '<div class="section-title">' + phaseTag('next') + ' Next matches <span class="line"></span></div>';
     html += nextMatchesBlock();
 
-    html += '<div class="section-title">Waiting queue <span class="line"></span></div>';
+    html += '<div class="section-title">' + phaseTag('queue') + ' Waiting queue <span class="line"></span></div>';
     html += waitingQueueBlock();
 
     html += '<div class="analytics-grid">';
@@ -3512,9 +3589,11 @@
       const m = r.match;
       const cid = byMatch[m.id];
       const c = cid ? TM.getState().courts.find(function (x) { return x.id === cid; }) : null;
-      return '<div class="mrow">' +
-        '<div class="mrow-top"><span class="mrow-id">' + esc(m.id) + '</span>' + stagePill(m) + (c ? '<span class="pill pill-free">→ ' + esc(c.name) + '</span>' : '<span class="pill">no free court</span>') + '</div>' +
-        '<div class="court-teams">' + teamsBlock(m) + '</div>' +
+      return '<div class="mrow match-card">' +
+        '<div class="mrow-top"><span class="mrow-id">' + esc(m.id) + '</span>' + matchStagePill(m) + phaseTag('next') +
+          (c ? '<span class="pill pill-free">→ ' + esc(c.name) + '</span>' : '<span class="pill">No free court</span>') + '</div>' +
+        '<div class="mrow-meta">' + matchMetaLine(m) + '</div>' +
+        teamsBlock(m) +
         '<div class="court-reason"><b style="color:var(--text2);">Reason:</b> ' + esc(r.reason) + '</div>' +
         '</div>';
     }).join('') + '</div>';
@@ -3576,9 +3655,10 @@
       else statusPill = '<span class="pill pill-free">AVAILABLE</span>';
 
       let h = '<div class="court-card compact' + cls + '">';
-      h += '<div class="court-head"><span class="court-name">' + esc(court.name) + '</span>' + statusPill + '</div>';
+      h += '<div class="court-head"><span class="court-name">' + esc(court.name) + '</span>' + statusPill;
+      h += '</div>';
       if (cur) {
-        h += '<div class="court-block-label" style="margin:0;">Live now</div>';
+        h += '<div class="court-block-label" style="margin:0;">' + phaseTag('now') + ' Live</div>';
         h += '<div class="court-teams">' + teamsBlock(cur) + '</div>';
         h += '<div class="court-reason mono">' + esc(cur.id) + ' · started ' + timeOf(cur.startedAt) + '</div>';
         h += '<div class="court-actions"><button class="btn btn-primary btn-sm" onclick="App.openScore(\'' + cur.id + '\',\'courts\')">Enter result</button></div>';
@@ -3588,7 +3668,7 @@
         h += '<div class="court-empty">' + esc(TM.whyCourtUnavailable(court) || 'Court unavailable') + '</div>';
       } else if (sug) {
         const queued = TM.schedulerSummary().queued;
-        h += '<div class="court-block-label" style="margin:0;">NEXT · ' + esc(sug.match.id) + '</div>';
+        h += '<div class="court-block-label" style="margin:0;">' + phaseTag('next', sug.match.id) + '</div>';
         h += '<div class="court-teams">' + teamsBlock(sug.match) + '</div>';
         h += '<div class="court-reason">Waiting: ' + queued + ' match' + (queued === 1 ? '' : 'es') + '</div>';
       } else {
@@ -3613,7 +3693,7 @@
     html += '<div class="court-head"><div><div class="court-name">' + esc(court.name) + '</div><div class="court-window">' + windowTxt + '</div></div>' + status + '</div>';
 
     html += '<div class="court-block' + (cur ? ' live-block' : '') + '">';
-    html += '<div class="court-block-label">Current match</div>';
+    html += '<div class="court-block-label">' + phaseTag('now') + ' Current match</div>';
     if (cur) {
       html += '<div class="court-teams">' + teamsBlock(cur) + '</div>';
       html += '<div class="court-reason">' + esc(cur.id) + ' · started ' + timeOf(cur.startedAt) + '</div>';
@@ -3627,7 +3707,7 @@
     html += '</div>';
 
     html += '<div class="court-block' + (sug ? ' next-block' : '') + '">';
-    html += '<div class="court-block-label">Next eligible match</div>';
+    html += '<div class="court-block-label">' + phaseTag('next') + ' Next eligible match</div>';
     if (cur) {
       html += '<div class="court-empty">Complete the current match to unlock the queue</div>';
     } else if (!enabled) {
@@ -3668,7 +3748,7 @@
     html += '<div class="courts-grid">' + st.courts.map(function (c) { return courtCard(c); }).join('') + '</div>';
 
     const ranked = TM.rankCandidates(0);
-    html += '<div class="section-title">Waiting / queued (' + ranked.length + ' eligible) <span class="line"></span></div>';
+    html += '<div class="section-title">' + phaseTag('queue', ranked.length + ' eligible') + ' Waiting / queued <span class="line"></span></div>';
     if (!ranked.length) {
       html += '<div class="card"><div class="muted">' +
         (TM.queuedMatches().length ? 'All remaining matches have a team currently on court.' : 'Group stage queue is empty.') +
@@ -3676,16 +3756,16 @@
     } else {
       html += '<div class="mgrid">' + ranked.map(function (r, i) {
         const m = r.match;
-        return '<div class="mrow">' +
-          '<div class="mrow-top"><span class="mrow-id">' + esc(m.id) + '</span>' + stagePill(m) + '<span class="pill">Queue #' + (i + 1) + '</span></div>' +
-          '<div class="court-teams">' + teamsBlock(m) + '</div>' +
+        return '<div class="mrow match-card">' +
+          '<div class="mrow-top"><span class="mrow-id">' + esc(m.id) + '</span>' + stagePill(m) + phaseTag('queue', '#' + (i + 1)) + '</div>' +
+          matchTeamsWithVs(m) +
           '<div class="court-reason">' + esc(r.reason) + '</div>' +
           '</div>';
       }).join('') + '</div>';
     }
 
     const oncourt = TM.inProgressMatches();
-    html += '<div class="section-title">On court now (' + oncourt.length + ') <span class="line"></span></div>';
+    html += '<div class="section-title">' + phaseTag('now', oncourt.length) + ' On court now <span class="line"></span></div>';
     html += oncourt.length
       ? '<div class="mgrid">' + oncourt.map(function (m) { return matchRow(m, 'courts'); }).join('') + '</div>'
       : '<div class="card"><div class="muted">No matches in progress.</div></div>';
@@ -4173,7 +4253,7 @@
         : (cur ? '<span class="pill pill-live">● In progress</span>' : (TM.courtAcceptsNewMatch(c) ? '<span class="pill pill-free">Available now</span>' : '<span class="pill">Outside window</span>'));
       let html = '<div class="court-cfg' + (on ? '' : ' inactive') + '">';
       html += '<div class="court-cfg-head"><span class="court-cfg-title">' + esc(c.name) + '</span>' + status +
-        '<label class="switch"><input type="checkbox"' + (on ? ' checked' : '') + ' onchange="App.toggleCourtConfig(' + c.id + ',this.checked)" aria-label="Enable ' + esc(c.name) + '"><span class="slider"></span></label>' +
+        '<label class="switch" title="Enabled"><input type="checkbox"' + (on ? ' checked' : '') + ' onchange="App.toggleCourtConfig(' + c.id + ',this.checked)" aria-label="Enable ' + esc(c.name) + '"><span class="slider"></span></label>' +
         '<button class="btn btn-xs btn-danger" onclick="App.removeCourt(' + c.id + ')" title="Remove this court">Remove</button></div>';
       html += '<div class="field" style="margin-bottom:10px;"><label>Name</label><input type="text" value="' + esc(c.name) + '" maxlength="30" ' +
         'onchange="App.renameCourt(' + c.id + ',this.value)" onkeydown="if(event.key===\'Enter\'){this.blur();}"></div>';

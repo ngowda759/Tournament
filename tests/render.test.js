@@ -637,6 +637,127 @@ TM.setCourtEnabled(3, false);
 eq('disabled court stays in config', TM.getState().courts.some(function (c) { return c.id === 3 && c.enabled === false; }), true);
 check('disabled court excluded from enabled list', TM.enabledCourts().every(function (c) { return c.id !== 3; }), 'still enabled');
 
+// ── UI polish (cosmetic only) ─────────────────────────────────────────────────
+// These assertions protect the visual refinements without touching the tournament
+// engine: the compact single-row header, the single Settings destination, theme
+// and Help controls, dashboard section order, larger match tiles, the Courts
+// operational monitor, the Settings court configuration, the NOW/NEXT/QUEUE
+// labelling, and light/dark theming. All of it is markup/CSS, so a functional
+// regression in the scheduler still fails loudly elsewhere in this file.
+
+// Branding, theme and Help remain in the shell.
+check('polish: BestShot branding remains', html.indexOf('Best<span>Shot</span>') !== -1, 'no logo');
+check('polish: theme toggle remains', html.indexOf('id="theme-toggle"') !== -1 && html.indexOf('toggleTheme()') !== -1, 'no theme');
+check('polish: help control remains', html.indexOf('App.about()') !== -1, 'no help');
+
+// Compact single-row header: the header is a nowrap flex row and the nav shrinks
+// and scrolls internally rather than forcing a wrap / page overflow. Phones keep
+// the wrapped nav row (existing More behaviour).
+check('polish: header lays out as one row', /header\s*\{[^}]*display:\s*flex/.test(styleText) && /header\s*\{[^}]*flex-wrap:\s*nowrap/.test(styleText), 'header not a single row');
+check('polish: nav can shrink in the header row', /nav\.tabs\s*\{[^}]*flex:\s*1 1 auto[^}]*min-width:\s*0/.test(styleText), 'nav cannot shrink');
+check('polish: nav scrolls internally', /nav\.tabs\s*\{[^}]*overflow-x:\s*auto/.test(styleText), 'nav not scrollable');
+check('polish: mobile nav still wraps to its own row', /@media \(max-width: 719px\)\s*\{[\s\S]*?nav\.tabs\s*\{[^}]*flex-wrap:\s*wrap/.test(styleText), 'mobile nav does not wrap');
+
+// Settings appears exactly once in the rendered navigation.
+App.nav('dashboard');
+const polishedNav = getEl('nav-tabs').innerHTML;
+check('polish: Settings appears exactly once', (polishedNav.match(/nav\('settings'\)/g) || []).length === 1, 'duplicate settings');
+check('polish: every destination still present', ['Dashboard', 'Matches', 'Courts', 'Standings', 'Knockout', 'Teams', 'Settings'].every(function (l) { return polishedNav.indexOf(l) !== -1; }), 'missing destination');
+App.nav('courts');
+const navCourts = getEl('nav-tabs').innerHTML;
+check('polish: active tab marks aria-current', navCourts.indexOf('aria-current="page"') !== -1, 'no aria-current');
+check('polish: mobile nav keeps the More control', navCourts.indexOf('nav-more-btn') !== -1, 'no More');
+
+// Dashboard section order (information hierarchy preserved).
+TM.resetTournament();
+App.nav('dashboard');
+s = getEl('view').innerHTML;
+const ORDER = ['Tournament progress', 'Live courts', 'Next matches', 'Waiting queue', 'Group performance', 'Team level distribution', 'Current leaders', 'Recent results'];
+let orderOk = true, prev = -1;
+ORDER.forEach(function (label) {
+  const at = s.indexOf(label);
+  if (at === -1 || at < prev) orderOk = false;
+  prev = at;
+});
+check('polish: dashboard section order preserved', orderOk, 'order changed');
+check('polish: KPI cards render', s.indexOf('kpi-grid') !== -1 && s.indexOf('kpi-value') !== -1, 'no kpis');
+check('polish: dashboard progress bars render', s.indexOf('progress-bar') !== -1, 'no progress');
+
+// NOW / NEXT / QUEUE visual language.
+check('polish: dashboard shows NOW tag', s.indexOf('phase-tag phase-now') !== -1 && s.indexOf('>NOW<') !== -1, 'no NOW tag');
+check('polish: dashboard shows NEXT tag', s.indexOf('phase-next') !== -1 && s.indexOf('>NEXT<') !== -1, 'no NEXT tag');
+check('polish: dashboard shows QUEUE tag', s.indexOf('phase-queue') !== -1 && s.indexOf('>QUEUE<') !== -1, 'no QUEUE tag');
+check('polish: phase tag styling exists', /\.phase-tag\s*\{/.test(styleText) && /\.phase-now\s*\{/.test(styleText) && /\.phase-next\s*\{/.test(styleText) && /\.phase-queue\s*\{/.test(styleText), 'no phase CSS');
+
+// Status is never colour-only: live/available states carry a text label.
+TM.getState().settings.allowOutsideAvailability = true;
+TM.startMatch(TM.groupMatches()[0].id, 1);
+App.nav('dashboard');
+s = getEl('view').innerHTML;
+check('polish: live status has a text label', s.indexOf('● LIVE') !== -1, 'no LIVE text');
+check('polish: available status has a text label', s.indexOf('AVAILABLE') !== -1, 'no AVAILABLE text');
+check('polish: live court keeps Enter result', s.indexOf('Enter result') !== -1, 'no action');
+check('polish: dashboard no undefined/NaN after polish', s.indexOf('undefined') === -1 && s.indexOf('NaN') === -1, 'leak');
+
+// Larger match tiles (asserted from the CSS so readability is protected).
+check('polish: match tiles are larger', /\.match-card\s*\{[^}]*padding:\s*16px\s+17px/.test(styleText), 'tile padding unchanged');
+check('polish: match team names are readable', /\.match-card\s+\.match-teams\s*\{[^}]*font-size:\s*15\.5px/.test(styleText), 'team font unchanged');
+check('polish: match scores are prominent', /\.match-card\s+\.match-teams\s+\.t\s+\.sc\s*\{[^}]*font-size:\s*18px/.test(styleText), 'score font unchanged');
+check('polish: match cards keep the VS divider CSS', /\.match-card\s+\.vs-label::before/.test(styleText), 'no vs divider');
+check('polish: match grid is two-column capable on desktop', /@media \(min-width: 820px\)\s*\{\s*\.mgrid\s*\{[^}]*repeat\(2/.test(styleText), 'no 2-col grid');
+check('polish: match grid is single-column on mobile', /\.mgrid\s*\{[^}]*grid-template-columns:\s*1fr/.test(styleText), 'mobile grid not single column');
+
+TM.resetTournament();
+App.nav('matches');
+ms = getEl('view').innerHTML;
+check('polish: matches tiles are match-card', ms.indexOf('mrow match-card') !== -1, 'no match-card rows');
+check('polish: matches screen keeps the grid', ms.indexOf('mgrid') !== -1, 'no grid');
+check('polish: matches screen has no undefined/NaN', ms.indexOf('undefined') === -1 && ms.indexOf('NaN') === -1, 'leak');
+
+// Courts is an operational monitor: NOW/NEXT/QUEUE render, and none of the court
+// configuration controls live on this page.
+TM.resetTournament();
+TM.getState().settings.allowOutsideAvailability = true;
+App.nav('courts');
+cs = getEl('view').innerHTML;
+check('polish: courts monitor renders court cards', cs.indexOf('court-card') !== -1, 'no court cards');
+check('polish: courts monitor shows NOW phase', cs.indexOf('phase-now') !== -1, 'no NOW');
+check('polish: courts monitor shows NEXT phase', cs.indexOf('phase-next') !== -1, 'no NEXT');
+check('polish: courts monitor shows QUEUE phase', cs.indexOf('phase-queue') !== -1, 'no QUEUE');
+check('polish: courts have no add-court control', cs.indexOf('App.addCourt()') === -1 && cs.indexOf('Add court') === -1, 'add court on courts page');
+check('polish: courts have no remove-court control', cs.indexOf('App.removeCourt(') === -1, 'remove court on courts page');
+check('polish: courts have no rename control', cs.indexOf('App.renameCourt(') === -1, 'rename on courts page');
+check('polish: courts have no enable/disable control', cs.indexOf('App.toggleCourtConfig(') === -1, 'toggle on courts page');
+check('polish: courts have no availability controls', cs.indexOf('App.setCourtTime(') === -1, 'times on courts page');
+check('polish: courts monitor has no undefined/NaN', cs.indexOf('undefined') === -1 && cs.indexOf('NaN') === -1, 'leak');
+
+// Settings owns court configuration; the section is cosmetically clear and still
+// wired to the unchanged court-management actions.
+TM.resetTournament();
+App.nav('settings');
+const polishSettings = getEl('view').innerHTML;
+check('polish: settings has the court configuration section', polishSettings.indexOf('Court configuration') !== -1, 'no court config section');
+check('polish: settings court config blocks use the clear head', polishSettings.indexOf('court-cfg-head') !== -1, 'no head');
+check('polish: settings court config has name', polishSettings.indexOf('App.renameCourt(') !== -1, 'no name');
+check('polish: settings court config has times', polishSettings.indexOf('App.setCourtTime(') !== -1 && polishSettings.indexOf('Available from') !== -1 && polishSettings.indexOf('Available until') !== -1, 'no times');
+check('polish: settings court config has enable toggle', polishSettings.indexOf('App.toggleCourtConfig(') !== -1, 'no enable');
+check('polish: settings court config has closed/reopen', polishSettings.indexOf('Mark closed') !== -1 || polishSettings.indexOf('Reopen court') !== -1, 'no closed control');
+check('polish: settings court config has remove', polishSettings.indexOf('App.removeCourt(') !== -1, 'no remove');
+check('polish: settings court config has add court', polishSettings.indexOf('App.addCourt()') !== -1, 'no add court');
+check('polish: settings no undefined/NaN', polishSettings.indexOf('undefined') === -1 && polishSettings.indexOf('NaN') === -1, 'leak');
+
+// Light/dark theming: both token sets exist and the polish leans on tokens.
+check('polish: dark theme token set exists', /:root\s*\{[^}]*--bg:\s*#0d0f0e/.test(styleText), 'no dark theme');
+check('polish: light theme overrides surfaces', /\[data-theme="light"\]\s*\{[^}]*--bg:/.test(styleText), 'no light theme');
+check('polish: elevation uses shadow tokens', /--shadow-sm:/.test(styleText) && /--shadow-lg:/.test(styleText), 'no shadow tokens');
+check('polish: light theme softens the shadow tokens', /\[data-theme="light"\]\s*\{[^}]*--shadow-sm/.test(styleText), 'no light shadows');
+check('polish: visible keyboard focus exists', /:focus-visible\s*\{[^}]*outline:/.test(styleText), 'no focus ring');
+
+// Mobile touch targets and no page overflow.
+check('polish: card selects are touch sized', /\.card select\s*\{[^}]*min-height:\s*44px/.test(styleText), 'select too small');
+check('polish: remove button is touch sized', /\.remove-btn\s*\{[^}]*width:\s*40px[^}]*height:\s*40px/.test(styleText), 'remove too small');
+check('polish: app shell caps a single column', /\.app-shell\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/.test(styleText), 'shell can overflow');
+
 console.log('\n' + (fail === 0 ? '✅ ALL RENDERS OK' : '❌ RENDER FAILURES'));
 console.log('passed: ' + pass + '  failed: ' + fail);
 if (failures.length) { console.log('\nFailures:'); failures.forEach(f => console.log('  - ' + f)); process.exit(1); }
