@@ -2921,6 +2921,286 @@ function assertRoundRobin(label, groupId, n) {
   check('a survivor was re-enabled', survivors.length >= 1, 'none enabled');
 })();
 
+/* ══════════════════════════════════════════════════════════
+   58. configurable knockout match formats and scoring
+   ══════════════════════════════════════════════════════════ */
+
+// Complete the whole group stage for the current tournament.
+function finishGroupStage() {
+  TM.groupMatches().forEach(function (m) {
+    TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 12, m.teamA < m.teamB ? 12 : 21);
+  });
+}
+
+// TEST 1 — default configuration
+(function () {
+  TM.resetTournament();
+  const kr = TM.getKnockoutRules();
+  const byKey = {};
+  kr.rounds.forEach(function (r) { byKey[r.key] = r; });
+  eq('default: QF round present', !!byKey.qf, true);
+  eq('default: QF format best_of_3', byKey.qf.format, 'best_of_3');
+  eq('default: QF points 11', byKey.qf.pointsPerGame, 11);
+  eq('default: SF format best_of_3', byKey.sf.format, 'best_of_3');
+  eq('default: SF points 15', byKey.sf.pointsPerGame, 15);
+  eq('default: Final format best_of_3', byKey.final.format, 'best_of_3');
+  eq('default: Final points 21', byKey.final.pointsPerGame, 21);
+  eq('default: default rules map qf', TM.DEFAULT_KNOCKOUT_RULES.qf.pointsPerGame, 11);
+  eq('default: generated bracket QF carries the snapshot', TM.matchScoring({ stage: 'qf' }).pointsPerGame, 11);
+})();
+
+// TEST 2 — configuration persistence across save/reload
+(function () {
+  TM.resetTournament();
+  check('set QF 15 ok', TM.setKnockoutRule('qf', { format: 'best_of_3', pointsPerGame: 15 }).ok);
+  check('set SF 21 ok', TM.setKnockoutRule('sf', { format: 'best_of_3', pointsPerGame: 21 }).ok);
+  check('set Final straight 21 ok', TM.setKnockoutRule('final', { format: 'single_game', pointsPerGame: 21 }).ok);
+  TM.save();
+  const snapshot = store[TM.STORAGE_KEY];
+  TM.setState(JSON.parse(snapshot));
+  const kr = TM.getKnockoutRules();
+  const byKey = {};
+  kr.rounds.forEach(function (r) { byKey[r.key] = r; });
+  eq('persist: QF 15', byKey.qf.pointsPerGame, 15);
+  eq('persist: SF 21', byKey.sf.pointsPerGame, 21);
+  eq('persist: Final single_game', byKey.final.format, 'single_game');
+  eq('persist: Final 21', byKey.final.pointsPerGame, 21);
+})();
+
+// TEST 3 — best-of-3 scoring: 11-8, 9-11, 11-7 → 2-1
+(function () {
+  TM.resetTournament();
+  TM.setKnockoutRule('qf', { format: 'best_of_3', pointsPerGame: 11 });
+  finishGroupStage();
+  TM.ensureKnockout();
+  const qf = TM.getMatch('QF-1');
+  eq('bo3: QF snapshot format', TM.matchScoring(qf).format, 'best_of_3');
+  eq('bo3: QF snapshot points', TM.matchScoring(qf).pointsPerGame, 11);
+  const r = TM.saveKnockoutScore('QF-1', [{ a: 11, b: 8 }, { a: 9, b: 11 }, { a: 11, b: 7 }]);
+  check('bo3: 2-1 accepted', r.ok, r.msg);
+  eq('bo3: setsA 2', qf.setsA, 2);
+  eq('bo3: setsB 1', qf.setsB, 1);
+  eq('bo3: completed', qf.status, 'completed');
+})();
+
+// TEST 4 — best-of-3 early completion: 11-5, 11-7 → 2-0, no game 3
+(function () {
+  TM.resetTournament();
+  TM.setKnockoutRule('qf', { format: 'best_of_3', pointsPerGame: 11 });
+  finishGroupStage();
+  TM.ensureKnockout();
+  const r = TM.saveKnockoutScore('QF-1', [{ a: 11, b: 5 }, { a: 11, b: 7 }]);
+  check('bo3 early: 2-0 accepted', r.ok, r.msg);
+  const qf = TM.getMatch('QF-1');
+  eq('bo3 early: setsA 2', qf.setsA, 2);
+  eq('bo3 early: setsB 0', qf.setsB, 0);
+  eq('bo3 early: completed', qf.status, 'completed');
+  // a third game on a decided match is rejected
+  const r2 = TM.validateKnockoutSets('QF-2', [{ a: 11, b: 5 }, { a: 11, b: 7 }, { a: 11, b: 3 }]);
+  check('bo3 early: game 3 when 2-0 rejected', r2 !== null, r2);
+})();
+
+// TEST 5 — straight-set scoring: single game completes the match
+(function () {
+  TM.resetTournament();
+  TM.setKnockoutRule('qf', { format: 'single_game', pointsPerGame: 21 });
+  finishGroupStage();
+  TM.ensureKnockout();
+  const qf = TM.getMatch('QF-1');
+  check('straight: snapshot format', TM.matchScoring(qf).format === 'single_game');
+  eq('straight: snapshot points', TM.matchScoring(qf).pointsPerGame, 21);
+  eq('straight: one set slot', qf.sets.length, 1);
+  const r = TM.saveKnockoutScore('QF-1', [{ a: 21, b: 17 }]);
+  check('straight: 21-17 accepted', r.ok, r.msg);
+  eq('straight: completed', qf.status, 'completed');
+  eq('straight: setsA 1', qf.setsA, 1);
+  eq('straight: setsB 0', qf.setsB, 0);
+  eq('straight: stored one game', qf.sets.length, 1);
+  // a straight match cannot ask for game 2 / game 3
+  const bad = TM.validateKnockoutSets('QF-1', [{ a: 21, b: 17 }, { a: 21, b: 19 }, null]);
+  check('straight: extra game rejected', bad !== null, bad);
+  const one = TM.validateKnockoutSets('QF-2', [{ a: 21, b: 17 }]);
+  check('straight: single game valid', one === null, one);
+  // best of 3 still needs two games (fresh bracket configured for best of 3)
+  TM.resetTournament();
+  TM.setKnockoutRule('qf', { format: 'best_of_3', pointsPerGame: 11 });
+  finishGroupStage();
+  TM.ensureKnockout();
+  const needsTwo = TM.validateKnockoutSets('QF-1', [{ a: 11, b: 7 }]);
+  check('bo3: one game is not enough', needsTwo !== null, needsTwo);
+})();
+
+// TEST 8 — snapshot protection: changing Settings does not alter an existing match
+(function () {
+  TM.resetTournament();
+  TM.setKnockoutRule('qf', { format: 'best_of_3', pointsPerGame: 11 });
+  finishGroupStage();
+  TM.ensureKnockout();
+  const before = TM.getMatch('QF-1');
+  eq('snapshot: QF created best_of_3', TM.matchScoring(before).format, 'best_of_3');
+  eq('snapshot: QF created 11', TM.matchScoring(before).pointsPerGame, 11);
+  // change settings to straight set × 21
+  check('snapshot: switch settings', TM.setKnockoutRule('qf', { format: 'single_game', pointsPerGame: 21 }).ok);
+  eq('snapshot: existing QF format unchanged', TM.matchScoring(TM.getMatch('QF-1')).format, 'best_of_3');
+  eq('snapshot: existing QF points unchanged', TM.matchScoring(TM.getMatch('QF-1')).pointsPerGame, 11);
+  // and it still validates as a best-of-3 match
+  const okBo3 = TM.validateKnockoutSets('QF-1', [{ a: 11, b: 7 }, { a: 9, b: 11 }, { a: 11, b: 6 }]);
+  check('snapshot: existing QF still best of 3', okBo3 === null, okBo3);
+  // a freshly generated QF after a bracket rebuild uses the new rule
+  TM.clearKnockout();
+  TM.ensureKnockout();
+  eq('snapshot: regenerated QF uses new setting', TM.matchScoring(TM.getMatch('QF-1')).format, 'single_game');
+  eq('snapshot: regenerated QF uses new points', TM.matchScoring(TM.getMatch('QF-1')).pointsPerGame, 21);
+})();
+
+// TEST 9 — completed match protection: settings change never rewrites a result
+(function () {
+  TM.resetTournament();
+  TM.setKnockoutRule('qf', { format: 'best_of_3', pointsPerGame: 11 });
+  finishGroupStage();
+  TM.ensureKnockout();
+  TM.saveKnockoutScore('QF-1', [{ a: 11, b: 8 }, { a: 9, b: 11 }, { a: 11, b: 7 }]);
+  const qf = TM.getMatch('QF-1');
+  const resultBefore = JSON.stringify({ sets: qf.sets, setsA: qf.setsA, setsB: qf.setsB, winner: qf.winner, status: qf.status });
+  TM.setKnockoutRule('qf', { format: 'single_game', pointsPerGame: 21 });
+  TM.setKnockoutRule('sf', { format: 'single_game', pointsPerGame: 21 });
+  TM.setKnockoutRule('final', { format: 'single_game', pointsPerGame: 21 });
+  const after = TM.getMatch('QF-1');
+  eq('completed protection: result unchanged', JSON.stringify({ sets: after.sets, setsA: after.setsA, setsB: after.setsB, winner: after.winner, status: after.status }), resultBefore);
+  eq('completed protection: scoring snapshot unchanged', TM.matchScoring(after).format, 'best_of_3');
+})();
+
+// TEST 10 — migration: state without knockoutRules gains the defaults
+(function () {
+  const legacy = {
+    version: 6,
+    teams: [
+      { id: 'A1', group: 'A', name: 'A One', players: ['x', 'y'], level: 'tunga' },
+      { id: 'A2', group: 'A', name: 'A Two', players: ['x', 'y'], level: 'tunga' },
+      { id: 'B1', group: 'B', name: 'B One', players: ['x', 'y'], level: 'bhadra' },
+      { id: 'B2', group: 'B', name: 'B Two', players: ['x', 'y'], level: 'bhadra' }
+    ],
+    groups: { A: ['A1', 'A2'], B: ['B1', 'B2'] },
+    matches: [
+      { id: 'A-01', stage: 'group', group: 'A', round: 1, teamA: 'A1', teamB: 'A2', status: 'completed', scoreA: 21, scoreB: 15, winner: 'A1', loser: 'A2', target: null }
+    ],
+    settings: { qualification: { perGroup: 2 } }
+  };
+  const m = TM.migrate(JSON.parse(JSON.stringify(legacy)));
+  eq('migration: knockoutRules seeded', !!m.settings.knockoutRules, true);
+  eq('migration: QF default', m.settings.knockoutRules.qf.pointsPerGame, 11);
+  eq('migration: SF default', m.settings.knockoutRules.sf.pointsPerGame, 15);
+  eq('migration: Final default', m.settings.knockoutRules.final.pointsPerGame, 21);
+  eq('migration: QF format', m.settings.knockoutRules.qf.format, 'best_of_3');
+  // existing matches / results / groups untouched
+  eq('migration: teams preserved', m.teams.length, 4);
+  eq('migration: groups preserved', JSON.stringify(m.groups), JSON.stringify({ A: ['A1', 'A2'], B: ['B1', 'B2'] }));
+  eq('migration: result preserved', m.matches[0].scoreA, 21);
+  eq('migration: winner preserved', m.matches[0].winner, 'A1');
+  eq('migration: no fixtures regenerated', m.matches.length, 1);
+  // idempotent
+  const m2 = TM.migrate(JSON.parse(JSON.stringify(m)));
+  eq('migration: idempotent', JSON.stringify(m2.settings.knockoutRules), JSON.stringify(m.settings.knockoutRules));
+  // legacy knockout match without a snapshot behaves as best of 3 at its target
+  const legacyKo = TM.migrate({ matches: [{ id: 'QF-1', stage: 'qf', teamA: 'A1', teamB: 'B1', target: 21, sets: [{ a: 21, b: 10 }, { a: 21, b: 9 }, { a: null, b: null }] }] });
+  eq('migration: legacy knockout match defaults best_of_3', TM.matchScoring(legacyKo.matches[0]).format, 'best_of_3');
+  eq('migration: legacy knockout match target preserved', TM.matchScoring(legacyKo.matches[0]).pointsPerGame, 21);
+})();
+
+// TEST 11 — invalid configuration is rejected
+(function () {
+  TM.resetTournament();
+  const bad = [
+    ['points 0', { format: 'best_of_3', pointsPerGame: 0 }],
+    ['points -1', { format: 'best_of_3', pointsPerGame: -1 }],
+    ['points NaN', { format: 'best_of_3', pointsPerGame: NaN }],
+    ['points Infinity', { format: 'best_of_3', pointsPerGame: Infinity }],
+    ['points non-numeric', { format: 'best_of_3', pointsPerGame: 'eleven' }],
+    ['points non-integer', { format: 'best_of_3', pointsPerGame: 11.5 }],
+    ['bad format', { format: 'best_of_five', pointsPerGame: 11 }],
+    ['missing format', { pointsPerGame: 11 }],
+    ['above bound', { format: 'best_of_3', pointsPerGame: 1000 }],
+    ['null rule', null]
+  ];
+  bad.forEach(function (pair) {
+    const r = TM.setKnockoutRule('qf', pair[1]);
+    check('invalid config rejected: ' + pair[0], !r.ok, JSON.stringify(pair[1]));
+  });
+  // rejected config never lands in state; the default remains
+  eq('invalid config: state untouched', TM.getKnockoutRules().rules.qf.pointsPerGame, 11);
+  // unknown round rejected
+  check('invalid config: unknown round rejected', !TM.setKnockoutRule('zz', { format: 'best_of_3', pointsPerGame: 11 }).ok);
+  // valid boundary accepted
+  check('valid config: points 1 accepted', TM.setKnockoutRule('qf', { format: 'best_of_3', pointsPerGame: 1 }).ok);
+  check('valid config: points 99 accepted', TM.setKnockoutRule('qf', { format: 'best_of_3', pointsPerGame: 99 }).ok);
+  eq('valid config: persisted', TM.getKnockoutRules().rules.qf.pointsPerGame, 99);
+  // a malformed stored rule is normalized back to the default on read
+  TM.resetTournament();
+  TM.getState().settings.knockoutRules.qf = { format: 'nonsense', pointsPerGame: 0 };
+  eq('malformed stored rule falls back to default', TM.knockoutRuleFor('qf').pointsPerGame, 11);
+})();
+
+// TEST 12 — group stage regression: unaffected by knockout configuration
+(function () {
+  TM.resetTournament();
+  const before = JSON.stringify(TM.groupMatches().map(function (m) { return [m.id, m.teamA, m.teamB]; }));
+  TM.setKnockoutRule('qf', { format: 'single_game', pointsPerGame: 21 });
+  TM.setKnockoutRule('sf', { format: 'single_game', pointsPerGame: 21 });
+  TM.setKnockoutRule('final', { format: 'single_game', pointsPerGame: 21 });
+  eq('group regression: group target still 21', TM.GROUP_TARGET, 21);
+  eq('group regression: fixtures unchanged', JSON.stringify(TM.groupMatches().map(function (m) { return [m.id, m.teamA, m.teamB]; })), before);
+  const gm = TM.groupMatches()[0];
+  check('group regression: group score validated to 21', TM.validateGroupScore(21, 15) === null);
+  check('group regression: 11-9 group score rejected', TM.validateGroupScore(11, 9) !== null);
+  const r = TM.saveGroupScore(gm.id, 21, 15);
+  check('group regression: group result saves', r.ok, r.msg);
+  eq('group regression: win still 2 points', TM.computeStandings('A')[0].pts, 2);
+})();
+
+// TEST 13 — scheduler regression: ordering / court suggestions unchanged
+(function () {
+  TM.resetTournament();
+  TM.getState().settings.allowOutsideAvailability = true;
+  const r1 = TM.rankCandidates(0).map(function (r) { return r.match.id; }).join(',');
+  const s1 = JSON.stringify(TM.suggestCourts());
+  check('scheduler regression: candidate list non-empty', r1.length > 0, r1.length);
+  check('scheduler regression: suggestions non-empty', s1.length > 4, s1);
+  TM.setKnockoutRule('qf', { format: 'single_game', pointsPerGame: 21 });
+  const r2 = TM.rankCandidates(0).map(function (r) { return r.match.id; }).join(',');
+  const s2 = JSON.stringify(TM.suggestCourts());
+  eq('scheduler regression: ranking unchanged', r2, r1);
+  eq('scheduler regression: suggestions unchanged', s2, s1);
+})();
+
+// TEST 14 — knockout structure regression
+(function () {
+  TM.resetTournament();
+  TM.setKnockoutRule('sf', { format: 'single_game', pointsPerGame: 21 });
+  finishGroupStage();
+  TM.ensureKnockout();
+  eq('structure: 20 group matches', TM.groupMatches().length, 20);
+  eq('structure: 4 quarter-finals', TM.getState().matches.filter(function (m) { return m.stage === 'qf'; }).length, 4);
+  eq('structure: 8 qualifiers', (function () { let c = 0; const q = TM.getState().knockout.qualifiers; Object.keys(q).forEach(function (g) { c += q[g].length; }); return c; })(), 8);
+  // play out the bracket
+  let guard = 0;
+  while (!TM.knockoutInfo().champion && guard++ < 40) {
+    const queued = TM.getState().matches.filter(function (m) { return m.stage !== 'group' && m.status === 'queued' && m.teamA && m.teamB && !m.bye; });
+    if (!queued.length) { TM.ensureKnockout(); continue; }
+    queued.forEach(function (m) {
+      const sc = TM.matchScoring(m);
+      if (sc.format === 'single_game') TM.saveKnockoutScore(m.id, [{ a: sc.pointsPerGame, b: sc.pointsPerGame - 5 }]);
+      else TM.saveKnockoutScore(m.id, [{ a: sc.pointsPerGame, b: sc.pointsPerGame - 5 }, { a: sc.pointsPerGame, b: sc.pointsPerGame - 6 }]);
+    });
+  }
+  eq('structure: 2 semi-finals', TM.getState().matches.filter(function (m) { return m.stage === 'sf'; }).length, 2);
+  eq('structure: 1 final', TM.getState().matches.filter(function (m) { return m.stage === 'final'; }).length, 1);
+  eq('structure: 27 total matches', TM.progress().overallTotal, 27);
+  check('structure: champion decided under mixed formats', !!TM.knockoutInfo().champion);
+  // the straight-set SF actually stored one game
+  const sf = TM.getState().matches.filter(function (m) { return m.stage === 'sf'; })[0];
+  eq('structure: straight SF stored one game', sf.sets.length, 1);
+})();
+
 /* ── report ─────────────────────────────────────────────── */
 console.log('\n' + (fail === 0 ? '✅ ALL TESTS PASSED' : '❌ FAILURES'));
 console.log('passed: ' + pass + '  failed: ' + fail);

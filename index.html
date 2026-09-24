@@ -508,6 +508,7 @@
   .bcard-team.win .nm, .bcard-team.win .sc { color: var(--accent); }
   .bcard-team.lose { opacity: 0.45; }
   .bcard-team.tbd { color: var(--text3); font-style: italic; }
+  .bcard-fmt { font-size: 10.5px; margin-top: 4px; letter-spacing: 0.2px; }
   .champion-card { background: linear-gradient(135deg, rgba(255,217,61,0.14), rgba(184,245,74,0.08)); border: 1px solid rgba(255,217,61,0.4); border-radius: var(--radius-lg); padding: 1.25rem; text-align: center; }
   .champion-card .crown { font-size: 34px; }
   .champion-card .ctitle { font-family: var(--font-head); font-size: 11px; font-weight: 800; letter-spacing: 2px; color: var(--gold); text-transform: uppercase; }
@@ -539,6 +540,14 @@
   .group-cfg-row input { flex: 1; min-width: 0; min-height: 40px; padding: 8px 11px; font-size: 13px; }
   .group-cfg-count { font-size: 12px; color: var(--text3); white-space: nowrap; }
   @media (max-width: 420px) { .group-cfg-row { flex-wrap: wrap; } .group-cfg-count { white-space: normal; } }
+  /* Knockout scoring: one block per round, format + points side by side. */
+  .ko-rule { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; background: var(--bg2); margin-bottom: 10px; }
+  .ko-rule:last-child { margin-bottom: 0; }
+  .ko-rule-title { font-family: var(--font-head); font-size: 13.5px; font-weight: 800; margin-bottom: 10px; }
+  .ko-rule-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; min-width: 0; }
+  .ko-rule-grid .field { margin-bottom: 0; min-width: 0; }
+  .ko-rule-grid input[type=number] { min-width: 0; }
+  @media (max-width: 360px) { .ko-rule-grid { grid-template-columns: 1fr; } }
   .level-chip { font-size: 10px; font-weight: 700; letter-spacing: 0.5px; padding: 2px 8px; border-radius: 20px; border: 1px solid var(--border); color: var(--text2); }
   /* Configured levels get a stable colour from their slug; the three defaults keep
      their original colours and any organizer-added level falls back to a neutral
@@ -722,7 +731,9 @@
       <ul class="rules-list">
         <li>You choose how many pairs qualify from each group (Settings → Qualification)</li>
         <li>The bracket is built from the number of qualifiers: 4 → SF + Final, 8 → QF onward, 16 → Round of 16 onward</li>
-        <li>Rounds are best of 3; if the qualifier count is not a power of two, byes advance teams without a fake match</li>
+        <li>Each round is configurable (Settings → Knockout Scoring): Best of 3 or a Straight set, with its own points target</li>
+        <li>A match keeps the format it was created under, so changing settings never alters existing or completed matches</li>
+        <li>If the qualifier count is not a power of two, byes advance teams without a fake match</li>
       </ul>
     </div>
     <div class="about-card" style="margin-bottom:1.25rem;">
@@ -786,6 +797,136 @@
   const KNOCKOUT_RANK = {};
   KNOCKOUT_ROUNDS.slice().sort(function (a, b) { return b.size - a.size; })
     .forEach(function (r, i) { KNOCKOUT_RANK[r.key] = i; });
+
+  // Knockout match formats. `best_of_3` is the historical behaviour (first to two
+  // games); `single_game` is a straight set decided by one game. Both share the
+  // same points-per-game target rule, so the two formats differ only in how many
+  // games a match can contain. The stored format id is `single_game` everywhere.
+  const KNOCKOUT_FORMAT_BEST_OF_3 = 'best_of_3';
+  const KNOCKOUT_FORMAT_SINGLE_GAME = 'single_game';
+  const KNOCKOUT_FORMATS = [KNOCKOUT_FORMAT_BEST_OF_3, KNOCKOUT_FORMAT_SINGLE_GAME];
+  const KNOCKOUT_FORMAT_LABEL = { best_of_3: 'Best of 3', single_game: 'Straight set' };
+  // Short round tags used by the concise format display ("QF · Best of 3 × 11").
+  const KNOCKOUT_SHORT = { r32: 'R32', r16: 'R16', qf: 'QF', sf: 'SF', final: 'Final' };
+  const MIN_POINTS_PER_GAME = 1;
+  const MAX_POINTS_PER_GAME = 99;
+
+  // Per-round scoring defaults. They preserve the pre-feature behaviour exactly
+  // (QF best of 3 × 11, SF × 15, Final × 21, and × 11 for the larger rounds), and
+  // are keyed by the existing KNOCKOUT_ROUNDS ids so there is only one round system.
+  const DEFAULT_KNOCKOUT_RULES = (function () {
+    const out = {};
+    KNOCKOUT_ROUNDS.forEach(function (r) {
+      out[r.key] = { format: KNOCKOUT_FORMAT_BEST_OF_3, pointsPerGame: KNOCKOUT_TARGET[r.key] };
+    });
+    return out;
+  })();
+
+  function defaultKnockoutRules() {
+    const out = {};
+    Object.keys(DEFAULT_KNOCKOUT_RULES).forEach(function (k) {
+      out[k] = { format: DEFAULT_KNOCKOUT_RULES[k].format, pointsPerGame: DEFAULT_KNOCKOUT_RULES[k].pointsPerGame };
+    });
+    return out;
+  }
+
+  // A malformed rule (bad format, 0/-1/NaN/Infinity/non-numeric target) never
+  // reaches the scoring engine: it is rejected here or normalized back to default.
+  function validateKnockoutRule(rule) {
+    if (!rule || typeof rule !== 'object' || Array.isArray(rule)) return 'A knockout scoring rule must be an object.';
+    if (KNOCKOUT_FORMATS.indexOf(rule.format) === -1) return 'Match format must be Best of 3 or Straight set.';
+    const p = rule.pointsPerGame;
+    if (typeof p !== 'number' || !isFinite(p) || !Number.isInteger(p) || p < MIN_POINTS_PER_GAME || p > MAX_POINTS_PER_GAME) {
+      return 'Points per game must be a whole number between ' + MIN_POINTS_PER_GAME + ' and ' + MAX_POINTS_PER_GAME + '.';
+    }
+    return null;
+  }
+
+  // Fill missing/rounds from defaults and drop any malformed entry. Used both by
+  // migration (old states have no knockoutRules at all) and by the settings setter.
+  function normalizeKnockoutRules(raw) {
+    const out = defaultKnockoutRules();
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+    Object.keys(out).forEach(function (key) {
+      const v = raw[key];
+      if (!v || typeof v !== 'object' || Array.isArray(v)) return;
+      const rule = { format: v.format, pointsPerGame: v.pointsPerGame };
+      if (validateKnockoutRule(rule)) return;
+      out[key] = { format: rule.format, pointsPerGame: rule.pointsPerGame };
+    });
+    return out;
+  }
+
+  // The rule a round is configured with, falling back to the default when the
+  // round is unknown or its rule is malformed.
+  function knockoutRuleFor(stage) {
+    const rules = (state && state.settings && state.settings.knockoutRules) ? state.settings.knockoutRules : null;
+    const rule = rules ? rules[stage] : null;
+    if (rule && !validateKnockoutRule(rule)) return { format: rule.format, pointsPerGame: rule.pointsPerGame };
+    const def = DEFAULT_KNOCKOUT_RULES[stage] || DEFAULT_KNOCKOUT_RULES.qf;
+    return { format: def.format, pointsPerGame: def.pointsPerGame };
+  }
+
+  // The scoring snapshot for a knockout match. A match created before this feature
+  // carries no `scoring`; it is treated as best of 3 at its stored target so its
+  // behaviour is unchanged. A match with a snapshot keeps it even if the settings
+  // later change — this is the per-match protection required by the spec.
+  function matchScoring(m) {
+    if (m && m.scoring && !validateKnockoutRule(m.scoring)) {
+      return { format: m.scoring.format, pointsPerGame: m.scoring.pointsPerGame };
+    }
+    const target = (m && Number.isInteger(m.target) && m.target > 0) ? m.target : null;
+    if (target != null) return { format: KNOCKOUT_FORMAT_BEST_OF_3, pointsPerGame: target };
+    const rule = knockoutRuleFor(m ? m.stage : null);
+    return { format: rule.format, pointsPerGame: rule.pointsPerGame };
+  }
+
+  function formatLabel(format) {
+    return KNOCKOUT_FORMAT_LABEL[format] || KNOCKOUT_FORMAT_LABEL[KNOCKOUT_FORMAT_BEST_OF_3];
+  }
+
+  // Concise "Best of 3 × 11" / "Straight set × 21" tag.
+  function knockoutFormatTag(stage, scoring) {
+    const sc = scoring || knockoutRuleFor(stage);
+    return formatLabel(sc.format) + ' × ' + sc.pointsPerGame;
+  }
+
+  // "QF · Best of 3 × 11" for match lists.
+  function knockoutFormatDisplay(stage, scoring) {
+    const sc = scoring || knockoutRuleFor(stage);
+    const short = KNOCKOUT_SHORT[stage] || (KNOCKOUT_LABEL[stage] || stage);
+    return short + ' · ' + knockoutFormatTag(stage, sc);
+  }
+
+  function matchFormatTag(m) {
+    return m && m.stage !== 'group' ? knockoutFormatTag(m.stage, matchScoring(m)) : '';
+  }
+
+  function matchFormatDisplay(m) {
+    return m && m.stage !== 'group' ? knockoutFormatDisplay(m.stage, matchScoring(m)) : '';
+  }
+
+  // The empty `sets` placeholder for a fresh match in the given format: one slot for
+  // a straight set, three for best of 3 (game 3 stays null until it is needed).
+  function emptySets(format) {
+    if (format === KNOCKOUT_FORMAT_SINGLE_GAME) return [{ a: null, b: null }];
+    return [{ a: null, b: null }, { a: null, b: null }, { a: null, b: null }];
+  }
+
+  // The knockout rounds that are actually in play: the rounds of the current
+  // bracket, or — before the bracket exists — the rounds the qualification rule
+  // predicts. Ordered earliest round (largest bracket) first.
+  function knockoutRoundsInPlay() {
+    const count = qualifierCount();
+    let rounds = count >= 2 ? bracketRounds(count) : [];
+    if (!rounds.length) {
+      const present = {};
+      state.matches.forEach(function (m) { if (m.stage !== 'group') present[m.stage] = true; });
+      rounds = KNOCKOUT_ROUNDS.slice().sort(function (a, b) { return b.size - a.size; })
+        .filter(function (r) { return present[r.key]; });
+    }
+    return rounds;
+  }
 
   // Default qualification: top 4 from each group (the default 10-pair example).
   const DEFAULT_QUALIFY_PER_GROUP = 4;
@@ -859,7 +1000,10 @@
       startedAt: null, completedAt: null, completedSeq: 0,
       scoreA: null, scoreB: null,
       sets: null, setsA: 0, setsB: 0,
-      winner: null, loser: null, target: null
+      winner: null, loser: null, target: null,
+      // Per-match scoring snapshot for knockout matches (format + points per game).
+      // Captured at creation so a later Settings change never rewrites a match.
+      scoring: null
     }, o || {});
   }
 
@@ -1272,7 +1416,9 @@
       settings: {
         allowOutsideAvailability: false,
         levels: DEFAULT_LEVELS.map(function (l) { return newLevel(l); }),
-        qualification: { perGroup: DEFAULT_QUALIFY_PER_GROUP }
+        qualification: { perGroup: DEFAULT_QUALIFY_PER_GROUP },
+        // Per-knockout-round scoring configuration; keyed by KNOCKOUT_ROUNDS ids.
+        knockoutRules: defaultKnockoutRules()
       },
       meta: { seq: 0 },
       ui: { screen: 'dashboard' }
@@ -1308,6 +1454,13 @@
     const rawQ = s.settings.qualification;
     const perGroup = (rawQ && Number.isInteger(rawQ.perGroup)) ? rawQ.perGroup : DEFAULT_QUALIFY_PER_GROUP;
     s.settings.qualification = { perGroup: perGroup > 0 ? perGroup : DEFAULT_QUALIFY_PER_GROUP };
+
+    // Knockout scoring migration. States written before this feature have no
+    // settings.knockoutRules; seed the historical defaults so existing tournaments
+    // keep the exact behaviour they had (QF 11, SF 15, Final 21, all best of 3).
+    // Existing matches keep their own scoring (or their stored target), so fixtures,
+    // results and bracket structure are never touched by this migration.
+    s.settings.knockoutRules = normalizeKnockoutRules(s.settings.knockoutRules);
     if (rawSettings.allowOutsideAvailability === undefined && rawSettings.enforceTimeWindows !== undefined) {
       s.settings.allowOutsideAvailability = !rawSettings.enforceTimeWindows; // pre-upgrade states
     }
@@ -1830,40 +1983,62 @@
     const m = getMatch(matchId);
     if (!m) return 'Match not found.';
     if (!m.teamA || !m.teamB) return 'Both teams must be known.';
-    const target = m.target || KNOCKOUT_TARGET[m.stage];
+    // The match's own snapshot decides the format and target. Never the live
+    // Settings, so an existing match keeps the rules it was created under.
+    const sc = matchScoring(m);
+    const target = sc.pointsPerGame;
+    const straight = sc.format === KNOCKOUT_FORMAT_SINGLE_GAME;
+    const maxSets = straight ? 1 : 3;
+    const minSets = straight ? 1 : 2;
 
-    for (let i = 0; i < sets.length; i++) {
-      const hasA = sets[i].a !== null && sets[i].a !== undefined;
-      const hasB = sets[i].b !== null && sets[i].b !== undefined;
-      if (hasA !== hasB) return 'Set ' + (i + 1) + ': enter both scores.';
+    // A straight-set match has no second or third game; ignore anything beyond the
+    // single slot so a stale UI can never record an impossible extra game.
+    if (straight && Array.isArray(sets) && sets.length > 1) {
+      const extra = sets.slice(1).some(function (s) {
+        return s && ((s.a !== null && s.a !== undefined) || (s.b !== null && s.b !== undefined));
+      });
+      if (extra) return 'A straight-set match is decided by a single game.';
     }
-    const filled = sets.filter(function (s) {
+    const list = Array.isArray(sets) ? sets.slice(0, maxSets) : [];
+
+    for (let i = 0; i < list.length; i++) {
+      const hasA = list[i].a !== null && list[i].a !== undefined;
+      const hasB = list[i].b !== null && list[i].b !== undefined;
+      if (hasA !== hasB) return 'Game ' + (i + 1) + ': enter both scores.';
+    }
+    const filled = list.filter(function (s) {
       return s.a !== null && s.a !== undefined && s.b !== null && s.b !== undefined;
     });
-    if (!filled.length) return 'Enter the set scores.';
+    if (!filled.length) return straight ? 'Enter the game score.' : 'Enter the game scores.';
 
-    // sets must be filled in order (no gaps)
-    for (let i = 0; i < sets.length; i++) {
-      const has = sets[i].a !== null && sets[i].a !== undefined;
+    // Games must be filled in order (no gaps)
+    for (let i = 0; i < list.length; i++) {
+      const has = list[i].a !== null && list[i].a !== undefined;
       if (has) continue;
-      for (let j = i + 1; j < sets.length; j++) {
-        if (sets[j].a !== null && sets[j].a !== undefined) return 'Fill the sets in order (set 1, then 2, then 3).';
+      for (let j = i + 1; j < list.length; j++) {
+        if (list[j].a !== null && list[j].a !== undefined) return 'Fill the games in order (game 1, then 2, then 3).';
       }
     }
-    if (filled.length < 2) return 'A best-of-3 match needs at least two sets.';
+
+    if (straight) {
+      if (filled.length > 1) return 'A straight-set match is decided by a single game.';
+    } else if (filled.length < minSets) {
+      return 'A best-of-3 match needs at least two games.';
+    }
 
     for (let i = 0; i < filled.length; i++) {
       const err = validateSetScore(filled[i].a, filled[i].b, target);
-      if (err) return 'Set ' + (i + 1) + ': ' + err;
+      if (err) return 'Game ' + (i + 1) + ': ' + err;
     }
 
-    if (filled.length === 3) {
-      const s1 = filled[0], s2 = filled[1];
-      if ((s1.a > s1.b) === (s2.a > s2.b)) return 'Set 3 is not needed — one team already won the first two sets.';
+    if (!straight && filled.length === 3) {
+      const g1 = filled[0], g2 = filled[1];
+      if ((g1.a > g1.b) === (g2.a > g2.b)) return 'Game 3 is not needed — one team already won the first two games.';
     }
     return null;
   }
 
+  // Games won by each side. Works for both formats; a straight match simply has one.
   function setsWon(sets) {
     let a = 0, b = 0;
     sets.forEach(function (s) {
@@ -1871,6 +2046,14 @@
       if (s.a > s.b) a++; else if (s.b > s.a) b++;
     });
     return { a: a, b: b };
+  }
+
+  // Whether a match is decided given the games entered so far. For best of 3 that
+  // is two games won; for a straight set it is the single game.
+  function knockoutMatchDecided(format, sets) {
+    const won = setsWon(sets);
+    const need = format === KNOCKOUT_FORMAT_SINGLE_GAME ? 1 : 2;
+    return won.a >= need || won.b >= need;
   }
 
   function saveGroupScore(matchId, a, b) {
@@ -1910,12 +2093,18 @@
     const err = validateKnockoutSets(matchId, sets);
     if (err) return { ok: false, msg: err };
 
-    const clean = sets.map(function (s) {
-      return {
+    // Store exactly the games the match's own format allows, so a straight set can
+    // never carry a stray second/third game into persisted state.
+    const sc = matchScoring(m);
+    const slots = sc.format === KNOCKOUT_FORMAT_SINGLE_GAME ? 1 : 3;
+    const clean = [];
+    for (let i = 0; i < slots; i++) {
+      const s = sets[i] || { a: null, b: null };
+      clean.push({
         a: (s.a === null || s.a === undefined) ? null : s.a,
         b: (s.b === null || s.b === undefined) ? null : s.b
-      };
-    });
+      });
+    }
     const won = setsWon(clean);
     m.sets = clean; m.setsA = won.a; m.setsB = won.b;
     m.winner = won.a > won.b ? m.teamA : m.teamB;
@@ -2149,6 +2338,9 @@
 
     const created = [];
     let byeCursor = 0, playCursor = 0;
+    // Snapshot the round's scoring configuration at bracket-build time. A later
+    // Settings change must never rewrite a match that already exists.
+    const firstScoring = Object.assign({}, knockoutRuleFor(first.key));
     for (let i = 0; i < firstRoundMatches; i++) {
       const id = knockoutMatchId(first.key, i + 1);
       if (byeAt[i]) {
@@ -2157,18 +2349,20 @@
         // already-decided match, never a made-up fixture.
         created.push(newMatch({
           id: id, stage: first.key, round: 1,
-          teamA: slot, teamB: null, target: first.target, bye: true,
+          teamA: slot, teamB: null, target: firstScoring.pointsPerGame, bye: true,
+          scoring: Object.assign({}, firstScoring),
           status: 'completed', winner: slot, completedAt: new Date().toISOString(),
-          sets: [{ a: null, b: null }, { a: null, b: null }, { a: null, b: null }]
+          sets: emptySets(firstScoring.format)
         }));
       } else {
         const a = playing[playCursor++];
         const b = playing[playCursor++] || null;
         created.push(newMatch({
           id: id, stage: first.key, round: 1,
-          teamA: a, teamB: b, target: first.target,
+          teamA: a, teamB: b, target: firstScoring.pointsPerGame,
+          scoring: Object.assign({}, firstScoring),
           bye: !b,
-          sets: [{ a: null, b: null }, { a: null, b: null }, { a: null, b: null }]
+          sets: emptySets(firstScoring.format)
         }));
       }
     }
@@ -2220,11 +2414,14 @@
       if (!state.matches.some(function (m) { return m.stage === cur.key; })) continue;
       const built = populatedPairing(cur.key, next.key);
       if (!built) continue;
+      // Snapshot the next round's scoring configuration when its matches are created.
+      const nextScoring = Object.assign({}, knockoutRuleFor(next.key));
       built.pairs.forEach(function (p, idx) {
         state.matches.push(newMatch({
           id: p.id, stage: next.key, round: idx + 1, teamA: p.a, teamB: p.b,
-          target: built.def.target, bye: (!p.a || !p.b),
-          sets: [{ a: null, b: null }, { a: null, b: null }, { a: null, b: null }]
+          target: nextScoring.pointsPerGame, bye: (!p.a || !p.b),
+          scoring: Object.assign({}, nextScoring),
+          sets: emptySets(nextScoring.format)
         }));
       });
     }
@@ -2821,6 +3018,39 @@
     return { perGroup: (state.settings.qualification && state.settings.qualification.perGroup) || DEFAULT_QUALIFY_PER_GROUP };
   }
 
+  /* ── knockout scoring configuration ──────────────────── */
+  // The configured scoring for every round in play, plus the (mutable) full config
+  // keyed by round id. `rounds` is what the Settings UI renders — the current
+  // bracket's rounds, or the rounds the qualification rule predicts.
+  function getKnockoutRules() {
+    const rules = normalizeKnockoutRules(state.settings.knockoutRules);
+    return {
+      rules: rules,
+      rounds: knockoutRoundsInPlay().map(function (r) {
+        const sc = rules[r.key] || knockoutRuleFor(r.key);
+        return { key: r.key, name: r.name, format: sc.format, pointsPerGame: sc.pointsPerGame };
+      })
+    };
+  }
+
+  // Validate and persist a single round's scoring. Rejects invalid format/target
+  // before anything reaches the scoring engine. Existing matches are untouched:
+  // they keep the snapshot taken when they were created.
+  function setKnockoutRule(stage, rule) {
+    const def = KNOCKOUT_ROUNDS.find(function (r) { return r.key === stage; });
+    if (!def) return { ok: false, msg: 'Unknown knockout round.' };
+    const candidate = {
+      format: rule ? rule.format : undefined,
+      pointsPerGame: (rule && rule.pointsPerGame != null) ? Number(rule.pointsPerGame) : undefined
+    };
+    const err = validateKnockoutRule(candidate);
+    if (err) return { ok: false, msg: err };
+    if (!state.settings.knockoutRules) state.settings.knockoutRules = defaultKnockoutRules();
+    state.settings.knockoutRules[stage] = { format: candidate.format, pointsPerGame: candidate.pointsPerGame };
+    save();
+    return { ok: true, stage: stage, rule: Object.assign({}, state.settings.knockoutRules[stage]) };
+  }
+
   /* ── time helpers ────────────────────────────────────── */
   function hhmmToMinutes(hhmm) {
     const p = String(hhmm).split(':');
@@ -2862,6 +3092,14 @@
     GROUP_CAP: GROUP_CAP,
     KNOCKOUT_ROUNDS: KNOCKOUT_ROUNDS,
     KNOCKOUT_TARGET: KNOCKOUT_TARGET,
+    KNOCKOUT_FORMAT_BEST_OF_3: KNOCKOUT_FORMAT_BEST_OF_3,
+    KNOCKOUT_FORMAT_SINGLE_GAME: KNOCKOUT_FORMAT_SINGLE_GAME,
+    KNOCKOUT_FORMATS: KNOCKOUT_FORMATS,
+    KNOCKOUT_FORMAT_LABEL: KNOCKOUT_FORMAT_LABEL,
+    KNOCKOUT_SHORT: KNOCKOUT_SHORT,
+    MIN_POINTS_PER_GAME: MIN_POINTS_PER_GAME,
+    MAX_POINTS_PER_GAME: MAX_POINTS_PER_GAME,
+    DEFAULT_KNOCKOUT_RULES: DEFAULT_KNOCKOUT_RULES,
     KNOCKOUT_LABEL: KNOCKOUT_LABEL,
     KNOCKOUT_RANK: KNOCKOUT_RANK,
     MIN_PAIRS: MIN_PAIRS,
@@ -2957,6 +3195,16 @@
     validateSetScore: validateSetScore,
     validateKnockoutSets: validateKnockoutSets,
     setsWon: setsWon,
+    knockoutMatchDecided: knockoutMatchDecided,
+    matchScoring: matchScoring,
+    knockoutRuleFor: knockoutRuleFor,
+    validateKnockoutRule: validateKnockoutRule,
+    normalizeKnockoutRules: normalizeKnockoutRules,
+    knockoutFormatTag: knockoutFormatTag,
+    knockoutFormatDisplay: knockoutFormatDisplay,
+    matchFormatTag: matchFormatTag,
+    matchFormatDisplay: matchFormatDisplay,
+    emptySets: emptySets,
     saveGroupScore: saveGroupScore,
     saveKnockoutScore: saveKnockoutScore,
     resetMatch: resetMatch,
@@ -2972,6 +3220,8 @@
     getQualification: getQualification,
     setQualification: setQualification,
     qualifiedPerGroup: qualifiedPerGroup,
+    getKnockoutRules: getKnockoutRules,
+    setKnockoutRule: setKnockoutRule,
 
     progress: progress,
     recentResults: recentResults,
@@ -3203,25 +3453,33 @@
         '</div>' +
         '<div class="score-preview" id="score-preview">Enter both scores to see the winner</div>';
     } else {
-      const target = m.target || TM.KNOCKOUT_TARGET[m.stage];
-      $('#score-sub').textContent = 'Best of 3 sets, each set to ' + target + ' points. Sets won decides the match.';
-      const sets = m.sets || [{ a: null, b: null }, { a: null, b: null }, { a: null, b: null }];
+      const sc = TM.matchScoring(m);
+      const target = sc.pointsPerGame;
+      const straight = sc.format === TM.KNOCKOUT_FORMAT_SINGLE_GAME;
+      // The format is stated before any input so the required entry is obvious.
+      $('#score-sub').textContent = straight
+        ? 'Straight set · ' + target + ' points. The single game decides the match.'
+        : 'Best of 3 · ' + target + ' points/game. First to 2 games wins.';
+      const slots = straight ? 1 : 3;
+      const sets = m.sets || [];
+      const label = function (i) { return straight ? 'Final score' : ('Game ' + (i + 1)); };
+      const row = function (side, i) {
+        const v = sets[i] && sets[i][side] != null ? sets[i][side] : '';
+        // Game 3 is only meaningful once games 1 and 2 are split; previewScore
+        // reveals this row then. Straight set renders a single "Final score" row.
+        const g3 = (!straight && i === 2) ? ' id="sc-g3-' + side + '-row" style="display:none"' : '';
+        return '<div class="score-input-row"' + g3 + '><label>' + label(i) + '</label><input class="score-input" type="number" inputmode="numeric" min="0" max="99" id="sc-' + side + '-' + i + '" oninput="App.previewScore()" value="' + v + '"></div>';
+      };
       $('#score-body').innerHTML =
         '<div class="score-block">' +
           '<div class="score-team-name">' + esc(tA ? tA.name : 'Team A') + '</div>' +
-          [0, 1, 2].map(function (i) {
-            const v = sets[i] && sets[i].a != null ? sets[i].a : '';
-            return '<div class="score-input-row"><label>Set ' + (i + 1) + '</label><input class="score-input" type="number" inputmode="numeric" min="0" max="99" id="sc-a-' + i + '" oninput="App.previewScore()" value="' + v + '"></div>';
-          }).join('') +
+          Array.from({ length: slots }, function (_, i) { return row('a', i); }).join('') +
         '</div>' +
         '<div class="score-block">' +
           '<div class="score-team-name">' + esc(tB ? tB.name : 'Team B') + '</div>' +
-          [0, 1, 2].map(function (i) {
-            const v = sets[i] && sets[i].b != null ? sets[i].b : '';
-            return '<div class="score-input-row"><label>Set ' + (i + 1) + '</label><input class="score-input" type="number" inputmode="numeric" min="0" max="99" id="sc-b-' + i + '" oninput="App.previewScore()" value="' + v + '"></div>';
-          }).join('') +
+          Array.from({ length: slots }, function (_, i) { return row('b', i); }).join('') +
         '</div>' +
-        '<div class="score-preview" id="score-preview">Enter the sets to see the winner</div>';
+        '<div class="score-preview" id="score-preview">' + (straight ? 'Enter the game score to see the winner' : 'Enter the games to see the winner') + '</div>';
     }
 
     $('#score-err').textContent = '';
@@ -3236,7 +3494,14 @@
 
     openModal('score-modal');
     previewScore();
-    setTimeout(function () { const el = $('#sc-a'); if (el) el.focus(); }, 60);
+    setTimeout(function () { const el = $('#' + (m.stage === 'group' ? 'sc-a' : 'sc-a-0')); if (el) el.focus(); }, 60);
+  }
+
+  // How many game rows the score modal currently renders for a match: one for a
+  // straight set, three for best of 3 (game 3 hidden until it is needed).
+  function scoreSlotCount(m) {
+    if (!m || m.stage === 'group') return 0;
+    return TM.matchScoring(m).format === TM.KNOCKOUT_FORMAT_SINGLE_GAME ? 1 : 3;
   }
 
   function readScoreInputs() {
@@ -3248,8 +3513,24 @@
       return Number.isFinite(v) ? v : NaN;
     }
     if (m.stage === 'group') return { a: num('sc-a'), b: num('sc-b') };
-    const sets = [0, 1, 2].map(function (i) { return { a: num('sc-a-' + i), b: num('sc-b-' + i) }; });
+    const slots = scoreSlotCount(m);
+    const sets = [];
+    for (let i = 0; i < slots; i++) sets.push({ a: num('sc-a-' + i), b: num('sc-b-' + i) });
     return { sets: sets };
+  }
+
+  // Reveal the game 3 row only when games 1 and 2 are both filled and split 1–1.
+  // Straight-set matches never render a game 2/3 row to begin with.
+  function updateGame3Visibility(m, sets) {
+    if (!m || m.stage === 'group') return;
+    if (TM.matchScoring(m).format === TM.KNOCKOUT_FORMAT_SINGLE_GAME) return;
+    const g1 = sets[0], g2 = sets[1];
+    const full = function (s) { return s && s.a !== null && s.a !== undefined && s.b !== null && s.b !== undefined; };
+    const needed = full(g1) && full(g2) && ((g1.a > g1.b) !== (g2.a > g2.b));
+    ['a', 'b'].forEach(function (side) {
+      const el = $('#sc-g3-' + side + '-row');
+      if (el) el.style.display = needed ? '' : 'none';
+    });
   }
 
   function previewScore() {
@@ -3272,18 +3553,23 @@
       return;
     }
 
+    const sc = TM.matchScoring(m);
+    const straight = sc.format === TM.KNOCKOUT_FORMAT_SINGLE_GAME;
     const sets = inp.sets;
+    updateGame3Visibility(m, sets);
     const err = TM.validateKnockoutSets(m.id, sets);
     if (err) {
       const anyFilled = sets.some(function (s) { return s.a !== null || s.b !== null; });
       box.className = 'score-preview' + (anyFilled ? ' bad' : '');
-      box.textContent = anyFilled ? err : 'Enter the sets to see the winner';
+      box.textContent = anyFilled ? err : (straight ? 'Enter the game score to see the winner' : 'Enter the games to see the winner');
       return;
     }
     const won = TM.setsWon(sets);
     const w = won.a > won.b ? aName : bName;
     box.className = 'score-preview ok';
-    box.textContent = '🏆 ' + w + ' wins ' + Math.max(won.a, won.b) + '–' + Math.min(won.a, won.b) + ' in sets';
+    box.textContent = straight
+      ? '🏆 ' + w + ' wins the straight set'
+      : '🏆 ' + w + ' wins ' + Math.max(won.a, won.b) + '–' + Math.min(won.a, won.b) + ' in games';
   }
 
   function submitScore() {
@@ -3624,7 +3910,7 @@
     const meta = [];
     if (m.bye) meta.push('Bye');
     else if (m.court) meta.push(TM.courtName(m.court));
-    meta.push(m.stage === 'group' ? esc(TM.groupLabel(m.group)) : esc(TM.KNOCKOUT_LABEL[m.stage]));
+    meta.push(m.stage === 'group' ? esc(TM.groupLabel(m.group)) : esc(TM.matchFormatDisplay(m)));
     if (m.completedAt) meta.push(timeOf(m.completedAt));
     return '<div class="mrow done">' +
       '<div class="mrow-top"><span class="mrow-id">✓ ' + esc(m.id) + '</span>' + stagePill(m) + '<span class="pill pill-done">Final</span></div>' +
@@ -3696,7 +3982,7 @@
     html += '<div class="court-block-label">' + phaseTag('now') + ' Current match</div>';
     if (cur) {
       html += '<div class="court-teams">' + teamsBlock(cur) + '</div>';
-      html += '<div class="court-reason">' + esc(cur.id) + ' · started ' + timeOf(cur.startedAt) + '</div>';
+      html += '<div class="court-reason">' + esc(cur.id) + ' · ' + esc(TM.matchFormatDisplay(cur)) + ' · started ' + timeOf(cur.startedAt) + '</div>';
       if (!enabled) html += '<div class="court-reason">This court was disabled while the match was running — it still finishes normally.</div>';
       else if (!accepts) html += '<div class="court-reason">Once it finishes, no further matches start on this court.</div>';
       html += '<div class="court-actions"><button class="btn btn-primary btn-sm" onclick="App.openScore(\'' + cur.id + '\',\'courts\')">Enter result</button>' +
@@ -3798,10 +4084,13 @@
   }
 
   // The Group / Round line: "Group A · Round 2" for group matches, the bracket round
-  // name for knockout matches.
+  // name plus its configured format for knockout matches ("Quarter-Final · Best of
+  // 3 × 11"). The format is read from the match's own snapshot, so it stays correct
+  // even after Settings change.
   function matchMetaLine(m) {
     if (m.stage === 'group') return esc(TM.groupLabel(m.group)) + ' · Round ' + esc(String(m.round));
-    return esc(TM.stageDisplayName(m.stage, TM.KNOCKOUT_LABEL[m.stage]));
+    return esc(TM.stageDisplayName(m.stage, TM.KNOCKOUT_LABEL[m.stage])) +
+      (m.bye ? '' : ' · ' + esc(TM.matchFormatTag(m)));
   }
 
   // Team A over a VS divider over Team B, so long names wrap safely and the two
@@ -3967,6 +4256,7 @@
       (m.bye
         ? row('A') + row('B') + '<div class="bcard-bye muted" style="font-size:11px;padding:0 10px 8px;">Bye — advances automatically</div>'
         : row('A') + row('B') +
+          '<div class="bcard-fmt muted">' + esc(TM.matchFormatTag(m)) + '</div>' +
           '<div class="mrow-actions">' +
             (m.status === 'completed'
               ? '<button class="btn btn-xs" onclick="App.openScore(\'' + m.id + '\',\'knockout\')">✎ Edit</button><button class="btn btn-xs" onclick="App.askReset(\'' + m.id + '\',\'knockout\')">↺</button>'
@@ -3986,10 +4276,10 @@
     const qualifiers = TM.getQualifiedTeams();
     const count = tmQualifierCount();
     const rounds = TM.bracketRounds(count);
-    const roundNames = rounds.map(function (r) { return r.name + ' (sets to ' + r.target + ')'; }).join(' → ');
+    const roundNames = rounds.map(function (r) { return r.name + ' (' + TM.knockoutFormatTag(r.key) + ')'; }).join(' → ');
 
     let html = '<div class="page-title">Knockout</div>';
-    html += '<div class="page-subtitle">' + (roundNames || 'Knockout') + '. Best of 3, generated automatically from the group standings.</div>';
+    html += '<div class="page-subtitle">' + (roundNames || 'Knockout') + '. Generated automatically from the group standings.</div>';
 
     if (!info.groupDone) {
       const p = TM.progress();
@@ -4596,6 +4886,40 @@
     }
     html += '</div>';
 
+    // Knockout scoring: one block per knockout round that exists (or is predicted
+    // from the qualification rule). Each round picks Best of 3 or Straight set and
+    // its points-per-game target. Saving never touches existing matches — each match
+    // keeps the format it was created under.
+    html += '<div class="section-title">Knockout Scoring <span class="line"></span></div>';
+    html += '<div class="card">';
+    const kRules = TM.getKnockoutRules();
+    if (!kRules.rounds.length) {
+      html += '<div class="alert alert-warn" style="margin:0;">⚠️ No knockout rounds yet — configure at least 2 qualifiers above to set round scoring.</div>';
+    } else {
+      kRules.rounds.forEach(function (r) {
+        const straight = r.format === TM.KNOCKOUT_FORMAT_SINGLE_GAME;
+        html += '<div class="ko-rule" data-stage="' + esc(r.key) + '">';
+        html += '<div class="ko-rule-title">' + esc(TM.stageDisplayName(r.key, r.name)) + '</div>';
+        html += '<div class="ko-rule-grid">';
+        html += '<div class="field"><label>Match format</label>' +
+          '<select onchange="App.setKnockoutFormat(\'' + esc(r.key) + '\',this.value)">' +
+          '<option value="best_of_3"' + (!straight ? ' selected' : '') + '>Best of 3</option>' +
+          '<option value="single_game"' + (straight ? ' selected' : '') + '>Straight set</option>' +
+          '</select></div>';
+        // The target field reads "Points to win" for a straight set and "Points per
+        // game" for best of 3, so the required entry is unambiguous.
+        html += '<div class="field"><label>' + (straight ? 'Points to win' : 'Points per game') + '</label>' +
+          '<input type="number" inputmode="numeric" min="' + TM.MIN_POINTS_PER_GAME + '" max="' + TM.MAX_POINTS_PER_GAME + '" step="1" value="' + r.pointsPerGame + '" ' +
+          'onchange="App.setKnockoutPoints(\'' + esc(r.key) + '\',this.value)" onkeydown="if(event.key===\'Enter\'){this.blur();}"></div>';
+        html += '</div>';
+        html += '<div class="muted" style="font-size:12px;margin-top:4px;">' + esc(TM.knockoutFormatDisplay(r.key, { format: r.format, pointsPerGame: r.pointsPerGame })) + '</div>';
+        html += '</div>';
+      });
+    }
+    html += '<div class="cfg-msg" id="ko-msg"></div>';
+    html += '<div class="muted" style="font-size:12px;margin-top:10px;">Each knockout round can be Best of 3 (first to two games) or a Straight set (one game), with its own points target. Changing a round here affects only matches created after the change — a match already created or started keeps the rules it was set up with.</div>';
+    html += '</div>';
+
     // Regenerate fixtures: explicit, safe, with before/after counts.
     html += '<div class="section-title">Regenerate Fixtures <span class="line"></span></div>';
     html += '<div class="card">' +
@@ -4717,6 +5041,43 @@
     if (!r.ok) { toast(r.msg); render(); return; }
     toast('Qualification updated — top ' + r.qualification.perGroup + ' per group');
     render();
+  }
+
+  // Apply a scoring edit for one knockout round. Both handlers validate through the
+  // core API and surface a clear message on rejection (never a silent bad value).
+  function applyKnockoutRule(stage, rule, okMsg) {
+    const r = TM.setKnockoutRule(stage, rule);
+    if (!r.ok) { toast(r.msg); render(); koMsg(r); return; }
+    toast(okMsg);
+    render();
+    koMsg({ ok: true, msg: 'Knockout scoring saved — ' + TM.knockoutFormatDisplay(stage, r.rule) + '.' });
+  }
+
+  function currentRule(stage) {
+    const all = TM.getKnockoutRules().rules;
+    return all[stage] ? { format: all[stage].format, pointsPerGame: all[stage].pointsPerGame } : TM.knockoutRuleFor(stage);
+  }
+
+  function setKnockoutFormat(stage, format) {
+    const cur = currentRule(stage);
+    const label = TM.KNOCKOUT_FORMAT_LABEL[format] || format;
+    applyKnockoutRule(stage, { format: format, pointsPerGame: cur.pointsPerGame }, label + ' set for ' + TM.stageDisplayName(stage, stage));
+  }
+
+  function setKnockoutPoints(stage, value) {
+    const cur = currentRule(stage);
+    const raw = String(value == null ? '' : value).trim();
+    // Reject empty / NaN / Infinity / non-numeric before they reach the engine.
+    const n = Number(raw);
+    applyKnockoutRule(stage, { format: cur.format, pointsPerGame: (raw === '' ? raw : n) },
+      'Points updated for ' + TM.stageDisplayName(stage, stage));
+  }
+
+  function koMsg(r) {
+    const el = $('#ko-msg');
+    if (!el) { if (r && !r.ok) toast(r.msg); return; }
+    el.className = 'cfg-msg ' + (r && r.ok ? 'ok' : 'err');
+    el.textContent = (r && r.msg) ? r.msg : '';
   }
 
   function askRegenerate() {
@@ -4917,6 +5278,8 @@
 
     setName: setName,
     setQualification: setQualification,
+    setKnockoutFormat: setKnockoutFormat,
+    setKnockoutPoints: setKnockoutPoints,
     askRegenerate: askRegenerate,
     setAllowOutside: setAllowOutside,
     setCourtCount: setCourtCount,

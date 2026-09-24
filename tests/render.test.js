@@ -758,6 +758,83 @@ check('polish: card selects are touch sized', /\.card select\s*\{[^}]*min-height
 check('polish: remove button is touch sized', /\.remove-btn\s*\{[^}]*width:\s*40px[^}]*height:\s*40px/.test(styleText), 'remove too small');
 check('polish: app shell caps a single column', /\.app-shell\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/.test(styleText), 'shell can overflow');
 
+/* ── configurable knockout scoring UI ─────────────────────────────────────── */
+// Settings → Knockout Scoring renders one block per round, with the right labels.
+TM.resetTournament();
+App.nav('settings');
+let koSettings = getEl('view').innerHTML;
+check('ko settings: section present', koSettings.indexOf('Knockout Scoring') !== -1, 'no section');
+check('ko settings: QF block', koSettings.indexOf('Quarter-finals') !== -1, 'no QF');
+check('ko settings: SF block', koSettings.indexOf('Semi-finals') !== -1, 'no SF');
+check('ko settings: Final block', koSettings.indexOf('>Final<') !== -1 || koSettings.indexOf('Final</div>') !== -1, 'no Final');
+check('ko settings: Best of 3 option', koSettings.indexOf('Best of 3') !== -1, 'no bo3 option');
+check('ko settings: Straight set option', koSettings.indexOf('Straight set') !== -1, 'no straight option');
+check('ko settings: points-per-game label', koSettings.indexOf('Points per game') !== -1, 'no ppg label');
+check('ko settings: wired to format handler', koSettings.indexOf('App.setKnockoutFormat(') !== -1, 'no format handler');
+check('ko settings: wired to points handler', koSettings.indexOf('App.setKnockoutPoints(') !== -1, 'no points handler');
+check('ko settings: shows the concise format tag', koSettings.indexOf('Best of 3 × 11') !== -1, 'no format tag');
+check('ko settings: no undefined/NaN', koSettings.indexOf('undefined') === -1 && koSettings.indexOf('NaN') === -1, 'leak');
+
+// A straight-set round relabels its target field to "Points to win".
+App.setKnockoutFormat('qf', 'single_game');
+App.nav('settings');
+koSettings = getEl('view').innerHTML;
+check('ko settings: straight set relabels field', koSettings.indexOf('Points to win') !== -1, 'no straight label');
+check('ko settings: straight tag shown', koSettings.indexOf('Straight set × ') !== -1, 'no straight tag');
+eq('ko settings: format change persisted', TM.getKnockoutRules().rules.qf.format, 'single_game');
+App.setKnockoutFormat('qf', 'best_of_3');
+
+// TEST 7 — best-of-3 score UI: Game 1/Game 2 render, Game 3 hidden until needed.
+TM.resetTournament();
+TM.setKnockoutRule('qf', { format: 'best_of_3', pointsPerGame: 11 });
+TM.groupMatches().forEach(function (m) { TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 12, m.teamA < m.teamB ? 12 : 21); });
+TM.ensureKnockout();
+App.openScore('QF-1', 'matches');
+let body = getEl('score-body').innerHTML;
+let sub = getEl('score-sub').textContent;
+check('bo3 UI: format stated before entry', sub.indexOf('Best of 3') !== -1 && sub.indexOf('11') !== -1, sub);
+check('bo3 UI: Game 1 rendered', body.indexOf('>Game 1<') !== -1, 'no game 1');
+check('bo3 UI: Game 2 rendered', body.indexOf('>Game 2<') !== -1, 'no game 2');
+check('bo3 UI: Game 3 row present but hidden', body.indexOf('sc-g3-a-row') !== -1 && body.indexOf('sc-g3-b-row') !== -1, 'no game 3 rows');
+check('bo3 UI: no undefined/NaN', body.indexOf('undefined') === -1 && body.indexOf('NaN') === -1, 'leak');
+App.closeScore();
+
+// TEST 6 — straight-set score UI: only a single "Final score" entry, no Game 2/3.
+TM.resetTournament();
+TM.setKnockoutRule('qf', { format: 'single_game', pointsPerGame: 21 });
+TM.groupMatches().forEach(function (m) { TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 12, m.teamA < m.teamB ? 12 : 21); });
+TM.ensureKnockout();
+App.openScore('QF-1', 'matches');
+body = getEl('score-body').innerHTML;
+sub = getEl('score-sub').textContent;
+check('straight UI: format stated', sub.indexOf('Straight set') !== -1 && sub.indexOf('21') !== -1, sub);
+check('straight UI: Final score label rendered', body.indexOf('>Final score<') !== -1, 'no final score');
+check('straight UI: no Game 2 input', body.indexOf('>Game 2<') === -1, 'game 2 rendered');
+check('straight UI: no Game 3 input', body.indexOf('>Game 3<') === -1 && body.indexOf('sc-g3-a-row') === -1, 'game 3 rendered');
+check('straight UI: single score input per side', (body.match(/id="sc-a-0"/g) || []).length === 1 && (body.match(/id="sc-a-1"/g) || []).length === 0, 'wrong slots');
+App.closeScore();
+
+// Match / knockout views advertise each round's configured format.
+TM.resetTournament();
+App.nav('knockout');
+const koView = getEl('view').innerHTML;
+check('ko view: subtitle shows configured formats', koView.indexOf('Best of 3 × 11') !== -1 && koView.indexOf('Best of 3 × 15') !== -1 && koView.indexOf('Best of 3 × 21') !== -1, 'no formats');
+check('ko view: no undefined/NaN', koView.indexOf('undefined') === -1 && koView.indexOf('NaN') === -1, 'leak');
+
+// With a generated bracket the match list labels each knockout match with its format.
+TM.setKnockoutRule('final', { format: 'single_game', pointsPerGame: 21 });
+TM.groupMatches().forEach(function (m) { TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 12, m.teamA < m.teamB ? 12 : 21); });
+TM.ensureKnockout();
+App.nav('matches');
+const matchView = getEl('view').innerHTML;
+check('matches view: knockout format tag shown', matchView.indexOf('Best of 3 × 11') !== -1, 'no qf format');
+check('matches view: no undefined/NaN', matchView.indexOf('undefined') === -1 && matchView.indexOf('NaN') === -1, 'leak');
+
+// Changing a round after the bracket exists must not alter an existing match's label.
+const qfBefore = TM.matchFormatTag(TM.getMatch('QF-1'));
+App.setKnockoutFormat('qf', 'single_game');
+check('snapshot UI: existing match label unchanged', TM.matchFormatTag(TM.getMatch('QF-1')) === qfBefore, TM.matchFormatTag(TM.getMatch('QF-1')));
+
 console.log('\n' + (fail === 0 ? '✅ ALL RENDERS OK' : '❌ RENDER FAILURES'));
 console.log('passed: ' + pass + '  failed: ' + fail);
 if (failures.length) { console.log('\nFailures:'); failures.forEach(f => console.log('  - ' + f)); process.exit(1); }
