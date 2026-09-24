@@ -1655,33 +1655,57 @@
   }
   function byMatchNumber(a, b) { return matchNumber(a.id) - matchNumber(b.id); }
 
-  // Seed the knockout from real group standings. Seeding follows the classic
-  // bracket pattern: A1 v Bk, B1 v Ak, A2 v B(k-1), B2 v A(k-1), … For example with
-  // top 4 from two groups: A1 v B4, B1 v A4, A2 v B3, B2 v A3. With top 2 from two
-  // groups: A1 v B2, B1 v A2. This generalises across group counts and sizes.
-  // Returns a flat slot list in bracket order; a null slot is a bye.
+  // Seed the knockout from real group standings. Returns a compact list of every
+  // qualified team exactly once, in bracket order: consecutive entries meet in the
+  // first round. Byes are added later by generateKnockout, never here.
+  //
+  // • One group — the qualifiers in standing order.
+  // • Two groups — the classic cross seeding A1 v Bk, B1 v Ak, A2 v B(k-1),
+  //   B2 v A(k-1), … e.g. top 4: A1 v B4, B1 v A4, A2 v B3, B2 v A3; top 2:
+  //   A1 v B2, B1 v A2. Unchanged, so existing two-group tournaments seed identically.
+  // • Three or more groups — a deterministic balanced draw:
+  //     1. rank-interleave (rank 1 of every group, then rank 2, …) so no group
+  //        dominates the top or bottom of the list;
+  //     2. snake-fold end-to-end so the strongest seed is drawn against the weakest.
+  //   Every configured group contributes its qualifiers; none is dropped or
+  //   duplicated. Example, 3 groups with top 2 each, order becomes
+  //   A1, C2, B1, B2, C1, A2 (six seeds); the two byes then go to A1 and B1.
   function seedBracket(qualifiers) {
     const gs = groupIds().filter(function (g) { return (qualifiers[g] || []).length; });
     if (!gs.length) return [];
-    if (gs.length < 2) {
+    if (gs.length === 1) {
       return (qualifiers[gs[0]] || []).slice();
     }
-    const a = qualifiers[gs[0]] || [], b = qualifiers[gs[1]] || [];
-    const k = Math.max(a.length, b.length);
-    const slots = [];
-    for (let i = 0; i < k; i++) {
-      let x, y;
-      if (i % 2 === 0) {
-        const h = i / 2;
-        x = a[h] || null; y = b[k - 1 - h] || null;
-      } else {
-        const h = (i - 1) / 2;
-        x = b[h] || null; y = a[k - 1 - h] || null;
+    // Two groups keep the original cross-interleave so their pairings are unchanged.
+    if (gs.length === 2) {
+      const a = qualifiers[gs[0]] || [], b = qualifiers[gs[1]] || [];
+      const k = Math.max(a.length, b.length);
+      const slots = [];
+      for (let i = 0; i < k; i++) {
+        let x, y;
+        if (i % 2 === 0) {
+          const h = i / 2;
+          x = a[h] || null; y = b[k - 1 - h] || null;
+        } else {
+          const h = (i - 1) / 2;
+          x = b[h] || null; y = a[k - 1 - h] || null;
+        }
+        if (x === null && y === null) continue;
+        slots.push(x); slots.push(y);
       }
-      if (x === null && y === null) continue;
-      slots.push(x); slots.push(y);
+      return slots;
     }
-    return slots;
+    // 3+ groups: rank-interleave every group, then snake-fold end-to-end.
+    const maxRank = gs.reduce(function (m, g) { return Math.max(m, qualifiers[g].length); }, 0);
+    const pool = [];
+    for (let r = 0; r < maxRank; r++) {
+      gs.forEach(function (g) { if (qualifiers[g][r]) pool.push(qualifiers[g][r]); });
+    }
+    const folded = [];
+    let lo = 0, hi = pool.length - 1;
+    while (lo < hi) { folded.push(pool[lo++]); folded.push(pool[hi--]); }
+    if (lo === hi) folded.push(pool[lo]);
+    return folded;
   }
 
   // Build the knockout bracket dynamically. Rounds are derived from the number of
@@ -2012,20 +2036,25 @@
 
     const structureChanged = groupSignature(next) !== groupSignature(state);
     const hasResults = state.matches.some(function (m) { return m.status !== 'queued'; });
-    if (structureChanged && hasResults && !opts.regenerate) {
+    // `opts.structural === false` is an explicit promise that this call cannot
+    // affect the playing structure (used by add/remove empty group). It never
+    // triggers a regeneration and never demands confirmation, so adding or
+    // removing an empty group can never clear existing results.
+    const nonStructural = opts.structural === false;
+    if (!nonStructural && structureChanged && hasResults && !opts.regenerate) {
       return { ok: false, needsConfirmation: true, msg: TEAM_LOCK_MSG };
     }
 
     state.teams = next.teams;
     state.groups = next.groups;
     state.groupLabels = next.groupLabels;
-    if (structureChanged) {
+    if (!nonStructural && structureChanged) {
       state.matches = buildGroupMatches(state);
       clearKnockout();
       state.meta.seq = 0;
     }
     save();
-    return { ok: true, regenerated: structureChanged };
+    return { ok: true, regenerated: !nonStructural && structureChanged };
   }
 
   // ── granular team API (operates directly on live state) ──
@@ -2091,8 +2120,9 @@
   }
 
   // Add an empty group. Pairs are never moved into it automatically — the
-  // organizer assigns pairs explicitly, so adding a group is always safe and
-  // never regenerates fixtures.
+  // organizer assigns pairs explicitly, so adding a group is always safe: it is
+  // explicitly marked non-structural and therefore never regenerates fixtures or
+  // clears results.
   function addGroup(groupId) {
     const ids = groupIds();
     if (ids.length >= MAX_GROUPS) return { ok: false, msg: 'A tournament supports at most ' + MAX_GROUPS + ' groups.' };
@@ -2100,7 +2130,7 @@
     if (!id) return { ok: false, msg: 'A group needs an id.' };
     if (state.groups[id]) return { ok: false, msg: 'Group ' + id + ' already exists.' };
     const teams = state.teams.map(copy);
-    return applyTeams(teams, { groups: ids.concat([id]), regenerate: true });
+    return applyTeams(teams, { groups: ids.concat([id]), structural: false });
   }
 
   // Remove a group. Only an empty group can be removed — a group that still holds
@@ -2114,9 +2144,9 @@
     if (held.length) {
       return { ok: false, msg: 'Group ' + g + ' still holds ' + held.length + ' pair' + (held.length === 1 ? '' : 's') + '. Move them to another group first.' };
     }
-    // Only the container changes, so this is never structural and never clears
-    // results (there are no matches for an empty group by definition).
-    return applyTeams(state.teams.map(copy), { groups: remaining, regenerate: true });
+    // Only the container changes, so this is explicitly non-structural: no
+    // fixtures to regenerate and no results to clear (an empty group has no matches).
+    return applyTeams(state.teams.map(copy), { groups: remaining, structural: false });
   }
 
   // Set or clear a friendly label for a group. Cosmetic only — it never affects
@@ -2325,6 +2355,7 @@
     resetImpact: resetImpact,
 
     bracketRounds: bracketRounds,
+    seedBracket: seedBracket,
     getQualifiedTeams: getQualifiedTeams,
     generateKnockout: generateKnockout,
     ensureKnockout: ensureKnockout,

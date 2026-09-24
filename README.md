@@ -24,6 +24,7 @@ example* the app starts from. Nothing in the tournament engine assumes it.
 - [Court configuration](#court-configuration)
 - [Team level configuration](#team-level-configuration)
 - [Knockout structure](#knockout-structure)
+- [Multi-group knockout](#multi-group-knockout)
 - [Qualification](#qualification)
 - [Match numbering](#match-numbering)
 - [Regenerating fixtures](#regenerating-fixtures)
@@ -129,16 +130,20 @@ operates as an N-pair tournament automatically. For example, removing two pairs 
 Groups are stable containers with ids (`A`, `B`, `C`, …) and an optional friendly label.
 
 - **Add group** (Settings → Groups, or the Teams screen) creates an **empty** group. It never
-  moves an existing pair into it, and it never changes the fixtures.
+  moves an existing pair into it, never regenerates fixtures and never clears results.
+- **Rename** only changes the cosmetic label — it never affects ids, fixtures or results.
 - An empty group takes part in nothing until you assign pairs to it: it generates 0 matches and
   the dashboard keeps showing the real totals. Settings flags it with a warning so you know it
   needs pairs before fixtures can be generated for it.
 - **Remove** is offered only for an **empty** group. A group that still holds pairs must have them
-  moved out first, so removing a group can never orphan a match.
+  moved out first. Removing an empty group never regenerates fixtures and never clears results —
+  there is nothing to regenerate, because an empty group has no fixtures.
 - Assign pairs to a group on the **Teams** screen (or in Settings once the group exists). A
   group with exactly one pair is rejected — a round-robin needs at least two.
-- A group can be relabelled (e.g. `Group C` → `Consolation`). The label is cosmetic and never
-  affects ids, fixtures or results. Clearing it restores the default name.
+
+In short: **adding, removing and renaming groups are never structural.** Only adding, removing or
+moving **pairs** changes the playing structure, and only those actions ask for confirmation when
+results already exist.
 
 ### Worked example — changing the tournament size
 
@@ -147,10 +152,11 @@ Groups are stable containers with ids (`A`, `B`, `C`, …) and an optional frien
 | 8 pairs, top 2 qualify | 4 + 4 | 6 + 6 = **12** | 4 qualify → SF → Final (3) | **15** |
 | 9 pairs, top 4 qualify | 5 + 4 | 10 + 6 = **16** | 8 qualify → QF → SF → Final (7) | **23** |
 | 10 pairs, top 4 qualify | 5 + 5 | 10 + 10 = **20** | 8 qualify → QF → SF → Final (7) | **27** |
-| 3 groups of 3 | 3 + 3 + 3 | 3 + 3 + 3 = **9** | depends on qualification | — |
-| 6 qualifiers | any | — | 2 byes + QF → SF → Final (5) | — |
+| 3 groups × 3, top 2 qualify | 3 + 3 + 3 | 3 + 3 + 3 = **9** | 6 qualify → 2 byes + QF → SF → Final (5) | **14** |
+| 3 groups (5 + 4 + 3), top 2 | 5 + 4 + 3 | 10 + 6 + 3 = **19** | 6 qualify → 2 byes + QF → SF → Final (5) | **24** |
 
-Every number here is computed from the configuration, never stored.
+Every number here is computed from the configuration, never stored. Adding, removing or renaming
+a group never changes any of these numbers; only changing the pairs does.
 
 ---
 
@@ -412,8 +418,11 @@ Round formats (best of 3):
 | Semi-finals | SF-1 … SF-2 | 15 |
 | Final | F-1 | 21 |
 
-Seeding pairs the groups against each other in the classic bracket order. With two groups and
-top 4 qualifying (`A1`…`A4`, `B1`…`B4`):
+Seeding depends on how many groups are configured, and every configured group contributes its
+qualifiers — none is ever dropped or duplicated.
+
+**Two groups (the default example)** use the classic cross seeding. With top 4 qualifying
+(`A1`…`A4`, `B1`…`B4`):
 
 - **QF-1** Group A #1 vs Group B #4
 - **QF-2** Group B #1 vs Group A #4
@@ -425,9 +434,22 @@ top 4 qualifying (`A1`…`A4`, `B1`…`B4`):
 - **Final** Winner SF-1 vs Winner SF-2
 
 With top 2 qualifying from each group, the engine goes straight to semi-finals (`A1 vs B2`,
-`B1 vs A2`) — no quarter-finals are created. With a different number of qualifiers the bracket is
-built accordingly, and if the qualifier count is not a power of two, **byes** are inserted
-automatically.
+`B1 vs A2`) — no quarter-finals are created.
+
+**Three or more groups** use a deterministic balanced draw:
+
+1. **Rank-interleave** — rank 1 of every group, then rank 2 of every group, and so on, so no
+   group dominates the top or bottom of the list.
+2. **Snake-fold** — the strongest seed is drawn against the weakest, the second strongest
+   against the second weakest, and so on.
+
+For example, three groups of three with top 2 each produce six seeds in the order
+`A1, C2, B1, B2, C1, A2`, and the two byes go to the strongest seeds (`A1`, `B1`). The bracket is
+always the next power of two ≥ the total qualifiers, byes are `bracket size − qualifiers`, and the
+number of real knockout matches is always `qualifiers − 1`.
+
+With a different number of qualifiers the bracket is built accordingly, and if the qualifier count
+is not a power of two, **byes** are inserted automatically.
 
 ### Byes
 
@@ -452,6 +474,40 @@ The total match count is always `group matches + (qualifiers − 1)`; nothing is
 
 ---
 
+## Multi-group knockout
+
+The bracket is built from **all** configured groups, whatever their number. Every group that has
+qualifiers contributes them, and no qualifier is ever dropped or duplicated.
+
+The rules are:
+
+1. **Qualifiers** come from each group via Settings → Qualification (top *n* per group).
+2. **Bracket size** is the next power of two ≥ the total number of qualifiers.
+3. **Byes** = bracket size − qualifiers, and they go to the strongest seeds. A bye advances a team
+   without creating a fake match.
+4. **Real knockout matches** = qualifiers − 1, always.
+
+Seeding by group count:
+
+| Groups | Strategy |
+|--------|----------|
+| 1 | Qualifiers in standing order |
+| 2 | Classic cross-seed: `A1 vs Bk`, `B1 vs Ak`, `A2 vs B(k−1)`, `B2 vs A(k−1)`, … |
+| 3+ | Rank-interleave (rank 1 of each group, then rank 2, …), then snake-fold so the strongest seed meets the weakest |
+
+See [Knockout structure](#knockout-structure) for the concrete examples and the worked pairings.
+
+Worked multi-group examples:
+
+| Configuration | Group matches | Qualifiers | Bracket | Byes | Real KO | Overall |
+|---------------|---------------|------------|---------|------|---------|---------|
+| 3 × 3, top 2 | 9 | 6 | 8 | 2 | 5 | 14 |
+| 5 + 4 + 3, top 2 | 19 | 6 | 8 | 2 | 5 | 24 |
+| 3 + 3 + 3 + 3, top 1 | 12 | 4 | 4 | 0 | 3 | 15 |
+| 4 + 3 + 2 + 2, top 2 | 11 | 8 | 8 | 0 | 7 | 18 |
+
+---
+
 ## Qualification
 
 **Settings → Qualification** controls how many pairs advance from each group. The selection is
@@ -463,8 +519,21 @@ Examples:
 - **8 pairs, 4 + 4, top 2 each** → 4 qualifiers → Semi-finals (`A1 vs B2`, `B1 vs A2`) → Final.
 - **10 pairs, 5 + 5, top 4 each** → 8 qualifiers → Quarter-finals → Semi-finals → Final.
 - **9 pairs, 5 + 4, top 4 each** → 8 qualifiers → Quarter-finals → Semi-finals → Final.
+- **3 groups of 3, top 2 each** → 6 qualifiers → 8-slot bracket with 2 byes → Quarter-finals →
+  Semi-finals → Final (5 real knockout matches).
 
 A group smaller than the configured qualifier count simply qualifies all of its pairs.
+
+The overall match count is always `group matches + (qualifiers − 1)`:
+
+| Configuration | Group matches | Qualifiers | Knockout | Overall |
+|---------------|---------------|------------|----------|---------|
+| 8 pairs (4 + 4), top 2 | 12 | 4 | 3 | 15 |
+| 9 pairs (5 + 4), top 4 | 16 | 8 | 7 | 23 |
+| 10 pairs (5 + 5), top 4 | 20 | 8 | 7 | 27 |
+| 3 × 3, top 2 | 9 | 6 | 5 (+2 byes) | 14 |
+
+None of these numbers is hard-coded — each is derived from the configuration.
 
 ---
 
@@ -762,7 +831,7 @@ node tests/core.test.js
 node tests/render.test.js
 ```
 
-It extracts the DOM-free `TM` layer from `index.html` and asserts, among ~1300 checks:
+It extracts the DOM-free `TM` layer from `index.html` and asserts, among ~1450 checks:
 
 - **dynamic group stage**: correct round-robin counts for 2/3/4/5/6 pairs (1/3/6/10/15) and for
   8 pairs 4+4 (12), 9 pairs 5+4 (16), 10 pairs 5+5 (20); no duplicate pairings, no self-matches,
@@ -785,6 +854,22 @@ It extracts the DOM-free `TM` layer from `index.html` and asserts, among ~1300 c
 - **dynamic groups**: add an empty group (never moves a pair, never changes fixtures), remove an
   empty group, refusal to remove a non-empty group, refusal to remove the last group, stable
   sequential ids, max-groups cap, and cosmetic group labels that never touch fixtures
+- **empty-group safety**: with completed results present, adding, removing or renaming an empty
+  group leaves every completed result, every group fixture and any knockout bracket byte-for-byte
+  unchanged — proven by snapshotting the completed matches before and after. Structural pair
+  edits (add/remove/move) still require confirmation when results exist and change nothing until
+  confirmed; confirming clears results and rebuilds with no orphaned matches
+- **multi-group knockout**: 8 pairs 4+4 top 2 → 12 group + 3 knockout = 15; 9 pairs 5+4 top 4 →
+  16 + 7 = 23; 10 pairs 5+5 top 4 → 20 + 7 = 27; 3 groups × 3 top 2 → 9 group matches, 6
+  qualifiers, 2 byes, 5 real knockout matches; unequal 3-group (5+4+3) and 4-group (3+3+3+3 and
+  4+3+2+2) configurations. In every case all configured groups contribute their qualifiers, no
+  qualifier is dropped or duplicated, the bracket is the next power of two ≥ the qualifiers, and
+  real knockout matches equal `qualifiers − 1`
+- **seeding**: the classic two-group cross-seed (`A1 vs B4`, `B1 vs A4`, `A2 vs B3`, `B2 vs A3`;
+  and `A1 vs B2`, `B1 vs A2` for top 2) is preserved exactly; one group seeds in standing order;
+  three groups rank-interleave and snake-fold so the strongest seed is drawn against the weakest
+- **multi-group persistence**: groups, labels, fixtures and the multi-group bracket survive
+  reload and export/import intact
 - **pair validation**: duplicate pair names (tournament-wide), empty names, duplicate ids, empty
   group assignment, too few pairs, a one-pair group, and a pair in an undeclared group
 - **standings** for groups of 3 and 6 rows, with all columns present

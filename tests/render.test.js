@@ -178,6 +178,28 @@ App.nav('settings');
 s = getEl('view').innerHTML;
 check('3x3 settings shows 9 group matches', s.indexOf('9 group matches') !== -1, 'no 9 group matches');
 
+// Multi-group knockout: 3 groups x 3, top 2 → 6 qualifiers across all three groups,
+// 2 byes, 5 real knockout matches. The Knockout screen must render all six qualifiers
+// from all three groups, and Settings must reflect the dynamic totals.
+TM.resetTournament();
+const three2 = [];
+['A', 'B', 'C'].forEach(function (g) { for (let i = 1; i <= 3; i++) three2.push({ id: g + i, group: g, name: g + i + ' pair' }); });
+TM.applyTeams(three2, { regenerate: true, groups: ['A', 'B', 'C'] });
+TM.setQualification(2);
+TM.groupMatches().forEach(function (m) { TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 15, m.teamA < m.teamB ? 15 : 21); });
+TM.ensureKnockout();
+renderAll('3-group knockout');
+App.nav('knockout');
+s = getEl('view').innerHTML;
+['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].forEach(function (t) {
+  check('3-group knockout shows qualifier ' + t, s.indexOf(t + ' pair') !== -1, 'missing ' + t);
+});
+check('3-group knockout shows all six as qualified', s.indexOf('Qualified (6)') !== -1, 'no qualified count');
+App.nav('settings');
+s = getEl('view').innerHTML;
+check('3-group settings shows 9 group matches', s.indexOf('9 group matches') !== -1, 'no 9 group matches');
+check('3-group settings shows 6 qualify', s.indexOf('6 pair') !== -1 || s.indexOf('6 pairs qualify') !== -1, 'no 6 qualify');
+
 console.log('\n' + (fail === 0 ? '✅ ALL RENDERS OK' : '❌ RENDER FAILURES'));
 console.log('passed: ' + pass + '  failed: ' + fail);
 if (failures.length) { console.log('\nFailures:'); failures.forEach(f => console.log('  - ' + f)); process.exit(1); }
