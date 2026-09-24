@@ -2458,6 +2458,211 @@ function assertRoundRobin(label, groupId, n) {
   check('no separate stored level counts', !/state\.levelCounts\b/.test(src) && !/settings\.levelCounts/.test(src));
 })();
 
+/* ══════════════════════════════════════════════════════════
+   56. Dashboard V2 analytics (derived from live state)
+   ══════════════════════════════════════════════════════════ */
+
+/* KPI cards: pairs · total · completed · live · courts · progress %.
+   Every value must come from state, never a constant. */
+(function () {
+  TM.resetTournament();
+  let k = TM.dashboardKPIs();
+  eq('kpi default pairs = 10', k.pairs, 10);
+  eq('kpi default total = 27', k.totalMatches, 27);
+  eq('kpi default completed = 0', k.completed, 0);
+  eq('kpi default live = 0', k.live, 0);
+  eq('kpi default courts = 3', k.courts, 3);
+  eq('kpi default progress = 0%', k.progressPct, 0);
+
+  // A different shape must move every number accordingly (no hard-coded 10/27/3).
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 4, B: 4 }), { regenerate: true });
+  TM.setQualification(2);
+  TM.setCourtCount(2, {});
+  k = TM.dashboardKPIs();
+  eq('kpi 8p pairs = 8', k.pairs, 8);
+  eq('kpi 8p total = 15', k.totalMatches, 15);
+  eq('kpi 8p courts = 2', k.courts, 2);
+
+  // Completing a match moves completed + progress, live moves on start.
+  TM.resetTournament();
+  const first = TM.groupMatches()[0];
+  TM.startMatch(first.id, 1, NOON);
+  k = TM.dashboardKPIs();
+  eq('kpi live after start = 1', k.live, 1);
+  TM.saveGroupScore(first.id, 21, 15);
+  k = TM.dashboardKPIs();
+  eq('kpi completed after result = 1', k.completed, 1);
+  eq('kpi live after result = 0', k.live, 0);
+  eq('kpi progress = round(1/27)', k.progressPct, Math.round((1 / 27) * 100));
+
+  // Disabling a court lowers the active-court count (independent of matches).
+  TM.resetTournament();
+  TM.setCourtEnabled(3, false);
+  eq('kpi courts drops when one disabled', TM.dashboardKPIs().courts, 2);
+})();
+
+/* Level distribution must read actual team assignments, not configured counts. */
+(function () {
+  TM.resetTournament();
+  const ld = TM.levelDistribution();
+  const byId = {};
+  ld.rows.forEach(r => { byId[r.id] = r; });
+  eq('leveldist Tunga = 3', byId.tunga.count, 3);
+  eq('leveldist Bhadra = 3', byId.bhadra.count, 3);
+  eq('leveldist Kaveri = 3', byId.kaveri.count, 3);
+  eq('leveldist Unassigned = 1', byId.unassigned.count, 1);
+  eq('leveldist unassigned flagged', byId.unassigned.unassigned, true);
+  eq('leveldist total = 10', ld.total, 10);
+  eq('leveldist max = 3', ld.max, 3);
+  // Bar width is proportional to the max.
+  eq('leveldist Tunga is full width', Math.round((byId.tunga.count / ld.max) * 100), 100);
+  eq('leveldist Unassigned is 1/3 width', Math.round((byId.unassigned.count / ld.max) * 100), 33);
+
+  // Reassigning changes the distribution and drops the warning.
+  TM.updateTeam('B5', { level: 'kaveri' });
+  const ld2 = TM.levelDistribution();
+  const by2 = {};
+  ld2.rows.forEach(r => { by2[r.id] = r; });
+  eq('leveldist Kaveri = 4 after reassign', by2.kaveri.count, 4);
+  eq('leveldist Unassigned = 0 after reassign', by2.unassigned.count, 0);
+  eq('leveldist unassigned total = 0', ld2.unassigned, 0);
+})();
+
+/* Group performance must work for 1, 2, 3 and 4 groups, deriving everything from
+   fixtures — never from a hard-coded A/B pair. */
+(function () {
+  function shape(counts) {
+    TM.resetTournament();
+    TM.applyTeams(makeTeams(counts), { regenerate: true, groups: Object.keys(counts) });
+    return TM.groupPerformance();
+  }
+
+  let gp = shape({ A: 4 });
+  eq('1 group: row count', gp.length, 1);
+  eq('1 group: pairs', gp[0].pairs, 4);
+  eq('1 group: total', gp[0].total, 6);
+  eq('1 group: remaining', gp[0].remaining, 6);
+  eq('1 group: pct', gp[0].pct, 0);
+
+  gp = shape({ A: 5, B: 5 });
+  eq('2 groups: row count', gp.length, 2);
+  eq('2 groups: A total', gp[0].total, 10);
+  eq('2 groups: B total', gp[1].total, 10);
+
+  gp = shape({ A: 3, B: 3, C: 3 });
+  eq('3 groups: row count', gp.length, 3);
+  eq('3 groups: C total', gp[2].total, 3);
+  eq('3 groups: C label', gp[2].label, 'Group C');
+
+  gp = shape({ A: 3, B: 3, C: 3, D: 3 });
+  eq('4 groups: row count', gp.length, 4);
+  eq('4 groups: D pairs', gp[3].pairs, 3);
+
+  // Completed / remaining / percentage update as results land.
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 5, B: 5 }), { regenerate: true });
+  const gm = TM.groupMatches('A');
+  gm.slice(0, 6).forEach(m => TM.saveGroupScore(m.id, 21, 15));
+  gp = TM.groupPerformance();
+  eq('group A completed = 6', gp[0].completed, 6);
+  eq('group A remaining = 4', gp[0].remaining, 4);
+  eq('group A pct = 60', gp[0].pct, 60);
+  eq('group B untouched pct = 0', gp[1].pct, 0);
+  // Completed must never exceed total, remaining must never go negative.
+  gp.forEach(r => {
+    check('group ' + r.group + ' completed <= total', r.completed <= r.total);
+    check('group ' + r.group + ' remaining >= 0', r.remaining >= 0);
+  });
+})();
+
+/* Stage labels must follow the actual bracket size implied by qualification. */
+(function () {
+  function stageNames(counts, per) {
+    TM.resetTournament();
+    TM.applyTeams(makeTeams(counts), { regenerate: true, groups: Object.keys(counts) });
+    TM.setQualification(per);
+    return TM.dashboardStages().map(s => s.name);
+  }
+
+  // 2 qualifiers (1 group of 2, top 2) has no semi-final — just the final.
+  eq('2 qualifiers: stages', JSON.stringify(stageNames({ A: 2 }, 2)), JSON.stringify(['Final']));
+  eq('4 qualifiers: stages', JSON.stringify(stageNames({ A: 4 }, 4)), JSON.stringify(['Semi-Final', 'Final']));
+  eq('8 qualifiers: stages', JSON.stringify(stageNames({ A: 8 }, 8)), JSON.stringify(['Quarter-Final', 'Semi-Final', 'Final']));
+  eq('16 qualifiers: stages', JSON.stringify(stageNames({ A: 8, B: 8 }, 8)), JSON.stringify(['Round of 16', 'Quarter-Final', 'Semi-Final', 'Final']));
+  // 6 qualifiers (2 groups x 3, top 3) is a QF-sized bracket with byes.
+  eq('6 qualifiers: stages', JSON.stringify(stageNames({ A: 3, B: 3 }, 3)), JSON.stringify(['Quarter-Final', 'Semi-Final', 'Final']));
+
+  // After the bracket is generated the stage list is read from actual matches and
+  // its done counts track real completion.
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 3, B: 3 }), { regenerate: true, groups: ['A', 'B'] });
+  TM.setQualification(2);
+  TM.groupMatches().forEach(m => TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 15, m.teamA < m.teamB ? 15 : 21));
+  TM.ensureKnockout();
+  const st = TM.dashboardStages();
+  eq('generated 4-qualifier bracket rounds', JSON.stringify(st.map(s => s.name)), JSON.stringify(['Semi-Final', 'Final']));
+  eq('generated semi-final has 2 matches', st[0].total, 2);
+  eq('generated final is pending until SF results', st[1].total, 0);
+  st.forEach(s => check('stage ' + s.name + ' done <= total', s.done <= s.total));
+})();
+
+/* Leaders reuse computeStandings — same order and tie-breaks as Standings. */
+(function () {
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 5, B: 5 }), { regenerate: true });
+  eq('no leaders before any result', TM.dashboardLeaders(5).length, 0);
+
+  TM.groupMatches('A').slice(0, 7).forEach(m => TM.saveGroupScore(m.id, 21, 15));
+  const leaders = TM.dashboardLeaders(5);
+  const standingsA = TM.computeStandings('A').filter(r => r.played > 0);
+  eq('leaders capped at 5', TM.dashboardLeaders(5).length <= 5, true);
+  eq('leaders only from played rows', leaders.every(l => l.played > 0), true);
+  // The leader is the top played row of the standings engine, with same stats.
+  eq('leaders[0] matches standings top', leaders[0].team.id, standingsA[0].team.id);
+  eq('leaders[0] pts match Standings', leaders[0].pts, standingsA[0].pts);
+  eq('leaders[0] diff match Standings', leaders[0].diff, standingsA[0].diff);
+  eq('leaders carry group id', leaders[0].group, 'A');
+  // Ordering must be points, then diff, then pf — identical tie-break chain.
+  for (let i = 1; i < leaders.length; i++) {
+    const a = leaders[i - 1], b = leaders[i];
+    check('leaders sorted at ' + i,
+      (a.pts > b.pts) || (a.pts === b.pts && a.diff >= b.diff));
+  }
+})();
+
+/* Status source for the champion / knockout strip. */
+(function () {
+  TM.resetTournament();
+  eq('status group by default', TM.dashboardStatus(), 'group');
+  TM.applyTeams(makeTeams({ A: 2 }), { regenerate: true, groups: ['A'] });
+  TM.groupMatches().forEach(m => TM.saveGroupScore(m.id, 21, 15));
+  // The engine auto-generates the bracket on the final group result, so clear it to
+  // exercise the "group stage complete, awaiting generation" state.
+  TM.clearKnockout();
+  eq('status ready when group stage complete', TM.dashboardStatus(), 'ready');
+  TM.ensureKnockout();
+  eq('status knockout once bracket exists', TM.dashboardStatus(), 'knockout');
+  const fin = TM.getMatch('F-1');
+  if (fin && !fin.bye) { TM.saveKnockoutScore('F-1', [{ a: 21, b: 15 }, { a: 21, b: 15 }, { a: null, b: null }]); }
+  if (TM.knockoutInfo().champion) eq('status complete with champion', TM.dashboardStatus(), 'complete');
+})();
+
+/* The dashboard must never store analytics: no cached totals in state/localStorage. */
+(function () {
+  TM.resetTournament();
+  const src = html;
+  check('no stored dashboard analytics object', !/state\.dashboard\b/.test(src) && !/dashboardCache/.test(src));
+  check('dashboard helpers exported on TM', /dashboardKPIs:/.test(src) && /groupPerformance:/.test(src) && /levelDistribution:/.test(src));
+  check('no external chart library referenced', !/chart\.js|recharts|\bd3\b|highcharts/i.test(src));
+  // A completed match changing membership must be reflected on the next derive.
+  TM.applyTeams(makeTeams({ A: 3, B: 3 }), { regenerate: true });
+  const before = TM.dashboardKPIs().totalMatches;
+  TM.addTeam({ id: 'B4', group: 'B', name: 'B Four' });
+  const after = TM.dashboardKPIs().totalMatches;
+  check('adding a pair changes derived totals', after !== before, 'before ' + before + ' after ' + after);
+})();
+
 /* ── report ─────────────────────────────────────────────── */
 console.log('\n' + (fail === 0 ? '✅ ALL TESTS PASSED' : '❌ FAILURES'));
 console.log('passed: ' + pass + '  failed: ' + fail);
