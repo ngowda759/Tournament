@@ -725,7 +725,7 @@ const NOON = new Date(2026, 0, 1, 6, 30, 0); // deterministic clock, inside 06:0
   eq('legacy: end -> endTime', mig.courts[0].endTime, '09:00');
   eq('legacy: C2 endTime 08:00', mig.courts[1].endTime, '08:00');
   check('legacy: enabled defaults true', mig.courts.every(c => c.enabled === true));
-  eq('legacy: new schema version', mig.version, 5);
+  eq('legacy: new schema version', mig.version, 6);
 
   // legacy state missing courts entirely falls back to the standard three
   const mig2 = TM.migrate({ teams: [{ id: 'A1', group: 'A', name: 'X & Y', players: ['X', 'Y'], level: 'Tunga' }], matches: [] });
@@ -882,7 +882,7 @@ const NOON = new Date(2026, 0, 1, 6, 30, 0); // deterministic clock, inside 06:0
   teams.find(t => t.id === 'A1').group = 'B';
   r = TM.applyTeams(teams);
   check('group move still blocked after results', !r.ok, r.msg);
-  check('block message still explains the lock', /after matches have started/i.test(r.msg), r.msg);
+  check('block message explains regeneration', /regenerate fixtures/i.test(r.msg), r.msg);
 
   // 10. level assignments survive a localStorage reload
   TM.resetTournament();
@@ -1022,6 +1022,1136 @@ const NOON = new Date(2026, 0, 1, 6, 30, 0); // deterministic clock, inside 06:0
   // and the settings screen count is the same derived count
   eq('settings count = assignment count', TM.levelCounts().kaveri,
     TM.getState().teams.filter(t => t.level === 'kaveri').length);
+})();
+
+/* ══════════════════════════════════════════════════════════
+   30. dynamic tournament engine — arbitrary pair counts
+   ══════════════════════════════════════════════════════════ */
+
+// Build a fully-specified team list { A: n, B: m, ... }.
+function makeTeams(counts) {
+  const teams = [];
+  Object.keys(counts).forEach(g => {
+    for (let i = 1; i <= counts[g]; i++) {
+      teams.push({ id: g + i, group: g, name: 'Pair ' + g + i, players: ['P' + g + i + 'a', 'P' + g + i + 'b'], level: 'unassigned' });
+    }
+  });
+  return teams;
+}
+
+// Verify that a group's fixtures form a correct round-robin.
+function assertRoundRobin(label, groupId, n) {
+  const gm = TM.groupMatches(groupId);
+  eq(label + ' group ' + groupId + ' match count N(N-1)/2', gm.length, n * (n - 1) / 2);
+  const seen = new Set();
+  const played = {};
+  gm.forEach(mm => {
+    const key = [mm.teamA, mm.teamB].sort().join('|');
+    check(label + ' no duplicate pairing ' + key, !seen.has(key));
+    seen.add(key);
+    check(label + ' no self-match ' + mm.id, mm.teamA !== mm.teamB);
+    check(label + ' both teams present ' + mm.id, !!mm.teamA && !!mm.teamB);
+    check(label + ' ids are real teams ' + mm.id, !!TM.getTeam(mm.teamA) && !!TM.getTeam(mm.teamB));
+    played[mm.teamA] = (played[mm.teamA] || 0) + 1;
+    played[mm.teamB] = (played[mm.teamB] || 0) + 1;
+  });
+  TM.teamsInGroup(groupId).forEach(t => {
+    eq(label + ' team ' + t.id + ' plays every other pair (' + (n - 1) + ')', played[t.id], n - 1);
+  });
+  eq(label + ' distinct pairings for group ' + groupId, seen.size, n * (n - 1) / 2);
+}
+
+(function () {
+  // 1 pair counts and their round-robin match totals
+  [
+    { counts: { A: 2 }, gm: 1 },
+    { counts: { A: 3 }, gm: 3 },
+    { counts: { A: 4 }, gm: 6 },
+    { counts: { A: 5 }, gm: 10 },
+    { counts: { A: 6 }, gm: 15 }
+  ].forEach(sc => {
+    TM.resetTournament();
+    const r = TM.applyTeams(makeTeams(sc.counts), { regenerate: true });
+    check('single-group applyTeams ok ' + JSON.stringify(sc.counts), r.ok, r.msg);
+    const g = Object.keys(sc.counts)[0];
+    assertRoundRobin('n=' + sc.counts[g], g, sc.counts[g]);
+    eq('n=' + sc.counts[g] + ' total group matches', TM.totalGroupMatchCount(), sc.gm);
+    eq('n=' + sc.counts[g] + ' progress group total', TM.progress().groupTotal, sc.gm);
+  });
+
+  // 2 pairs in one group. The default configuration has a configured Group B too,
+  // so a genuine single-group tournament removes the (empty) Group B first.
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 2 }), { regenerate: true, groups: ['A'] });
+  eq('2 pairs: 1 group', TM.groupIds().length, 1);
+  eq('2 pairs: 1 match', TM.groupMatches().length, 1);
+
+  // 3 pairs: 3 matches, all pairs play 2
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 3 }), { regenerate: true });
+  eq('3 pairs: 3 matches', TM.groupMatches().length, 3);
+
+  // 4 pairs: 6 matches
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 4 }), { regenerate: true });
+  eq('4 pairs: 6 matches', TM.groupMatches().length, 6);
+
+  // 5 pairs: 10 matches
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 5 }), { regenerate: true });
+  eq('5 pairs: 10 matches', TM.groupMatches().length, 10);
+
+  // 6 pairs: 15 matches
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 6 }), { regenerate: true });
+  eq('6 pairs: 15 matches', TM.groupMatches().length, 15);
+
+  // 8 pairs 4+4 => 6 + 6 = 12
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 4, B: 4 }), { regenerate: true });
+  eq('8 pairs: distribution', JSON.stringify(TM.groupDistribution()), JSON.stringify({ A: 4, B: 4 }));
+  assertRoundRobin('8p', 'A', 4);
+  assertRoundRobin('8p', 'B', 4);
+  eq('8 pairs: 12 group matches', TM.totalGroupMatchCount(), 12);
+
+  // 9 pairs 5+4 => 10 + 6 = 16
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 5, B: 4 }), { regenerate: true });
+  eq('9 pairs: distribution', JSON.stringify(TM.groupDistribution()), JSON.stringify({ A: 5, B: 4 }));
+  assertRoundRobin('9p', 'A', 5);
+  assertRoundRobin('9p', 'B', 4);
+  eq('9 pairs: 16 group matches', TM.totalGroupMatchCount(), 16);
+
+  // 10 pairs 5+5 => 10 + 10 = 20 (the default example)
+  TM.resetTournament();
+  TM.buildDefaultTournament();
+  assertRoundRobin('10p default', 'A', 5);
+  assertRoundRobin('10p default', 'B', 5);
+  eq('10 pairs: 20 group matches', TM.totalGroupMatchCount(), 20);
+
+  // dynamic match ids: a 4-pair group only ever reaches A-06
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 4, B: 4 }), { regenerate: true });
+  const aIds = TM.groupMatches('A').map(mm => mm.id);
+  eq('4-pair group ids A-01..A-06', aIds.join(','), 'A-01,A-02,A-03,A-04,A-05,A-06');
+  check('no A-07..A-10 for a 4-pair group', !aIds.some(id => ['A-07', 'A-08', 'A-09', 'A-10'].includes(id)));
+  const bIds = TM.groupMatches('B').map(mm => mm.id);
+  eq('4-pair group B ids B-01..B-06', bIds.join(','), 'B-01,B-02,B-03,B-04,B-05,B-06');
+
+  // 6 pairs -> ids through A-15
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 6 }), { regenerate: true });
+  const sixIds = TM.groupMatches('A').map(mm => mm.id);
+  eq('6-pair group starts A-01', sixIds[0], 'A-01');
+  eq('6-pair group ends A-15', sixIds[sixIds.length - 1], 'A-15');
+
+  // byes never appear in group fixtures
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 5 }), { regenerate: true });
+  check('no group fixture is a bye', TM.groupMatches().every(mm => !mm.bye));
+})();
+
+/* ── 31. state model is generic (no fixed 10 / 5 / 20) ──── */
+(function () {
+  const src = html;
+  check('no teams.length === 10 assumption', !/teams\.length\s*===\s*10/.test(src));
+  check('no groups.A.length === 5 assumption', !/groups\.A\.length\s*===\s*5/.test(src));
+  check('no groups.B.length === 5 assumption', !/groups\.B\.length\s*===\s*5/.test(src));
+  check('no hard-coded 20 group matches label', !/20 group matches/i.test(src));
+  check('no hard-coded "27 matches"', !/\b27\s*match/i.test(src));
+  check('score target 21 preserved as a rule', TM.GROUP_TARGET === 21);
+})();
+
+/* ── 32. pair management ───────────────────────────────── */
+(function () {
+  TM.resetTournament();
+  const before = TM.getState().teams.length;
+  const add = TM.addTeam({ id: 'A11', group: 'A', name: 'New & Pair', players: ['New', 'Pair'], level: 'unassigned' });
+  check('add pair ok', add.ok, add.msg);
+  eq('add pair increases count', TM.getState().teams.length, before + 1);
+  eq('add pair regenerates fixtures', TM.groupMatches().length, TM.totalGroupMatchCount());
+
+  const rm = TM.removeTeam('A11');
+  check('remove pair ok', rm.ok, rm.msg);
+  eq('remove pair restores count', TM.getState().teams.length, before);
+
+  // removing two from the default 10 yields an 8-pair tournament, no placeholders
+  TM.resetTournament();
+  TM.removeTeam('A5');
+  TM.removeTeam('B5');
+  eq('remove two -> 8 pairs', TM.getState().teams.length, 8);
+  eq('remove two -> group A size 4', TM.getState().groups.A.length, 4);
+  eq('remove two -> group B size 4', TM.getState().groups.B.length, 4);
+  eq('remove two -> 12 group matches', TM.totalGroupMatchCount(), 12);
+  check('no orphan fixtures', TM.groupMatches().every(mm => TM.getTeam(mm.teamA) && TM.getTeam(mm.teamB)));
+
+  // rename pair + edit players (non-structural, never regenerates)
+  TM.resetTournament();
+  const upd = TM.updateTeam('A1', { name: 'Renamed & Pair', players: ['Renamed', 'Pair'] });
+  check('rename pair ok', upd.ok, upd.msg);
+  eq('rename pair name', TM.getTeam('A1').name, 'Renamed & Pair');
+  eq('edit player 1', TM.getTeam('A1').players[0], 'Renamed');
+  eq('rename does not regenerate', upd.regenerated, false);
+
+  // move pair between groups (structural)
+  TM.resetTournament();
+  const moved = TM.assignTeamToGroup('A5', 'B', { regenerate: true });
+  check('move pair between groups ok', moved.ok, moved.msg);
+  eq('moved pair group', TM.getTeam('A5').group, 'B');
+  eq('move reflects in distribution A', TM.groupDistribution().A, 4);
+  eq('move reflects in distribution B', TM.groupDistribution().B, 6);
+  eq('move regenerates matches', TM.totalGroupMatchCount(), 6 + 15);
+})();
+
+/* ── 33. regeneration guards and safety ────────────────── */
+(function () {
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 4, B: 4 }), { regenerate: true });
+  // complete one match so results exist
+  const first = TM.groupMatches()[0];
+  TM.saveGroupScore(first.id, 21, 12);
+  eq('one result recorded', TM.progress().groupDone, 1);
+
+  // structural change without regenerate -> needsConfirmation, nothing changes
+  const blocked = TM.removeTeam('B4');
+  check('structural change after results needs confirmation', blocked.needsConfirmation === true, JSON.stringify(blocked));
+  eq('count unchanged after blocked change', TM.getState().teams.length, 8);
+  eq('results preserved after blocked change', TM.progress().groupDone, 1);
+
+  // explicit regenerate clears results safely and rebuilds for the new shape
+  const plan = TM.regeneratePlan();
+  eq('plan pairs', plan.pairs, 8);
+  eq('plan existing results', plan.existingResults, 1);
+  const regen = TM.regenerateFixtures();
+  check('regenerate ok', regen.ok, regen.msg);
+  eq('regenerate clears results', TM.progress().groupDone, 0);
+  eq('regenerate keeps fixtures for 8 pairs', TM.groupMatches().length, 12);
+
+  // with regenerate:true the structural change + rebuild happens in one call
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 5, B: 5 }), { regenerate: true });
+  TM.saveGroupScore(TM.groupMatches()[0].id, 21, 12);
+  const forced = TM.removeTeam('B5', { regenerate: true });
+  check('forced removal after results ok', forced.ok, forced.msg);
+  eq('forced removal -> 9 pairs', TM.getState().teams.length, 9);
+  eq('forced removal -> 16 group matches', TM.totalGroupMatchCount(), 16);
+  eq('forced removal cleared results', TM.progress().groupDone, 0);
+})();
+
+/* ── 34. qualification configuration ───────────────────── */
+(function () {
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 4, B: 4 }), { regenerate: true });
+  const q = TM.setQualification(2);
+  check('set qualification 2 ok', q.ok, q.msg);
+  eq('qualification read back', TM.getQualification().perGroup, 2);
+  eq('qualified per group A', TM.qualifiedPerGroup().A, 2);
+  eq('qualified per group B', TM.qualifiedPerGroup().B, 2);
+  eq('predicted knockout 4 qualifiers -> 3 matches', TM.predictedKnockoutTotal(), 3);
+
+  // cannot exceed largest group
+  const bad = TM.setQualification(9);
+  check('qualification above group size rejected', !bad.ok, bad.msg);
+
+  // 8 pairs top 2 => SF + Final, no QF
+  const gm = TM.groupMatches();
+  gm.forEach(mm => TM.saveGroupScore(mm.id, mm.teamA < mm.teamB ? 21 : 12, mm.teamA < mm.teamB ? 12 : 21));
+  TM.ensureKnockout();
+  const info = TM.knockoutInfo();
+  check('8p top2: no quarter-finals', !info.rounds.qf.exists);
+  check('8p top2: semi-finals exist', info.rounds.sf.exists);
+  check('8p top2: bracket structure ends in a Final', TM.bracketRounds(4).some(r => r.key === 'final'));
+  eq('8p top2: 4 qualifiers', Object.keys(info.qualifiers).reduce((t, g) => t + info.qualifiers[g].length, 0), 4);
+  eq('8p top2: knockout total 3', TM.progress().knockoutTotal, 3);
+  eq('8p top2: overall total 15', TM.progress().overallTotal, 15);
+  check('8p top2: no fake teams in bracket', TM.getState().matches.filter(mm => mm.stage !== 'group').every(mm => !mm.teamA || !!TM.getTeam(mm.teamA)));
+
+  // changing qualification after the bracket exists is refused
+  const late = TM.setQualification(3);
+  check('qualification change after bracket refused', !late.ok, late.msg);
+})();
+
+/* ── 35. knockout bracket generation for each qualifier size ─ */
+(function () {
+  function playThrough(counts, perGroup) {
+    TM.resetTournament();
+    TM.applyTeams(makeTeams(counts), { regenerate: true });
+    if (perGroup != null) TM.setQualification(perGroup);
+    TM.groupMatches().forEach(mm => TM.saveGroupScore(mm.id, mm.teamA < mm.teamB ? 21 : 12, mm.teamA < mm.teamB ? 12 : 21));
+    let info = TM.knockoutInfo();
+    let guard = 0;
+    while (!info.champion && guard++ < 40) {
+      const ko = TM.getState().matches.filter(mm => mm.stage !== 'group' && mm.status === 'queued' && mm.teamA && mm.teamB && !mm.bye);
+      if (!ko.length) { TM.ensureKnockout(); info = TM.knockoutInfo(); continue; }
+      ko.forEach(mm => {
+        const t = mm.target || 11;
+        TM.saveKnockoutScore(mm.id, [{ a: t, b: t - 4 }, { a: t, b: t - 6 }]);
+      });
+      info = TM.knockoutInfo();
+    }
+    return info;
+  }
+
+  // 2 qualifiers -> Final only
+  let info = playThrough({ A: 2 }, 2);
+  check('2 qualifiers: final exists', info.rounds.final.exists);
+  check('2 qualifiers: no semi-finals', !info.rounds.sf.exists);
+  check('2 qualifiers: champion decided', !!info.champion, 'no champion');
+
+  // 4 qualifiers -> SF + Final
+  info = playThrough({ A: 4 }, 4);
+  check('4 qualifiers: sf exists', info.rounds.sf.exists);
+  check('4 qualifiers: no qf', !info.rounds.qf.exists);
+  check('4 qualifiers: champion decided', !!info.champion);
+
+  // 8 qualifiers -> QF + SF + Final (default 10-pair scenario, top 4 each)
+  info = playThrough({ A: 5, B: 5 }, 4);
+  check('8 qualifiers: qf exists', info.rounds.qf.exists);
+  check('8 qualifiers: sf exists', info.rounds.sf.exists);
+  check('8 qualifiers: champion decided', !!info.champion);
+  eq('8 qualifiers: 7 knockout matches', TM.progress().knockoutTotal, 7);
+  eq('10-pair default: overall 27', TM.progress().overallTotal, 27);
+
+  // 16 qualifiers -> Round of 16 onward
+  info = playThrough({ A: 8, B: 8 }, 8);
+  check('16 qualifiers: r16 exists', info.rounds.r16.exists);
+  check('16 qualifiers: champion decided', !!info.champion);
+  eq('16 qualifiers: 15 knockout matches', TM.progress().knockoutTotal, 15);
+
+  // non-power-of-two qualifier count gets byes, never a fake match
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 5, B: 5 }), { regenerate: true });
+  TM.setQualification(3); // 6 qualifiers
+  TM.groupMatches().forEach(mm => TM.saveGroupScore(mm.id, mm.teamA < mm.teamB ? 21 : 12, mm.teamA < mm.teamB ? 12 : 21));
+  TM.ensureKnockout();
+  const byeMatches = TM.getState().matches.filter(mm => mm.stage !== 'group' && mm.bye);
+  check('6 qualifiers: byes created', byeMatches.length === 2, 'got ' + byeMatches.length);
+  check('byes have no opponent', byeMatches.every(mm => !mm.teamA || !mm.teamB));
+  check('byes auto-advance a real team', byeMatches.every(mm => !!TM.getTeam(mm.teamA || mm.teamB)));
+  check('bye is recorded as completed', byeMatches.every(mm => mm.status === 'completed'));
+  eq('6 qualifiers: predicted knockout matches', TM.predictedKnockoutTotal(), 5);
+  check('bye cannot be started', !TM.startMatch(byeMatches[0].id, 1, NOON).ok);
+  check('bye cannot be scored', !TM.saveKnockoutScore(byeMatches[0].id, [{ a: 11, b: 5 }, { a: 11, b: 5 }]).ok);
+  check('bye cannot be reset', !TM.resetMatch(byeMatches[0].id).ok);
+  check('bye advances without a fake opponent', byeMatches.every(mm => !mm.teamA || !mm.teamB));
+})();
+
+/* ── 36. standings for any group size ──────────────────── */
+(function () {
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 6, B: 3 }), { regenerate: true });
+  eq('standings rows = group A size 6', TM.computeStandings('A').length, 6);
+  eq('standings rows = group B size 3', TM.computeStandings('B').length, 3);
+  ['A', 'B'].forEach(g => {
+    const rows = TM.computeStandings(g);
+    rows.forEach(r => {
+      check('row has position fields ' + g, typeof r.pts === 'number' && typeof r.played === 'number' && typeof r.diff === 'number');
+      check('row has played/won/lost ' + g, ['played', 'won', 'lost', 'pts', 'pf', 'pa', 'diff'].every(k => r[k] !== undefined));
+    });
+    rows.forEach(r => eq('unbeaten rows start 0 played ' + g + r.team.id, r.played, 0));
+  });
+
+  // after results, standings reflect real play
+  TM.groupMatches('B').forEach(mm => TM.saveGroupScore(mm.id, 21, 15));
+  const rowsB = TM.computeStandings('B');
+  eq('standings preserve 3 rows after play', rowsB.length, 3);
+  eq('total played counts both sides', rowsB.reduce((t, r) => t + r.played, 0), 6);
+})();
+
+/* ── 37. scheduler works with any match count ──────────── */
+(function () {
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 4, B: 4 }), { regenerate: true });
+  eq('scheduler sees 12 queued matches', TM.queuedMatches().length, 12);
+  // start several and verify the invariants hold regardless of total
+  const started = [];
+  let guard = 0;
+  while (started.length < 4 && guard++ < 20) {
+    const sug = TM.suggestCourts(NOON);
+    const ids = Object.keys(sug);
+    if (!ids.length) break;
+    let progressed = false;
+    ids.forEach(cid => {
+      const r = TM.startMatch(sug[cid].match.id, Number(cid), NOON);
+      if (r.ok) { started.push(sug[cid].match.id); progressed = true; }
+    });
+    if (!progressed) break;
+  }
+  check('scheduler started matches', started.length > 0, 'started ' + started.length);
+  // no team on two courts
+  const busy = {};
+  let conflict = false;
+  TM.getState().matches.filter(mm => mm.status === 'in_progress').forEach(mm => {
+    [mm.teamA, mm.teamB].forEach(t => { if (busy[t]) conflict = true; busy[t] = true; });
+  });
+  check('scheduler: no team on two courts', !conflict);
+  // no court double booking
+  const courts = {};
+  let doubleBook = false;
+  TM.getState().matches.filter(mm => mm.status === 'in_progress').forEach(mm => {
+    if (courts[mm.court]) doubleBook = true; courts[mm.court] = true;
+  });
+  check('scheduler: no court double booking', !doubleBook);
+  // deterministic: same suggestion twice on a fresh 12-match queue
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 4, B: 4 }), { regenerate: true });
+  const s1 = JSON.stringify(TM.suggestCourts(NOON));
+  const s2 = JSON.stringify(TM.suggestCourts(NOON));
+  eq('scheduler selection is deterministic', s1, s2);
+  check('scheduler offers distinct matches per court', new Set(Object.keys(TM.suggestCourts(NOON)).map(k => TM.suggestCourts(NOON)[k].match.id)).size === Object.keys(TM.suggestCourts(NOON)).length);
+  // disabled courts ignored
+  const st = TM.getState();
+  const d = st.courts[0];
+  TM.setCourtEnabled(d.id, false);
+  check('disabled court not offered', !TM.enabledCourts().some(c => c.id === d.id));
+  check('disabled court absent from suggestions', TM.suggestCourts(NOON)[d.id] === undefined);
+  eq('disabled reduces enabled courts', TM.enabledCourts().length, st.courts.length - 1);
+  TM.setCourtEnabled(d.id, true);
+})();
+
+/* ── 38. dashboard progress is dynamic ─────────────────── */
+(function () {
+  function expected(counts, per) {
+    TM.resetTournament();
+    TM.applyTeams(makeTeams(counts), { regenerate: true });
+    if (per != null) TM.setQualification(per);
+    const p = TM.progress();
+    return p;
+  }
+  let p = expected({ A: 4, B: 4 }, 2);
+  eq('8p 4/4 progress groupTotal', p.groupTotal, 12);
+  eq('8p 4/4 progress overallTotal', p.overallTotal, 15);
+
+  p = expected({ A: 5, B: 4 }, 4);
+  eq('9p 5/4 progress groupTotal', p.groupTotal, 16);
+  eq('9p 5/4 progress overallTotal', p.overallTotal, 23);
+
+  p = expected({ A: 5, B: 5 }, 4);
+  eq('10p 5/5 progress groupTotal', p.groupTotal, 20);
+  eq('10p 5/5 progress overallTotal', p.overallTotal, 27);
+  eq('10p 5/5 default matches 27 (config, not constant)', TM.getTotalMatchCount().total, 27);
+
+  // dashboard label reflects partial progress correctly
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 5, B: 4 }), { regenerate: true });
+  TM.setQualification(4);
+  TM.groupMatches().slice(0, 7).forEach(mm => TM.saveGroupScore(mm.id, 21, 15));
+  p = TM.progress();
+  eq('partial progress groupDone', p.groupDone, 7);
+  eq('partial progress label "7 / 16"', p.groupDone + ' / ' + p.groupTotal, '7 / 16');
+})();
+
+/* ── 39. levels independent of groups; courts independent ── */
+(function () {
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 4, B: 4 }), { regenerate: true });
+  // levels derived from assignments, not from group membership
+  TM.updateTeam('A1', { level: 'tunga' });
+  TM.updateTeam('A2', { level: 'tunga' });
+  TM.updateTeam('B1', { level: 'bhadra' });
+  const counts = TM.levelCounts();
+  eq('level count tunga = 2', counts.tunga, 2);
+  eq('level count bhadra = 1', counts.bhadra, 1);
+  eq('unassigned derived', TM.hasUnassignedTeams(), true);
+  // moving a team between groups never changes its level
+  TM.assignTeamToGroup('A1', 'B', { regenerate: true });
+  eq('level survives group move', TM.getTeam('A1').level, 'tunga');
+
+  // courts remain independent of pair count
+  TM.applyTeams(makeTeams({ A: 3 }), { regenerate: true });
+  eq('courts still 3 with 3 pairs', TM.getState().courts.length, 3);
+  const ok = TM.setCourtCount(5);
+  check('court count independent of pairs', ok.ok, ok.msg);
+  eq('courts now 5', TM.getState().courts.length, 5);
+})();
+
+/* ── 40. end-to-end scenarios A/B/C ────────────────────── */
+(function () {
+  function runScenario(label, counts, perGroup, expectGroup, expectOverall) {
+    TM.resetTournament();
+    const applied = TM.applyTeams(makeTeams(counts), { regenerate: true });
+    check(label + ': apply ok', applied.ok, applied.msg);
+    if (perGroup != null) { const q = TM.setQualification(perGroup); check(label + ': qualification ok', q.ok, q.msg); }
+    eq(label + ': group matches', TM.totalGroupMatchCount(), expectGroup);
+
+    // group stage
+    TM.groupMatches().forEach(mm => {
+      const winA = mm.teamA < mm.teamB;
+      TM.saveGroupScore(mm.id, winA ? 21 : 15, winA ? 15 : 21);
+    });
+    eq(label + ': group stage complete', TM.groupStageComplete(), true);
+    check(label + ': no group fixture left queued', TM.groupMatches().every(mm => mm.status === 'completed'));
+
+    // knockout to champion
+    let info = TM.knockoutInfo();
+    let guard = 0;
+    while (!info.champion && guard++ < 40) {
+      const ko = TM.getState().matches.filter(mm => mm.stage !== 'group' && mm.status === 'queued' && mm.teamA && mm.teamB && !mm.bye);
+      if (!ko.length) { TM.ensureKnockout(); info = TM.knockoutInfo(); continue; }
+      ko.forEach(mm => {
+        const t = mm.target || 11;
+        TM.saveKnockoutScore(mm.id, [{ a: t, b: t - 3 }, { a: t, b: t - 5 }]);
+      });
+      info = TM.knockoutInfo();
+    }
+    check(label + ': champion crowned', !!info.champion, 'no champion');
+    check(label + ': champion is a real team', !!TM.getTeam(info.champion));
+    eq(label + ': overall total', TM.progress().overallTotal, expectOverall);
+    eq(label + ': overall complete', TM.progress().overallDone, expectOverall);
+    eq(label + ': 100%', TM.progress().pct, 100);
+    check(label + ': no orphan matches', TM.getState().matches.every(mm => (!mm.teamA || !!TM.getTeam(mm.teamA)) && (!mm.teamB || !!TM.getTeam(mm.teamB))));
+  }
+
+  runScenario('Scenario A (8 pairs 4+4)', { A: 4, B: 4 }, 2, 12, 15);
+  runScenario('Scenario B (9 pairs 5+4)', { A: 5, B: 4 }, 4, 16, 23);
+  runScenario('Scenario C (10 pairs 5+5)', { A: 5, B: 5 }, 4, 20, 27);
+
+  // Scenario A must NOT produce QF, 20 group matches or 27 total
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 4, B: 4 }), { regenerate: true });
+  TM.setQualification(2);
+  TM.groupMatches().forEach(mm => TM.saveGroupScore(mm.id, 21, 15));
+  TM.ensureKnockout();
+  const infoA = TM.knockoutInfo();
+  check('Scenario A: no QF matches', !infoA.rounds.qf.exists);
+  eq('Scenario A: 12 not 20 group matches', TM.totalGroupMatchCount(), 12);
+  eq('Scenario A: 15 not 27 total matches', TM.progress().overallTotal, 15);
+})();
+
+/* ── 41. persistence, export and import ────────────────── */
+(function () {
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 4, B: 4 }), { regenerate: true });
+  TM.setQualification(2);
+  TM.groupMatches()[0] && TM.saveGroupScore(TM.groupMatches()[0].id, 21, 13);
+  const snapshot = TM.exportJSON();
+
+  // reload from storage
+  TM.load();
+  eq('persist: 8 pairs survive reload', TM.getState().teams.length, 8);
+  eq('persist: qualification survives reload', TM.getQualification().perGroup, 2);
+  eq('persist: fixtures survive reload', TM.groupMatches().length, 12);
+  eq('persist: result survives reload', TM.progress().groupDone, 1);
+
+  // import the exported backup into a fresh state
+  TM.resetTournament();
+  const imp = TM.importJSON(snapshot);
+  check('import ok', imp.ok, imp.msg);
+  eq('import: 8 pairs', TM.getState().teams.length, 8);
+  eq('import: 12 fixtures', TM.groupMatches().length, 12);
+})();
+
+/* ── 42. createTournament(config) entry point ───────────── */
+(function () {
+  // Build a 9-pair tournament entirely from config — name, pairs, groups,
+  // qualification and court count.
+  const pairs = [];
+  for (let i = 1; i <= 5; i++) pairs.push({ name: 'Pair A' + i, players: ['a' + i, 'b' + i], level: 'tunga', group: 'A' });
+  for (let i = 1; i <= 4; i++) pairs.push({ name: 'Pair B' + i, players: ['c' + i, 'd' + i], level: 'bhadra', group: 'B' });
+  const r = TM.createTournament({
+    name: 'Yelahanka Badminton Tournament',
+    pairs: pairs,
+    qualification: { perGroup: 4 },
+    courts: 4
+  });
+  check('createTournament ok', r.ok, r.msg);
+  eq('createTournament name', TM.getState().tournament.name, 'Yelahanka Badminton Tournament');
+  eq('createTournament 9 pairs', TM.getState().teams.length, 9);
+  eq('createTournament distribution', JSON.stringify(TM.groupDistribution()), JSON.stringify({ A: 5, B: 4 }));
+  eq('createTournament group matches', TM.totalGroupMatchCount(), 16);
+  eq('createTournament qualification', TM.getQualification().perGroup, 4);
+  eq('createTournament courts', TM.getState().courts.length, 4);
+  check('createTournament ids derived from group', !!TM.getTeam('A1') && !!TM.getTeam('B4'));
+  eq('createTournament players preserved', TM.getTeam('A1').players.join('&'), 'a1&b1');
+  eq('createTournament level preserved', TM.getTeam('A1').level, 'tunga');
+  eq('createTournament no fake teams', TM.getState().teams.filter(t => !t.name).length, 0);
+
+  // A qualifier count that does not fit the largest group is rejected.
+  const bad = TM.createTournament({ name: 'x', pairs: [{ name: 'a', group: 'A' }, { name: 'b', group: 'A' }], qualification: 5 });
+  check('createTournament rejects oversized qualification', !bad.ok, bad.msg);
+
+  // A 3-group tournament is supported (groups are not fixed at A/B).
+  const three = TM.createTournament({
+    pairs: [
+      { name: 'a1', group: 'A' }, { name: 'a2', group: 'A' },
+      { name: 'b1', group: 'B' }, { name: 'b2', group: 'B' },
+      { name: 'c1', group: 'C' }, { name: 'c2', group: 'C' }
+    ]
+  });
+  check('createTournament 3 groups ok', three.ok, three.msg);
+  eq('createTournament 3 groups', TM.groupIds().length, 3);
+  eq('createTournament 3 one-match groups', TM.totalGroupMatchCount(), 3);
+})();
+
+/* ── 43. dynamic group management ──────────────────────── */
+(function () {
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 4, B: 4 }), { regenerate: true });
+  eq('baseline: 2 groups', TM.groupIds().join(','), 'A,B');
+  eq('baseline: 12 group matches', TM.totalGroupMatchCount(), 12);
+
+  // add an empty group: no pair is moved, no fixture changes
+  const add = TM.addGroup();
+  check('addGroup ok', add.ok, add.msg);
+  eq('addGroup -> 3 groups', TM.groupIds().join(','), 'A,B,C');
+  eq('addGroup does not move a pair', JSON.stringify(TM.groupDistribution()), JSON.stringify({ A: 4, B: 4, C: 0 }));
+  eq('addGroup does not add fixtures', TM.groupMatches().length, 12);
+  eq('empty group has 0 matches', TM.getGroupMatchCount('C'), 0);
+
+  // A single pair cannot form a one-pair group, so moving just one pair into the
+  // new group is rejected; the group stays empty and fixtures are untouched.
+  const mv = TM.assignTeamToGroup('A4', 'C', { regenerate: true });
+  check('move 1 pair into C is rejected (needs 2)', !mv.ok, JSON.stringify(mv));
+  eq('C stays empty after rejected move', TM.groupDistribution().C, 0);
+  // Moving two pairs in is valid and regenerates the fixtures for the new shape.
+  const teamsMoved = TM.getState().teams.map(t => ({ id: t.id, group: t.group, name: t.name, players: t.players, level: t.level }));
+  teamsMoved.find(t => t.id === 'A4').group = 'C';
+  teamsMoved.find(t => t.id === 'A3').group = 'C';
+  const applied = TM.applyTeams(teamsMoved, { regenerate: true, groups: ['A', 'B', 'C'] });
+  check('move two pairs into C ok', applied.ok, applied.msg);
+  eq('A now 2', TM.groupDistribution().A, 2);
+  eq('C now 2', TM.groupDistribution().C, 2);
+  eq('group matches = 1 + 6 + 1', TM.totalGroupMatchCount(), 8);
+
+  // removing a non-empty group is blocked
+  const bad = TM.removeGroup('C');
+  check('remove non-empty group blocked', !bad.ok, JSON.stringify(bad));
+  eq('blocked removal keeps C', TM.groupIds().indexOf('C') !== -1, true);
+
+  // removing an empty group is allowed and harmless
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 4, B: 4 }), { regenerate: true });
+  TM.addGroup();
+  const rm = TM.removeGroup('C');
+  check('remove empty group ok', rm.ok, rm.msg);
+  eq('remove empty group -> 2 groups', TM.groupIds().join(','), 'A,B');
+  eq('remove empty group keeps fixtures', TM.groupMatches().length, 12);
+
+  // the last group cannot be removed
+  const oneLeft = TM.removeGroup('B');
+  check('cannot remove a non-empty group', !oneLeft.ok);
+  const lone = TM.removeGroup('A');
+  check('cannot remove a non-empty group A', !lone.ok);
+
+  // group ids are stable and increments are deterministic
+  TM.resetTournament();
+  TM.addGroup(); TM.addGroup();
+  eq('stable sequential ids', TM.groupIds().join(','), 'A,B,C,D');
+
+  // labels are cosmetic and never touch fixtures
+  const rl = TM.renameGroup('A', 'Premier');
+  check('rename group ok', rl.ok, rl.msg);
+  eq('group label stored', TM.groupLabel('A'), 'Premier');
+  eq('rename never changes fixtures', TM.groupMatches().length, 20);
+  TM.renameGroup('A', '');
+  eq('clearing label restores default', TM.groupLabel('A'), 'Group A');
+
+  // max groups is enforced
+  TM.resetTournament();
+  let guard = 0;
+  while (TM.groupIds().length < TM.MAX_GROUPS && guard++ < 20) TM.addGroup();
+  const overflow = TM.addGroup();
+  check('max groups enforced', !overflow.ok, JSON.stringify(overflow));
+})();
+
+/* ── 44. knockout bracket for every qualifier size ────── */
+(function () {
+  // Build a single group of `q` pairs so exactly q teams qualify, then play out the
+  // bracket and confirm it is real (no fake matches) and internally consistent.
+  function buildFor(q) {
+    TM.resetTournament();
+    TM.applyTeams(makeTeams({ A: q }), { regenerate: true, groups: ['A'] });
+    TM.setQualification(q);
+    TM.groupMatches().forEach(mm => TM.saveGroupScore(mm.id, mm.teamA < mm.teamB ? 21 : 15, mm.teamA < mm.teamB ? 15 : 21));
+    TM.ensureKnockout();
+  }
+
+  [2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16].forEach(function (q) {
+    buildFor(q);
+    const ko = TM.getState().matches.filter(mm => mm.stage !== 'group');
+    const real = ko.filter(mm => !mm.bye);
+    const byes = ko.filter(mm => mm.bye);
+    eq('q=' + q + ': predicted knockout matches = q-1', TM.predictedKnockoutTotal(), q - 1);
+    const pow2 = Math.pow(2, Math.ceil(Math.log2(Math.max(2, q))));
+    eq('q=' + q + ': real matches + byes = first-round slots', real.length + byes.length, pow2 / 2);
+    check('q=' + q + ': bracket has real matches', real.length > 0);
+    check('q=' + q + ': no self matches', ko.every(mm => !mm.teamA || mm.teamA !== mm.teamB));
+    check('q=' + q + ': no orphan matches', ko.every(mm => (!mm.teamA || !!TM.getTeam(mm.teamA)) && (!mm.teamB || !!TM.getTeam(mm.teamB))));
+    check('q=' + q + ': byes never have two teams', byes.every(mm => !mm.teamA || !mm.teamB));
+    check('q=' + q + ': byes auto-advance a real team', byes.every(mm => !!TM.getTeam(mm.teamA || mm.teamB)));
+    check('q=' + q + ': bye is completed, not queued', byes.every(mm => mm.status === 'completed'));
+    check('q=' + q + ': bye cannot be started', byes.every(mm => !TM.startMatch(mm.id, 1, NOON).ok));
+    check('q=' + q + ': bye cannot be scored', byes.every(mm => !TM.saveKnockoutScore(mm.id, [{ a: 11, b: 5 }, { a: 11, b: 5 }]).ok));
+    // byes must never inflate the progress totals
+    eq('q=' + q + ': knockout total excludes byes', TM.progress().knockoutTotal, q - 1);
+
+    // play through to a champion
+    let info = TM.knockoutInfo();
+    let guard = 0;
+    while (!info.champion && guard++ < 60) {
+      const pending = TM.getState().matches.filter(mm => mm.stage !== 'group' && mm.status === 'queued' && mm.teamA && mm.teamB && !mm.bye);
+      if (!pending.length) { TM.ensureKnockout(); info = TM.knockoutInfo(); continue; }
+      pending.forEach(mm => {
+        const t = mm.target || 11;
+        TM.saveKnockoutScore(mm.id, [{ a: t, b: t - 3 }, { a: t, b: t - 5 }]);
+      });
+      info = TM.knockoutInfo();
+    }
+    check('q=' + q + ': champion crowned', !!info.champion);
+    check('q=' + q + ': champion is real', !!TM.getTeam(info.champion));
+    eq('q=' + q + ': overall played equals overall total', TM.progress().overallDone, TM.progress().overallTotal);
+  });
+
+  // the correct rounds exist for the classic sizes
+  buildFor(4);
+  let info = TM.knockoutInfo();
+  check('4 qualifiers: SF exists, no QF', info.sfExists && !info.qfExists);
+  buildFor(8);
+  info = TM.knockoutInfo();
+  check('8 qualifiers: QF exists', info.qfExists);
+  eq('8 qualifiers: 7 knockout matches', TM.progress().knockoutTotal, 7);
+  buildFor(16);
+  info = TM.knockoutInfo();
+  check('16 qualifiers: R16 exists', info.rounds.r16.exists);
+  eq('16 qualifiers: 15 knockout matches', TM.progress().knockoutTotal, 15);
+  // 17-32 qualifiers previously produced no bracket at all; verify that is fixed
+  buildFor(17);
+  info = TM.knockoutInfo();
+  check('17 qualifiers: a bracket exists', info.exists);
+  eq('17 qualifiers: 16 knockout matches', TM.progress().knockoutTotal, 16);
+  buildFor(24);
+  eq('24 qualifiers: 23 knockout matches', TM.predictedKnockoutTotal(), 23);
+})();
+
+/* ── 45. scenario D: three groups of three ─────────────── */
+(function () {
+  TM.resetTournament();
+  const teams = [];
+  ['A', 'B', 'C'].forEach(function (g) {
+    for (let i = 1; i <= 3; i++) teams.push({ id: g + i, group: g, name: 'Pair ' + g + i, players: ['a', 'b'], level: 'unassigned' });
+  });
+  const r = TM.applyTeams(teams, { regenerate: true, groups: ['A', 'B', 'C'] });
+  check('Scenario D: apply ok', r.ok, r.msg);
+  eq('Scenario D: 3 groups', TM.groupIds().length, 3);
+  eq('Scenario D: 3 + 3 + 3 = 9 group matches', TM.totalGroupMatchCount(), 9);
+  ['A', 'B', 'C'].forEach(g => assertRoundRobin('Scenario D', g, 3));
+  eq('Scenario D: group A 3 matches', TM.groupMatches('A').length, 3);
+  eq('Scenario D: group B 3 matches', TM.groupMatches('B').length, 3);
+  eq('Scenario D: group C 3 matches', TM.groupMatches('C').length, 3);
+  eq('Scenario D: no orphan matches', TM.getState().matches.every(mm => TM.getTeam(mm.teamA) && TM.getTeam(mm.teamB)), true);
+})();
+
+/* ── 46. scenario E: six qualifiers and their byes ─────── */
+(function () {
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 5, B: 5 }), { regenerate: true });
+  TM.setQualification(3); // top 3 from each = 6 qualifiers
+  TM.groupMatches().forEach(mm => TM.saveGroupScore(mm.id, mm.teamA < mm.teamB ? 21 : 15, mm.teamA < mm.teamB ? 15 : 21));
+  const info0 = TM.knockoutInfo();
+  const qual = TM.getState().knockout.qualifiers;
+  eq('Scenario E: 6 real qualifiers', qual.A.length + qual.B.length, 6);
+  eq('Scenario E: 5 knockout matches', TM.progress().knockoutTotal, 5);
+  eq('Scenario E: predicted 5', TM.predictedKnockoutTotal(), 5);
+  const ko = TM.getState().matches.filter(mm => mm.stage !== 'group');
+  const real = ko.filter(mm => !mm.bye);
+  const byes = ko.filter(mm => mm.bye);
+  eq('Scenario E: 2 byes to a 8-slot bracket', byes.length, 2);
+  eq('Scenario E: 2 real QF matches', real.length, 2);
+  check('Scenario E: no fake matches', ko.every(mm => !mm.teamA || !mm.teamB || mm.teamA !== mm.teamB));
+  check('Scenario E: byes never queued', byes.every(mm => mm.status === 'completed'));
+  check('Scenario E: real matches are queued', real.every(mm => mm.status === 'queued' || mm.status === 'completed'));
+
+  // play to a champion, verifying the bye teams enter at the right round
+  let info = info0;
+  let guard = 0;
+  while (!info.champion && guard++ < 40) {
+    const pending = TM.getState().matches.filter(mm => mm.stage !== 'group' && mm.status === 'queued' && mm.teamA && mm.teamB && !mm.bye);
+    if (!pending.length) { TM.ensureKnockout(); info = TM.knockoutInfo(); continue; }
+    pending.forEach(mm => {
+      const t = mm.target || 11;
+      TM.saveKnockoutScore(mm.id, [{ a: t, b: t - 3 }, { a: t, b: t - 5 }]);
+    });
+    info = TM.knockoutInfo();
+  }
+  check('Scenario E: champion crowned', !!info.champion);
+  eq('Scenario E: overall played = total', TM.progress().overallDone, TM.progress().overallTotal);
+})();
+
+/* ── 47. pair management validation ────────────────────── */
+(function () {
+  TM.resetTournament();
+  // duplicate pair names are rejected tournament-wide
+  const t = makeTeams({ A: 4, B: 4 });
+  t[4].name = t[0].name;
+  check('duplicate pair names rejected', !TM.applyTeams(t).ok);
+  // empty pair names are rejected
+  const t2 = makeTeams({ A: 4, B: 4 });
+  t2[0].name = '   ';
+  check('empty pair name rejected', !TM.applyTeams(t2).ok);
+  // duplicate team ids are rejected
+  const t3 = makeTeams({ A: 4, B: 4 });
+  t3[1].id = t3[0].id;
+  check('duplicate team id rejected', !TM.applyTeams(t3).ok);
+  // an empty group assignment is rejected
+  const t4 = makeTeams({ A: 4, B: 4 });
+  t4[0].group = '';
+  check('empty group assignment rejected', !TM.applyTeams(t4).ok);
+  // below the minimum pair count
+  check('below minimum pairs rejected', !TM.applyTeams(makeTeams({ A: 1 })).ok);
+  // a group of exactly one pair is rejected (cannot round-robin)
+  const t5 = makeTeams({ A: 4, B: 4 });
+  t5.forEach(x => { if (x.group === 'B' && x.id !== 'B1') x.group = 'A'; });
+  check('one-pair group rejected', !TM.applyTeams(t5).ok);
+  // a pair assigned to an undeclared group is rejected when groups are declared
+  check('undeclared group rejected with explicit list', !TM.applyTeams(makeTeams({ A: 4, B: 4 }), { groups: ['A'] }).ok);
+  // validateGroups catches a mismatch directly
+  const vg = TM.validateGroups(['A'], makeTeams({ A: 4, B: 4 }));
+  check('validateGroups catches undeclared group', !vg.ok, JSON.stringify(vg));
+  const vg2 = TM.validateGroups(['A', 'B'], makeTeams({ A: 4, B: 4 }));
+  check('validateGroups accepts a valid config', vg2.ok, vg2.msg);
+})();
+
+/* ── 48. regeneration after results with detailed plan ── */
+(function () {
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 5, B: 5 }), { regenerate: true });
+  TM.setQualification(4);
+  TM.groupMatches().slice(0, 7).forEach(mm => TM.saveGroupScore(mm.id, 21, 12));
+
+  // plan reports current vs new detail without touching state
+  const plan = TM.regeneratePlan();
+  eq('plan: 10 pairs', plan.pairs, 10);
+  eq('plan: existing fixtures 20', plan.existingFixtures, 20);
+  eq('plan: existing results 7', plan.existingResults, 7);
+  eq('plan: new fixtures for 10 pairs', plan.newFixtures, 20);
+  eq('plan does not mutate results', TM.progress().groupDone, 7);
+
+  // a structural change is refused without explicit regeneration
+  const blocked = TM.removeTeam('A5');
+  check('structural change needs confirmation', blocked.needsConfirmation === true, JSON.stringify(blocked));
+  eq('results intact after refusal', TM.progress().groupDone, 7);
+  eq('teams intact after refusal', TM.getState().teams.length, 10);
+
+  // regenerate clears results and rebuilds for the current shape
+  const regen = TM.regenerateFixtures();
+  check('regenerate ok', regen.ok, regen.msg);
+  eq('regenerate clears results', TM.progress().groupDone, 0);
+  eq('regenerate keeps 20 fixtures', TM.groupMatches().length, 20);
+
+  // non-structural edits never regenerate, even with results present
+  TM.groupMatches().slice(0, 3).forEach(mm => TM.saveGroupScore(mm.id, 21, 12));
+  const doneBefore = TM.progress().groupDone;
+  const rename = TM.updateTeam('A1', { name: 'Renamed Pair', players: ['New1', 'New2'] });
+  check('rename ok with results present', rename.ok, rename.msg);
+  eq('rename did not regenerate', rename.regenerated, false);
+  eq('rename preserved results', TM.progress().groupDone, doneBefore);
+  const lv = TM.updateTeam('A1', { level: 'tunga' });
+  check('level change ok with results', lv.ok, lv.msg);
+  eq('level change did not regenerate', lv.regenerated, false);
+  eq('level change preserved results', TM.progress().groupDone, doneBefore);
+
+  // adding a pair after results requires confirmation, and cancelling keeps results
+  const addRes = TM.addTeam({ id: 'A6', group: 'A', name: 'Extra Pair', players: ['x', 'y'], level: 'unassigned' });
+  check('add pair after results needs confirmation', addRes.needsConfirmation === true, JSON.stringify(addRes));
+  eq('cancelled add keeps results', TM.progress().groupDone, doneBefore);
+  eq('cancelled add keeps pair count', TM.getState().teams.length, 10);
+  // confirming regenerates and clears results, with no orphaned matches
+  const forced = TM.addTeam({ id: 'A6', group: 'A', name: 'Extra Pair', players: ['x', 'y'], level: 'unassigned' }, { regenerate: true });
+  check('forced add ok', forced.ok, forced.msg);
+  eq('forced add -> 11 pairs', TM.getState().teams.length, 11);
+  eq('forced add cleared results', TM.progress().groupDone, 0);
+  check('forced add no orphan matches', TM.getState().matches.every(mm => TM.getTeam(mm.teamA) && TM.getTeam(mm.teamB)));
+  eq('forced add regenerated fixtures for 11 pairs', TM.groupMatches().length, TM.totalGroupMatchCount());
+})();
+
+/* ── 49. group management persistence ──────────────────── */
+(function () {
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 4, B: 4 }), { regenerate: true });
+  TM.addGroup('C');
+  TM.renameGroup('C', 'Consolation');
+  TM.save();
+  const snapshot = TM.exportJSON();
+
+  TM.resetTournament();
+  const imp = TM.importJSON(snapshot);
+  check('group config import ok', imp.ok, imp.msg);
+  eq('imported groups', TM.groupIds().join(','), 'A,B,C');
+  eq('imported empty group survives', TM.groupDistribution().C, 0);
+  eq('imported group label survives', TM.groupLabel('C'), 'Consolation');
+  eq('imported fixtures unaffected by empty group', TM.groupMatches().length, 12);
+
+  // an empty configured group must survive a plain reload too
+  TM.save();
+  TM.load();
+  eq('reload keeps the empty group', TM.groupIds().join(','), 'A,B,C');
+})();
+
+/* ── 50. empty-group safety with existing results ──────── */
+(function () {
+  // Completing a group stage then adding/removing/renaming empty groups must
+  // leave every completed result and every group fixture untouched.
+  function seedResults(counts) {
+    TM.resetTournament();
+    TM.applyTeams(makeTeams(counts), { regenerate: true });
+    TM.groupMatches().forEach(m => TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 12, m.teamA < m.teamB ? 12 : 21));
+    return TM.getState().matches.filter(m => m.status === 'completed').length;
+  }
+  function snapshotCompleted() {
+    return JSON.stringify(
+      TM.getState().matches.filter(m => m.status === 'completed')
+        .map(m => [m.id, m.teamA, m.teamB, m.scoreA, m.scoreB]).sort()
+    );
+  }
+
+  // add empty group
+  let done = seedResults({ A: 4, B: 4 });
+  let sigBefore = snapshotCompleted();
+  eq('results present before add group', done, 12);
+  const beforeMatches = TM.groupMatches().length;
+  const add = TM.addGroup('C');
+  check('add empty group ok', add.ok, add.msg);
+  eq('add empty group did not regenerate', add.regenerated, false);
+  eq('add empty group kept completed results', snapshotCompleted(), sigBefore);
+  eq('add empty group kept group fixtures', TM.groupMatches().length, beforeMatches);
+  eq('add empty group added the container', TM.getState().groups.C.length, 0);
+  check('add empty group needs no confirmation', add.needsConfirmation !== true);
+
+  // rename group (label is cosmetic)
+  const rename = TM.renameGroup('A', 'Alpha');
+  check('rename group ok', rename.ok, rename.msg);
+  eq('rename group kept completed results', snapshotCompleted(), sigBefore);
+  eq('rename group kept group fixtures', TM.groupMatches().length, beforeMatches);
+  eq('rename group label applied', TM.groupLabel('A'), 'Alpha');
+  eq('rename group kept the group id', TM.getState().groups.A.length, 4);
+
+  // remove the empty group
+  const rm = TM.removeGroup('C');
+  check('remove empty group ok', rm.ok, rm.msg);
+  eq('remove empty group did not regenerate', rm.regenerated, false);
+  eq('remove empty group kept completed results', snapshotCompleted(), sigBefore);
+  eq('remove empty group kept group fixtures', TM.groupMatches().length, beforeMatches);
+  check('remove empty group removed the container', !TM.getState().groups.C);
+
+  // a group that still holds pairs cannot be removed
+  const rmFull = TM.removeGroup('B');
+  check('cannot remove a non-empty group', !rmFull.ok, rmFull.msg);
+  eq('blocked removal kept results', snapshotCompleted(), sigBefore);
+
+  // same guarantees once a knockout bracket exists
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 5, B: 5 }), { regenerate: true });
+  TM.groupMatches().forEach(m => TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 12, m.teamA < m.teamB ? 12 : 21));
+  TM.ensureKnockout();
+  const koBefore = JSON.stringify(TM.getState().matches.filter(m => m.stage !== 'group').map(m => [m.id, m.teamA, m.teamB]));
+  const completedKoBefore = TM.getState().matches.filter(m => m.status === 'completed').length;
+  TM.addGroup('C');
+  TM.renameGroup('C', 'Plate');
+  eq('empty-group add keeps bracket intact', JSON.stringify(TM.getState().matches.filter(m => m.stage !== 'group').map(m => [m.id, m.teamA, m.teamB])), koBefore);
+  eq('empty-group add keeps completed count', TM.getState().matches.filter(m => m.status === 'completed').length, completedKoBefore);
+  TM.removeGroup('C');
+  eq('empty-group remove keeps bracket intact', JSON.stringify(TM.getState().matches.filter(m => m.stage !== 'group').map(m => [m.id, m.teamA, m.teamB])), koBefore);
+
+  // structural pair edits still require confirmation when results exist
+  TM.resetTournament();
+  done = seedResults({ A: 4, B: 4 });
+  sigBefore = snapshotCompleted();
+  const move = TM.assignTeamToGroup('A1', 'B');
+  check('moving a pair after results needs confirmation', move.needsConfirmation === true, JSON.stringify(move));
+  eq('blocked move kept results', snapshotCompleted(), sigBefore);
+  eq('blocked move kept group membership', TM.getState().teams.find(t => t.id === 'A1').group, 'A');
+  const removePair = TM.removeTeam('A1');
+  check('removing a pair after results needs confirmation', removePair.needsConfirmation === true, JSON.stringify(removePair));
+  eq('blocked removal kept results', snapshotCompleted(), sigBefore);
+  const addPair = TM.addTeam({ id: 'A9', group: 'A', name: 'Extra', players: ['x', 'y'], level: 'unassigned' });
+  check('adding a pair after results needs confirmation', addPair.needsConfirmation === true, JSON.stringify(addPair));
+  eq('blocked add kept results', snapshotCompleted(), sigBefore);
+  // confirming the move regenerates and clears results with no orphaned matches
+  const moved = TM.assignTeamToGroup('A1', 'B', { regenerate: true });
+  check('confirmed move ok', moved.ok, moved.msg);
+  check('confirmed move regenerated', moved.regenerated === true);
+  eq('confirmed move cleared results', TM.getState().matches.filter(m => m.status === 'completed').length, 0);
+  check('confirmed move produced no orphan matches', TM.getState().matches.every(m => !m.teamA || TM.getTeam(m.teamA)));
+  eq('confirmed move updated membership', TM.getState().teams.find(t => t.id === 'A1').group, 'B');
+  eq('confirmed move regenerated 3+5 fixtures', TM.groupMatches().length, 13);
+})();
+
+/* ── 51. multi-group knockout: all groups contribute ───── */
+(function () {
+  // Play an entire tournament (group stage + knockout) to a champion and return
+  // the structural facts about the bracket.
+  function playToChampion(counts, perGroup) {
+    TM.resetTournament();
+    TM.applyTeams(makeTeams(counts), { regenerate: true });
+    if (perGroup != null) TM.setQualification(perGroup);
+    TM.groupMatches().forEach(m => TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 12, m.teamA < m.teamB ? 12 : 21));
+    let info = TM.knockoutInfo();
+    let guard = 0;
+    while (!info.champion && guard++ < 60) {
+      const ko = TM.getState().matches.filter(m => m.stage !== 'group' && m.status === 'queued' && m.teamA && m.teamB && !m.bye);
+      if (!ko.length) { TM.ensureKnockout(); info = TM.knockoutInfo(); continue; }
+      ko.forEach(m => { const t = m.target || 11; TM.saveKnockoutScore(m.id, [{ a: t, b: t - 4 }, { a: t, b: t - 6 }]); });
+      info = TM.knockoutInfo();
+    }
+    const koMatches = TM.getState().matches.filter(m => m.stage !== 'group');
+    const q = TM.getState().knockout.qualifiers || {};
+    const allQ = [].concat(...Object.keys(q).map(g => q[g]));
+    const inBracket = new Set(koMatches.map(m => m.teamA).concat(koMatches.map(m => m.teamB)).filter(Boolean));
+    return {
+      info, koMatches,
+      real: koMatches.filter(m => !m.bye && m.teamA && m.teamB).length,
+      byes: koMatches.filter(m => m.bye).length,
+      allQ, uniqueQ: new Set(allQ).size,
+      allInBracket: allQ.every(t => inBracket.has(t)),
+      groupMatches: TM.groupMatches().length,
+      progress: TM.progress()
+    };
+  }
+
+  // 8 pairs, 4 + 4, top 2 -> 12 group + 3 knockout = 15
+  let r = playToChampion({ A: 4, B: 4 }, 2);
+  eq('8p/4+4: group matches 12', r.groupMatches, 12);
+  eq('8p/4+4: 4 qualifiers', r.allQ.length, 4);
+  eq('8p/4+4: 3 real knockout matches', r.real, 3);
+  eq('8p/4+4: no byes', r.byes, 0);
+  eq('8p/4+4: overall 15', r.progress.overallTotal, 15);
+  eq('8p/4+4: knockout total 3', r.progress.knockoutTotal, 3);
+  check('8p/4+4: champion decided', !!r.info.champion);
+  check('8p/4+4: no quarter-finals', !r.info.rounds.qf.exists);
+  check('8p/4+4: semi-finals exist', r.info.rounds.sf.exists);
+
+  // 9 pairs, 5 + 4, top 4 -> 16 + 7 = 23
+  r = playToChampion({ A: 5, B: 4 }, 4);
+  eq('9p/5+4: group matches 16', r.groupMatches, 16);
+  eq('9p/5+4: 8 qualifiers', r.allQ.length, 8);
+  eq('9p/5+4: 7 real knockout matches', r.real, 7);
+  eq('9p/5+4: no byes', r.byes, 0);
+  eq('9p/5+4: overall 23', r.progress.overallTotal, 23);
+  check('9p/5+4: champion decided', !!r.info.champion);
+  check('9p/5+4: qf exists', r.info.rounds.qf.exists);
+
+  // 10 pairs, 5 + 5, top 4 -> 20 + 7 = 27 (the default example)
+  r = playToChampion({ A: 5, B: 5 }, 4);
+  eq('10p/5+5: group matches 20', r.groupMatches, 20);
+  eq('10p/5+5: 8 qualifiers', r.allQ.length, 8);
+  eq('10p/5+5: 7 real knockout matches', r.real, 7);
+  eq('10p/5+5: overall 27', r.progress.overallTotal, 27);
+  check('10p/5+5: champion decided', !!r.info.champion);
+
+  // 3 groups x 3 pairs, top 2 -> 9 group, 6 qualifiers, 2 byes, 5 real matches
+  r = playToChampion({ A: 3, B: 3, C: 3 }, 2);
+  eq('3x3/2: group matches 9', r.groupMatches, 9);
+  eq('3x3/2: 6 qualifiers', r.allQ.length, 6);
+  eq('3x3/2: all qualifiers unique', r.uniqueQ, 6);
+  check('3x3/2: every group contributes qualifiers', r.allInBracket);
+  eq('3x3/2: 2 byes', r.byes, 2);
+  eq('3x3/2: 5 real knockout matches', r.real, 5);
+  eq('3x3/2: real knockout = qualifiers - 1', r.real, r.allQ.length - 1);
+  eq('3x3/2: overall 14', r.progress.overallTotal, 14);
+  check('3x3/2: champion decided', !!r.info.champion);
+  // brackets size = next power of two >= qualifiers
+  eq('3x3/2: bracket size 8', TM.bracketRounds(6)[0].size, 8);
+  // byes have no fake opponent and auto-advance a real team
+  check('3x3/2: byes have no opponent', r.koMatches.filter(m => m.bye).every(m => !m.teamA || !m.teamB));
+  check('3x3/2: byes advance real teams', r.koMatches.filter(m => m.bye).every(m => !!TM.getTeam(m.teamA || m.teamB)));
+
+  // unequal 3-group configuration: 5 + 4 + 3, top 2 -> 6 qualifiers + 2 byes
+  r = playToChampion({ A: 5, B: 4, C: 3 }, 2);
+  eq('unequal 3-group: group matches 19', r.groupMatches, 19);
+  eq('unequal 3-group: 6 qualifiers', r.allQ.length, 6);
+  check('unequal 3-group: all groups represented', r.allInBracket);
+  eq('unequal 3-group: 2 byes', r.byes, 2);
+  eq('unequal 3-group: 5 real knockout matches', r.real, 5);
+  eq('unequal 3-group: overall 24', r.progress.overallTotal, 24);
+  check('unequal 3-group: champion decided', !!r.info.champion);
+
+  // 4-group configuration: 3 + 3 + 3 + 3, top 1 -> 4 qualifiers, no byes
+  r = playToChampion({ A: 3, B: 3, C: 3, D: 3 }, 1);
+  eq('4-group: group matches 12', r.groupMatches, 12);
+  eq('4-group: 4 qualifiers', r.allQ.length, 4);
+  check('4-group: all four groups represented', r.allInBracket);
+  eq('4-group: no byes', r.byes, 0);
+  eq('4-group: 3 real knockout matches', r.real, 3);
+  eq('4-group: overall 15', r.progress.overallTotal, 15);
+  check('4-group: champion decided', !!r.info.champion);
+
+  // 4-group with different sizes: 4 + 3 + 2 + 2, top 2 -> 8 qualifiers (2 from each)
+  r = playToChampion({ A: 4, B: 3, C: 2, D: 2 }, 2);
+  eq('4-group uneven: group matches 11', r.groupMatches, 11);
+  eq('4-group uneven: 8 qualifiers', r.allQ.length, 8);
+  check('4-group uneven: all groups represented', r.allInBracket);
+  eq('4-group uneven: no byes', r.byes, 0);
+  eq('4-group uneven: 7 real knockout matches', r.real, 7);
+  eq('4-group uneven: real = qualifiers - 1', r.real, r.allQ.length - 1);
+  check('4-group uneven: champion decided', !!r.info.champion);
+
+  // no qualifier is dropped or duplicated in any of the above
+  [ { A: 3, B: 3, C: 3 }, { A: 5, B: 4, C: 3 }, { A: 3, B: 3, C: 3, D: 3 }, { A: 4, B: 3, C: 2, D: 2 } ].forEach(function (counts, idx) {
+    const rr = playToChampion(counts, 2);
+    eq('multi-group #' + idx + ': no duplicate qualifiers', rr.uniqueQ, rr.allQ.length);
+    check('multi-group #' + idx + ': all qualifiers in bracket', rr.allInBracket);
+    eq('multi-group #' + idx + ': real matches = qualifiers - 1', rr.real, rr.allQ.length - 1);
+  });
+})();
+
+/* ── 52. seedBracket preserves the classic two-group draw ─ */
+(function () {
+  TM.resetTournament();
+  const q = { A: ['A1', 'A2', 'A3', 'A4'], B: ['B1', 'B2', 'B3', 'B4'] };
+  const seeded = TM.seedBracket(q);
+  // Classic order: A1 v B4, B1 v A4, A2 v B3, B2 v A3
+  eq('2-group seed: A1 vs B4', seeded[0] + '/' + seeded[1], 'A1/B4');
+  eq('2-group seed: B1 vs A4', seeded[2] + '/' + seeded[3], 'B1/A4');
+  eq('2-group seed: A2 vs B3', seeded[4] + '/' + seeded[5], 'A2/B3');
+  eq('2-group seed: B2 vs A3', seeded[6] + '/' + seeded[7], 'B2/A3');
+  eq('2-group seed: all eight seeds present', new Set(seeded).size, 8);
+  const q2 = { A: ['A1', 'A2'], B: ['B1', 'B2'] };
+  const seeded2 = TM.seedBracket(q2);
+  eq('2-group top2 seed: A1 vs B2', seeded2[0] + '/' + seeded2[1], 'A1/B2');
+  eq('2-group top2 seed: B1 vs A2', seeded2[2] + '/' + seeded2[3], 'B1/A2');
+
+  // single group -> standing order
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 4 }), { regenerate: true });
+  eq('1-group seed: standing order', TM.seedBracket({ A: ['A1', 'A2', 'A3', 'A4'] }).join(','), 'A1,A2,A3,A4');
+
+  // three groups: every group contributes, no drops/dupes
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 3, B: 3, C: 3 }), { regenerate: true });
+  const s3 = TM.seedBracket({ A: ['A1', 'A2'], B: ['B1', 'B2'], C: ['C1', 'C2'] });
+  eq('3-group seed: six seeds', s3.length, 6);
+  eq('3-group seed: unique', new Set(s3).size, 6);
+  ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].forEach(t => check('3-group seed includes ' + t, s3.includes(t)));
+  check('3-group seed: strongest meets weakest', s3[0] === 'A1' && s3[1] === 'C2', s3.join(','));
+})();
+
+/* ── 53. multi-group knockout persistence + import/export ─ */
+(function () {
+  TM.resetTournament();
+  TM.applyTeams(makeTeams({ A: 3, B: 3, C: 3 }), { regenerate: true });
+  TM.setQualification(2);
+  TM.groupMatches().forEach(m => TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 12, m.teamA < m.teamB ? 12 : 21));
+  TM.ensureKnockout();
+  TM.addGroup('D');
+  TM.renameGroup('C', 'Gamma');
+  TM.save();
+
+  const snapshot = TM.exportJSON();
+  const beforeKo = TM.getState().matches.filter(m => m.stage !== 'group').map(m => [m.id, m.teamA, m.teamB]).sort();
+
+  TM.resetTournament();
+  const imp = TM.importJSON(snapshot);
+  check('multi-group import ok', imp.ok, imp.msg);
+  eq('multi-group import keeps groups', TM.groupIds().join(','), 'A,B,C,D');
+  eq('multi-group import keeps label', TM.groupLabel('C'), 'Gamma');
+  eq('multi-group import keeps group matches', TM.groupMatches().length, 9);
+  eq('multi-group import keeps bracket', JSON.stringify(TM.getState().matches.filter(m => m.stage !== 'group').map(m => [m.id, m.teamA, m.teamB]).sort()), JSON.stringify(beforeKo));
+
+  // plain reload preserves everything too
+  TM.save();
+  TM.load();
+  eq('reload keeps bracket', JSON.stringify(TM.getState().matches.filter(m => m.stage !== 'group').map(m => [m.id, m.teamA, m.teamB]).sort()), JSON.stringify(beforeKo));
+  eq('reload keeps empty group D', TM.getState().groups.D.length, 0);
 })();
 
 /* ── report ─────────────────────────────────────────────── */
