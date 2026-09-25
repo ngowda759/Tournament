@@ -368,7 +368,7 @@ check('exactly three suggested courts', (s.match(/→ Court/g) || []).length, 3)
 
 // Branding, theme toggle and Help must remain in the shell regardless of Dashboard
 // layout changes.
-check('BestShot branding remains', html.indexOf('Best<span>Shot</span>') !== -1 || html.indexOf('Best<span>') !== -1, 'no logo');
+check('Tournament branding remains', html.indexOf('class="logo"') !== -1 && /class="logo"[^>]*>\s*Tournament\s*</.test(html), 'no logo');
 check('theme toggle remains', html.indexOf('id="theme-toggle"') !== -1 && html.indexOf('toggleTheme()') !== -1, 'no theme toggle');
 check('help remains', html.indexOf('App.about()') !== -1, 'no help control');
 
@@ -646,7 +646,7 @@ check('disabled court excluded from enabled list', TM.enabledCourts().every(func
 // regression in the scheduler still fails loudly elsewhere in this file.
 
 // Branding, theme and Help remain in the shell.
-check('polish: BestShot branding remains', html.indexOf('Best<span>Shot</span>') !== -1, 'no logo');
+check('polish: Tournament branding remains', html.indexOf('class="logo"') !== -1 && /class="logo"[^>]*>\s*Tournament\s*</.test(html), 'no logo');
 check('polish: theme toggle remains', html.indexOf('id="theme-toggle"') !== -1 && html.indexOf('toggleTheme()') !== -1, 'no theme');
 check('polish: help control remains', html.indexOf('App.about()') !== -1, 'no help');
 
@@ -834,6 +834,62 @@ check('matches view: no undefined/NaN', matchView.indexOf('undefined') === -1 &&
 const qfBefore = TM.matchFormatTag(TM.getMatch('QF-1'));
 App.setKnockoutFormat('qf', 'single_game');
 check('snapshot UI: existing match label unchanged', TM.matchFormatTag(TM.getMatch('QF-1')) === qfBefore, TM.matchFormatTag(TM.getMatch('QF-1')));
+
+// ── Dashboard League standings (score statistics) ─────────────────────────────
+// The dashboard must expose cumulative league-stage P/W/L/PF/PA/PD/Pts per team,
+// grouped per group, reusing the engine's standings calculation.
+TM.resetTournament();
+TM.getState().settings.allowOutsideAvailability = true;
+App.nav('dashboard');
+s = getEl('view').innerHTML;
+check('league: section heading present', s.indexOf('League standings') !== -1, 'no heading');
+check('league: league table rendered', s.indexOf('standings-table league-standings') !== -1, 'no league table');
+check('league: team column present', /<th>Team<\/th>/.test(s), 'no team header');
+// TEST 8 — the dashboard renders P, W, L, PF, PA, PD and Pts columns.
+check('league T8: P/W/L/PF/PA/PD/Pts headers render',
+  /<th class="num">P<\/th>[\s\S]*?<th class="num">W<\/th>[\s\S]*?<th class="num">L<\/th>[\s\S]*?<th class="num">PF<\/th>[\s\S]*?<th class="num">PA<\/th>[\s\S]*?<th class="num">PD<\/th>[\s\S]*?<th class="num">Pts<\/th>/.test(s),
+  'missing column headers');
+// TEST 10 — zero point difference renders as "0".
+check('league T10: zero PD renders as 0', /<td class="num-cell">0<\/td>/.test(s), 'no zero PD');
+check('league: both groups shown', s.indexOf('Group A') !== -1 && s.indexOf('Group B') !== -1, 'missing group');
+check('league: no undefined/NaN leak', s.indexOf('undefined') === -1 && s.indexOf('NaN') === -1, 'leak');
+
+// TEST 9 — a negative point difference renders with its sign.
+TM.groupMatches('A').forEach(function (m) { TM.saveGroupScore(m.id, 21, 15); });
+App.nav('dashboard');
+s = getEl('view').innerHTML;
+check('league T9: negative PD renders', /<td class="num-cell">-\d+<\/td>/.test(s), 'no negative PD');
+check('league T9: positive PD renders with +', /<td class="num-cell">\+\d+<\/td>/.test(s), 'no +PD');
+
+// Live update: the dashboard reflects a freshly completed league result with no
+// extra refresh, because it consumes the same live standings calculation.
+(function () {
+  TM.resetTournament();
+  TM.getState().settings.allowOutsideAvailability = true;
+  const teams = [];
+  ['A', 'B'].forEach(function (g) { for (let i = 1; i <= 5; i++) teams.push({ id: g + i, group: g, name: 'Team ' + g + i }); });
+  TM.applyTeams(teams, { regenerate: true });
+  const team = 'A1';
+  const mine = TM.groupMatches('A').filter(function (m) { return m.teamA === team || m.teamB === team; });
+  [[21, 15], [18, 21], [21, 12], [21, 19]].forEach(function (sc, i) {
+    const m = mine[i];
+    if (m.teamA === team) TM.saveGroupScore(m.id, sc[0], sc[1]);
+    else TM.saveGroupScore(m.id, sc[1], sc[0]);
+  });
+  App.nav('dashboard');
+  s = getEl('view').innerHTML;
+  const row = s.match(/<tr>[\s\S]*?Team A1[\s\S]*?<\/tr>/);
+  check('league live: A1 row rendered', !!row, 'no A1 row');
+  check('league live: A1 shows P4 W3 L1 PF81 PA67 PD+14 Pts6',
+    row && /played-cell">4<\/td>[\s\S]*?num-cell">3<\/td>[\s\S]*?num-cell">1<\/td>[\s\S]*?num-cell">81<\/td>[\s\S]*?num-cell">67<\/td>[\s\S]*?num-cell">\+14<\/td>[\s\S]*?pts-cell">6<\/td>/.test(row[0]),
+    row ? row[0] : 'none');
+})();
+
+// Responsive: the league table sits in the existing scroll wrapper and the CSS
+// keeps it shrinkable at narrow widths (no new framework).
+check('league: table wrapped for mobile scroll', /tbl-wrap"><table class="standings-table league-standings"/.test(s), 'not wrapped');
+check('league: tbl-wrap scroll CSS', /\.tbl-wrap\s*\{[^}]*overflow-x:\s*auto/.test(styleText), 'no scroll wrapper');
+check('league: narrow-width rule exists', /@media\s*\(max-width:\s*430px\)\s*\{[\s\S]*?\.league-standings/.test(styleText), 'no mobile rule');
 
 console.log('\n' + (fail === 0 ? '✅ ALL RENDERS OK' : '❌ RENDER FAILURES'));
 console.log('passed: ' + pass + '  failed: ' + fail);

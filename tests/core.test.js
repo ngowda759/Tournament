@@ -3201,6 +3201,174 @@ function finishGroupStage() {
   eq('structure: straight SF stored one game', sf.sets.length, 1);
 })();
 
+/* ── league-stage score statistics (dashboard) ─────────── */
+// The dashboard's League standings section is a pure view over computeStandings,
+// the tournament engine's single source of truth. These tests pin the aggregation
+// down: P/W/L/PF/PA/PD/Pts come from completed league matches only, and the
+// ranking/tie-breaks are untouched.
+function setScoreFor(m, teamId, mine, theirs) {
+  return m.teamA === teamId ? TM.saveGroupScore(m.id, mine, theirs) : TM.saveGroupScore(m.id, theirs, mine);
+}
+function rowFor(group, teamId) {
+  return TM.computeStandings(group).find(r => r.team.id === teamId);
+}
+
+// TEST 1 — a single completed match, both sides.
+(function () {
+  TM.resetTournament();
+  TM.getState().settings.allowOutsideAvailability = true;
+  const m = TM.groupMatches('A')[0];
+  setScoreFor(m, m.teamA, 21, 15);
+
+  const w = rowFor('A', m.teamA);
+  eq('T1 winner P', w.played, 1);
+  eq('T1 winner W', w.won, 1);
+  eq('T1 winner L', w.lost, 0);
+  eq('T1 winner PF', w.pf, 21);
+  eq('T1 winner PA', w.pa, 15);
+  eq('T1 winner PD', w.diff, 6);
+  eq('T1 winner Pts', w.pts, 2);
+
+  const l = rowFor('A', m.teamB);
+  eq('T1 loser P', l.played, 1);
+  eq('T1 loser W', l.won, 0);
+  eq('T1 loser L', l.lost, 1);
+  eq('T1 loser PF', l.pf, 15);
+  eq('T1 loser PA', l.pa, 21);
+  eq('T1 loser PD', l.diff, -6);
+  eq('T1 loser Pts', l.pts, 0);
+})();
+
+// TEST 2 — multiple matches: 21-15, 18-21, 21-12, 21-19 → P4 W3 L1 PF81 PA67 PD+14 Pts6.
+(function () {
+  TM.resetTournament();
+  TM.getState().settings.allowOutsideAvailability = true;
+  const team = 'A1';
+  const mine = TM.groupMatches('A').filter(m => m.teamA === team || m.teamB === team);
+  eq('T2 team has 4 league matches', mine.length, 4);
+  const scores = [[21, 15], [18, 21], [21, 12], [21, 19]];
+  mine.forEach((m, i) => setScoreFor(m, team, scores[i][0], scores[i][1]));
+
+  const r = rowFor('A', team);
+  eq('T2 P', r.played, 4);
+  eq('T2 W', r.won, 3);
+  eq('T2 L', r.lost, 1);
+  eq('T2 PF', r.pf, 81);
+  eq('T2 PA', r.pa, 67);
+  eq('T2 PD', r.diff, 14);
+  eq('T2 Pts', r.pts, 6);
+})();
+
+// TEST 3 — no completed matches: every figure is zero (never NaN/undefined).
+(function () {
+  TM.resetTournament();
+  TM.computeStandings('A').forEach(r => {
+    eq('T3 ' + r.team.id + ' P', r.played, 0);
+    eq('T3 ' + r.team.id + ' W', r.won, 0);
+    eq('T3 ' + r.team.id + ' L', r.lost, 0);
+    eq('T3 ' + r.team.id + ' PF', r.pf, 0);
+    eq('T3 ' + r.team.id + ' PA', r.pa, 0);
+    eq('T3 ' + r.team.id + ' PD', r.diff, 0);
+    eq('T3 ' + r.team.id + ' Pts', r.pts, 0);
+  });
+})();
+
+// TEST 4 — live and scheduled matches must not contribute to league statistics.
+(function () {
+  TM.resetTournament();
+  TM.getState().settings.allowOutsideAvailability = true;
+  const gm = TM.groupMatches('A');
+  const snapshot = () => JSON.stringify(TM.computeStandings('A').map(r => [r.team.id, r.played, r.won, r.lost, r.pts, r.pf, r.pa, r.diff]));
+  const before = snapshot();
+
+  TM.startMatch(gm[0].id, 1);              // in_progress — live
+  eq('T4 match is live', TM.getMatch(gm[0].id).status, 'in_progress');
+  eq('T4 live match untouched league stats', snapshot(), before);
+  // The remaining group fixtures are still queued; none may contribute either.
+  eq('T4 other fixtures still queued', gm.slice(1).every(m => m.status === 'queued'), true);
+  eq('T4 scheduled matches untouched league stats', snapshot(), before);
+})();
+
+// TEST 5 — knockout results must never alter league statistics.
+(function () {
+  TM.resetTournament();
+  TM.getState().settings.allowOutsideAvailability = true;
+  TM.groupMatches().forEach(m => setScoreFor(m, m.teamA, 21, 12));
+  TM.ensureKnockout();
+  const before = JSON.stringify(TM.getState().matches.filter(m => m.stage === 'group').length) +
+    '|' + JSON.stringify(TM.computeStandings('A').map(r => [r.team.id, r.played, r.won, r.lost, r.pts, r.pf, r.pa, r.diff])) +
+    '|' + JSON.stringify(TM.computeStandings('B').map(r => [r.team.id, r.played, r.won, r.lost, r.pts, r.pf, r.pa, r.diff]));
+
+  let guard = 0;
+  while (guard++ < 40) {
+    const queued = TM.getState().matches.filter(m => m.stage !== 'group' && m.status === 'queued' && m.teamA && m.teamB && !m.bye);
+    if (!queued.length) break;
+    queued.forEach(m => {
+      const sc = TM.matchScoring(m);
+      if (sc.format === 'single_game') TM.saveKnockoutScore(m.id, [{ a: sc.pointsPerGame, b: sc.pointsPerGame - 5 }]);
+      else TM.saveKnockoutScore(m.id, [{ a: sc.pointsPerGame, b: sc.pointsPerGame - 5 }, { a: sc.pointsPerGame, b: sc.pointsPerGame - 6 }]);
+    });
+    TM.ensureKnockout();
+  }
+  const koDone = TM.getState().matches.filter(m => m.stage !== 'group' && m.status === 'completed');
+  check('T5 knockout matches were completed', koDone.length > 0, 'none');
+
+  const after = JSON.stringify(TM.getState().matches.filter(m => m.stage === 'group').length) +
+    '|' + JSON.stringify(TM.computeStandings('A').map(r => [r.team.id, r.played, r.won, r.lost, r.pts, r.pf, r.pa, r.diff])) +
+    '|' + JSON.stringify(TM.computeStandings('B').map(r => [r.team.id, r.played, r.won, r.lost, r.pts, r.pf, r.pa, r.diff]));
+  eq('T5 league stats unchanged by knockout', after, before);
+})();
+
+// TEST 6 — tie-breaking is still points → point difference → points scored.
+(function () {
+  TM.resetTournament();
+  TM.getState().settings.allowOutsideAvailability = true;
+  TM.applyTeams(makeTeams({ A: 4 }), { regenerate: true, groups: ['A'] });
+  // Set a whole round-robin explicitly, keyed by pairing so fixture order cannot
+  // matter. Every match is to 21 with a clear margin, so validation accepts it.
+  function setPair(a, b, sa, sb) {
+    const m = TM.groupMatches('A').find(m =>
+      (m.teamA === a && m.teamB === b) || (m.teamA === b && m.teamB === a));
+    check('T6 fixture ' + a + '-' + b + ' exists', !!m);
+    const res = TM.saveGroupScore(m.id, m.teamA === a ? sa : sb, m.teamA === a ? sb : sa);
+    check('T6 score ' + a + '-' + b + ' saved', res.ok, res.msg);
+  }
+  setPair('A2', 'A1', 21, 13);  // A1 loses (-8)
+  setPair('A1', 'A3', 21, 13);  // A1 wins (+8)
+  setPair('A1', 'A4', 21, 13);  // A1 wins (+8)
+  setPair('A2', 'A3', 21, 5);   // A2 wins (+16)
+  setPair('A4', 'A2', 21, 5);   // A2 loses (-16)
+  setPair('A3', 'A4', 21, 10);
+
+  const rows = TM.computeStandings('A');
+  const at = id => rows.findIndex(r => r.team.id === id);
+  const rA1 = rowFor('A', 'A1'), rA2 = rowFor('A', 'A2');
+  const rA3 = rowFor('A', 'A3'), rA4 = rowFor('A', 'A4');
+
+  // A1 and A2 tie on league points and on point difference — only PF separates them.
+  eq('T6 A1/A2 equal points', rA1.pts, rA2.pts);
+  eq('T6 A1/A2 equal PD', rA1.diff, rA2.diff);
+  eq('T6 A1 PD value', rA1.diff, 8);
+  check('T6 A1 PF > A2 PF', rA1.pf > rA2.pf);
+  check('T6 more points scored ranks first', at('A1') < at('A2'));
+  // A3 and A4 tie on points — the better point difference ranks first.
+  eq('T6 A3/A4 equal points', rA3.pts, rA4.pts);
+  check('T6 better PD ranks first', rA4.diff > rA3.diff && at('A4') < at('A3'));
+})();
+
+// TEST 7 — multiple groups calculate independently.
+(function () {
+  TM.resetTournament();
+  TM.getState().settings.allowOutsideAvailability = true;
+  TM.groupMatches('A').forEach(m => setScoreFor(m, m.teamA, 21, 10));
+  const a = TM.computeStandings('A');
+  const b = TM.computeStandings('B');
+  eq('T7 group A all played', a.every(r => r.played === 4), true);
+  eq('T7 group B untouched', b.every(r => r.played === 0 && r.pf === 0 && r.pa === 0 && r.pts === 0), true);
+  eq('T7 group A PF total', a.reduce((s, r) => s + r.pf, 0), 310);
+  eq('T7 group A PA total', a.reduce((s, r) => s + r.pa, 0), 310);
+})();
+
 /* ── report ─────────────────────────────────────────────── */
 console.log('\n' + (fail === 0 ? '✅ ALL TESTS PASSED' : '❌ FAILURES'));
 console.log('passed: ' + pass + '  failed: ' + fail);

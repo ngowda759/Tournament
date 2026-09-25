@@ -491,6 +491,16 @@
   .num-cell { text-align: right; color: var(--text2); font-variant-numeric: tabular-nums; }
   .played-cell { text-align: right; color: var(--text3); font-variant-numeric: tabular-nums; }
   .pts-cell { font-family: var(--font-head); font-size: 14px; font-weight: 800; color: var(--accent); text-align: right; font-variant-numeric: tabular-nums; }
+  /* League standings on the Dashboard: one compact table per group. The nested
+     sub-heading tightens the default section spacing, and the tighter column padding
+     keeps P/W/L/PF/PA/PD/Pts readable on a phone before the table scrolls. */
+  .section-title.sub { margin: 1.1rem 0 0.6rem; }
+  .league-group { color: var(--text); }
+  .league-standings td, .league-standings th { padding-left: 6px; padding-right: 6px; }
+  @media (max-width: 430px) {
+    .league-standings { font-size: 12.5px; min-width: 420px; }
+    .league-standings td { padding-top: 8px; padding-bottom: 8px; }
+  }
 
   /* BRACKET */
   .bracket-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 8px; }
@@ -3662,6 +3672,9 @@
     html += '<div class="section-title">' + phaseTag('queue') + ' Waiting queue <span class="line"></span></div>';
     html += waitingQueueBlock();
 
+    html += '<div class="section-title">League standings <span class="line"></span></div>';
+    html += leagueStandingsBlock();
+
     html += '<div class="analytics-grid">';
     html += '<div class="dash-col">' + groupPerformanceBlock() + '</div>';
     html += '<div class="dash-col">' + levelDistributionBlock() + '</div>';
@@ -3801,6 +3814,39 @@
     html += '<div class="dash-actions"><button class="link-btn" onclick="App.nav(\'settings\')">Manage levels →</button></div>';
     html += '</div>';
     return html;
+  }
+
+  /* ── league standings ─────────────────────────────────── */
+  // Cumulative league-stage score statistics per team, one table per group. Every
+  // figure comes from TM.computeStandings, the tournament engine's single source of
+  // truth, so P/W/L/PF/PA/PD/Pts and the ranking cannot drift from the Standings
+  // screen or the knockout seeding.
+  function leagueStandingsBlock() {
+    const groups = TM.groupIds();
+    if (!groups.length) return '<div class="card"><div class="muted">No groups configured yet.</div></div>';
+    return groups.map(function (g) {
+      const rows = TM.computeStandings(g);
+      let html = '<div class="section-title sub"><span class="league-group">' + esc(TM.groupLabel(g)) + '</span><span class="line"></span></div>';
+      html += '<div class="tbl-wrap"><table class="standings-table league-standings"><thead><tr>' +
+        '<th>#</th><th>Team</th><th class="num">P</th><th class="num">W</th><th class="num">L</th>' +
+        '<th class="num">PF</th><th class="num">PA</th><th class="num">PD</th><th class="num">Pts</th>' +
+        '</tr></thead><tbody>';
+      rows.forEach(function (r, i) {
+        html += '<tr>' +
+          '<td class="rank-cell">' + (i + 1) + '</td>' +
+          '<td><div class="team-cell-name">' + esc(r.team.name) + '</div>' + teamSub(r.team) + '</td>' +
+          '<td class="played-cell">' + r.played + '</td>' +
+          '<td class="num-cell">' + r.won + '</td>' +
+          '<td class="num-cell">' + r.lost + '</td>' +
+          '<td class="num-cell">' + r.pf + '</td>' +
+          '<td class="num-cell">' + r.pa + '</td>' +
+          '<td class="num-cell">' + (r.diff > 0 ? '+' : '') + r.diff + '</td>' +
+          '<td class="pts-cell">' + r.pts + '</td>' +
+          '</tr>';
+      });
+      html += '</tbody></table></div>';
+      return html;
+    }).join('');
   }
 
   /* ── group performance ────────────────────────────────── */
