@@ -60,10 +60,10 @@ eq('total group matches = 20', TM.groupMatches().length, 20);
   });
 })();
 
-// a player who appears in two different pairs stays distinct per pair
-eq('Pair A3 exists', st.teams.some(t => t.id === 'A3' && t.players.includes('A3a') && t.players.includes('Player X')), true);
-eq('Pair B3 exists', st.teams.some(t => t.id === 'B3' && t.players.includes('B3a') && t.players.includes('Player X')), true);
-eq('last pair has an editable second player', st.teams.find(t => t.id === 'B5').players.length, 2);
+// distinct Vinays preserved
+eq('RK & Vinay exists', st.teams.some(t => t.id === 'A3' && t.players.includes('RK') && t.players.includes('Vinay')), true);
+eq('Praveen & Vinay exists', st.teams.some(t => t.id === 'B3' && t.players.includes('Praveen') && t.players.includes('Vinay')), true);
+eq('Anil partner editable (TBD)', st.teams.find(t => t.id === 'B5').players[1], 'TBD');
 
 /* ── 2. scoring validation ─────────────────────────────── */
 check('21-17 valid', TM.validateGroupScore(21, 17) === null);
@@ -263,7 +263,7 @@ const NOON = new Date(2026, 0, 1, 6, 30, 0); // deterministic clock, inside 06:0
 (function () {
   const teams = TM.getState().teams.map(t => ({ id: t.id, group: t.group, name: t.name, players: t.players, level: t.level }));
   // rename only (structure same)
-  teams[0].name = 'Pair A1 (A)';
+  teams[0].name = 'Naveen & Chandan (A)';
   let r = TM.applyTeams(teams);
   check('rename allowed', r.ok, r.msg);
   eq('rename did not regenerate', r.regenerated, false);
@@ -716,7 +716,7 @@ const NOON = new Date(2026, 0, 1, 6, 30, 0); // deterministic clock, inside 06:0
       { id: 2, name: 'Court 2', start: '06:00', end: '08:00', closed: false },
       { id: 3, name: 'Court 3', start: '06:00', end: '08:00', closed: false }
     ],
-    teams: [{ id: 'A1', group: 'A', name: 'X & Y', players: ['X', 'Y'], level: 'Level 1' }],
+    teams: [{ id: 'A1', group: 'A', name: 'X & Y', players: ['X', 'Y'], level: 'Tunga' }],
     matches: []
   };
   const mig = TM.migrate(legacy);
@@ -728,7 +728,7 @@ const NOON = new Date(2026, 0, 1, 6, 30, 0); // deterministic clock, inside 06:0
   eq('legacy: new schema version', mig.version, 6);
 
   // legacy state missing courts entirely falls back to the standard three
-  const mig2 = TM.migrate({ teams: [{ id: 'A1', group: 'A', name: 'X & Y', players: ['X', 'Y'], level: 'Level 1' }], matches: [] });
+  const mig2 = TM.migrate({ teams: [{ id: 'A1', group: 'A', name: 'X & Y', players: ['X', 'Y'], level: 'Tunga' }], matches: [] });
   eq('legacy: missing courts -> 3 defaults', mig2.courts.length, 3);
   eq('legacy: default C1 end 09:00', mig2.courts[0].endTime, '09:00');
 
@@ -781,20 +781,20 @@ const NOON = new Date(2026, 0, 1, 6, 30, 0); // deterministic clock, inside 06:0
 
 /* ── 21. configurable team levels ──────────────────────── */
 (function () {
-  // 1. default levels are Level 1, Level 2 and Level 3
+  // 1. default levels are Tunga, Bhadra and Kaveri
   TM.resetTournament();
   let s = TM.getState();
   const names = TM.levels().map(l => l.name);
-  eq('default levels are Level 1/Level 2/Level 3', names.join(','), 'Level 1,Level 2,Level 3');
-  eq('default level ids are slugs', TM.levels().map(l => l.id).join(','), 'level-1,level-2,level-3');
+  eq('default levels are Tunga/Bhadra/Kaveri', names.join(','), 'Tunga,Bhadra,Kaveri');
+  eq('default level ids are slugs', TM.levels().map(l => l.id).join(','), 'tunga,bhadra,kaveri');
   check('default levels enabled', TM.levels().every(l => l.enabled !== false));
   eq('levels persisted on state.settings', Array.isArray(s.settings.levels), true);
 
-  // 2. default distribution: Level 1 3, Level 2 3, Level 3 3, Unassigned 1
+  // 2. default distribution: Tunga 3, Bhadra 3, Kaveri 3, Unassigned 1
   let counts = TM.levelCounts();
-  eq('default Level 1 count = 3', counts['level-1'], 3);
-  eq('default Level 2 count = 3', counts['level-2'], 3);
-  eq('default Level 3 count = 3', counts['level-3'], 3);
+  eq('default Tunga count = 3', counts.tunga, 3);
+  eq('default Bhadra count = 3', counts.bhadra, 3);
+  eq('default Kaveri count = 3', counts.kaveri, 3);
   eq('default Unassigned count = 1', counts[TM.UNASSIGNED_ID], 1);
   const sum = TM.levelSummary();
   eq('total pairs 10', sum.total, 10);
@@ -802,38 +802,38 @@ const NOON = new Date(2026, 0, 1, 6, 30, 0); // deterministic clock, inside 06:0
   eq('unassigned 1', sum.unassigned, 1);
   check('unassigned warning flag set', TM.hasUnassignedTeams());
 
-  // Pair B5 is the unassigned pair and remains in Group B (level != group)
-  const b5 = s.teams.find(t => t.id === 'B5');
-  eq('Pair B5 default level is Unassigned', b5.level, TM.UNASSIGNED_ID);
-  eq('Pair B5 stays in Group B', b5.group, 'B');
-  eq('Pair B5 level label', TM.levelName(b5.level), 'Unassigned');
+  // Anil & TBD is the unassigned pair and remains in Group B (level != group)
+  const anil = s.teams.find(t => t.id === 'B5');
+  eq('Anil & TBD default level is Unassigned', anil.level, TM.UNASSIGNED_ID);
+  eq('Anil & TBD stays in Group B', anil.group, 'B');
+  eq('Anil & TBD level label', TM.levelName(anil.level), 'Unassigned');
 
   // 3. the Teams dropdown draws from the configured levels (one source of truth)
   eq('selectable levels = configured + Unassigned',
-    TM.selectableLevels().map(l => l.name).join(','), 'Level 1,Level 2,Level 3,Unassigned');
+    TM.selectableLevels().map(l => l.name).join(','), 'Tunga,Bhadra,Kaveri,Unassigned');
   check('selectable levels expose ids', TM.selectableLevels().every(l => typeof l.id === 'string' && l.id.length > 0));
 
   // 4. changing a pair's level updates the displayed count
   let teams = TM.getState().teams.map(t => ({ id: t.id, group: t.group, name: t.name, players: t.players, level: t.level }));
-  const a1 = teams.find(t => t.id === 'A1'); // Level 1
-  a1.level = 'level-2';
+  const a1 = teams.find(t => t.id === 'A1'); // Tunga
+  a1.level = 'bhadra';
   let r = TM.applyTeams(teams);
   check('level change accepted', r.ok, r.msg);
   counts = TM.levelCounts();
-  eq('Level 1 count drops to 2', counts['level-1'], 2);
-  eq('Level 2 count rises to 4', counts['level-2'], 4);
+  eq('Tunga count drops to 2', counts.tunga, 2);
+  eq('Bhadra count rises to 4', counts.bhadra, 4);
   eq('total still 10', TM.levelSummary().total, 10);
 
-  // 5. moving a team from Level 3 to Level 1 updates both counts
+  // 5. moving a team from Kaveri to Tunga updates both counts
   TM.resetTournament();
   teams = TM.getState().teams.map(t => ({ id: t.id, group: t.group, name: t.name, players: t.players, level: t.level }));
-  const a3 = teams.find(t => t.id === 'A3'); // Level 3
-  a3.level = 'level-1';
+  const a3 = teams.find(t => t.id === 'A3'); // Kaveri
+  a3.level = 'tunga';
   r = TM.applyTeams(teams);
-  check('Level 3 -> Level 1 accepted', r.ok, r.msg);
+  check('Kaveri -> Tunga accepted', r.ok, r.msg);
   counts = TM.levelCounts();
-  eq('Level 3 count drops to 2', counts['level-3'], 2);
-  eq('Level 1 count rises to 4', counts['level-1'], 4);
+  eq('Kaveri count drops to 2', counts.kaveri, 2);
+  eq('Tunga count rises to 4', counts.tunga, 4);
 
   // 6. moving a team to Unassigned works
   TM.resetTournament();
@@ -851,7 +851,7 @@ const NOON = new Date(2026, 0, 1, 6, 30, 0); // deterministic clock, inside 06:0
   const groupIds = TM.groupMatches().map(m => m.id).join(',');
   const pairings = TM.groupMatches().map(m => m.teamA + '|' + m.teamB).join(',');
   teams = TM.getState().teams.map(t => ({ id: t.id, group: t.group, name: t.name, players: t.players, level: t.level }));
-  teams.forEach(t => { t.level = 'level-2'; });
+  teams.forEach(t => { t.level = 'bhadra'; });
   r = TM.applyTeams(teams);
   check('bulk level change accepted', r.ok, r.msg);
   eq('fixtures not regenerated', r.regenerated, false);
@@ -871,10 +871,10 @@ const NOON = new Date(2026, 0, 1, 6, 30, 0); // deterministic clock, inside 06:0
   TM.resetTournament();
   TM.saveGroupScore('A-01', 21, 10);
   teams = TM.getState().teams.map(t => ({ id: t.id, group: t.group, name: t.name, players: t.players, level: t.level }));
-  teams.find(t => t.id === 'A1').level = 'level-3';
+  teams.find(t => t.id === 'A1').level = 'kaveri';
   r = TM.applyTeams(teams);
   check('level change allowed after results', r.ok, r.msg);
-  eq('A1 level applied after results', TM.getTeam('A1').level, 'level-3');
+  eq('A1 level applied after results', TM.getTeam('A1').level, 'kaveri');
   eq('result preserved after level change', TM.getMatch('A-01').status, 'completed');
 
   // 9. group changes keep the existing structural safeguards
@@ -887,24 +887,24 @@ const NOON = new Date(2026, 0, 1, 6, 30, 0); // deterministic clock, inside 06:0
   // 10. level assignments survive a localStorage reload
   TM.resetTournament();
   teams = TM.getState().teams.map(t => ({ id: t.id, group: t.group, name: t.name, players: t.players, level: t.level }));
-  teams.find(t => t.id === 'A2').level = 'level-3';
+  teams.find(t => t.id === 'A2').level = 'kaveri';
   TM.applyTeams(teams);
   TM.save();
   const beforeLevels = TM.getState().teams.map(t => t.id + ':' + t.level).join(',');
   TM.load();
   eq('level assignments survive reload', TM.getState().teams.map(t => t.id + ':' + t.level).join(','), beforeLevels);
-  eq('level config survives reload', TM.levels().map(l => l.id).join(','), 'level-1,level-2,level-3');
+  eq('level config survives reload', TM.levels().map(l => l.id).join(','), 'tunga,bhadra,kaveri');
 
   // 11. level assignments survive export/import
   const dump = TM.exportJSON();
   const imp = TM.importJSON(dump);
   check('import with levels ok', imp.ok, imp.msg);
   eq('level assignments survive export/import', TM.getState().teams.map(t => t.id + ':' + t.level).join(','), beforeLevels);
-  eq('level config survives export/import', TM.levels().map(l => l.id).join(','), 'level-1,level-2,level-3');
+  eq('level config survives export/import', TM.levels().map(l => l.id).join(','), 'tunga,bhadra,kaveri');
 
   // 12. duplicate/invalid level ids are rejected
   eq('duplicate level id rejected', TM.applyLevels([
-    { id: 'level-1', name: 'Level 1' }, { id: 'level-1', name: 'Other' }
+    { id: 'tunga', name: 'Tunga' }, { id: 'tunga', name: 'Other' }
   ]).ok, false);
   eq('duplicate level name rejected', TM.applyLevels([
     { id: 'one', name: 'Same' }, { id: 'two', name: 'same' }
@@ -915,55 +915,55 @@ const NOON = new Date(2026, 0, 1, 6, 30, 0); // deterministic clock, inside 06:0
   eq('reserved Unassigned name rejected', TM.applyLevels([{ id: 'x', name: 'Unassigned' }]).ok, false);
   check('validateLevels reports a reason', /unique/i.test(TM.validateLevels([{ id: 'a', name: 'N' }, { id: 'a', name: 'M' }])));
   eq('empty level list rejected', TM.applyLevels([]).ok, false);
-  eq('non-list level config rejected', TM.applyLevels('Level 1').ok, false);
+  eq('non-list level config rejected', TM.applyLevels('Tunga').ok, false);
   // an unknown level on a pair is rejected rather than silently kept
   TM.resetTournament();
   teams = TM.getState().teams.map(t => ({ id: t.id, group: t.group, name: t.name, players: t.players, level: t.level }));
   teams[0].level = 'not-a-level';
   check('unknown pair level rejected', !TM.applyTeams(teams).ok);
 
-  // 13. the two pairs sharing a player stay distinct
-  eq('Pair A3 distinct from Pair B3',
-    (TM.getTeam('A3').name === 'Pair A3' && TM.getTeam('B3').name === 'Pair B3'), true);
+  // 13. two Vinay teams remain distinct
+  eq('RK & Vinay distinct from Praveen & Vinay',
+    (TM.getTeam('A3').name === 'RK & Vinay' && TM.getTeam('B3').name === 'Praveen & Vinay'), true);
   teams = TM.getState().teams.map(t => ({ id: t.id, group: t.group, name: t.name, players: t.players, level: t.level }));
-  teams.find(t => t.id === 'A3').level = 'level-1';
-  teams.find(t => t.id === 'B3').level = 'level-3';
+  teams.find(t => t.id === 'A3').level = 'tunga';
+  teams.find(t => t.id === 'B3').level = 'kaveri';
   TM.applyTeams(teams);
-  eq('A3 keeps its own level', TM.getTeam('A3').level, 'level-1');
-  eq('B3 keeps its own level', TM.getTeam('B3').level, 'level-3');
-  eq('both pairs sharing the player still exist',
-    TM.getState().teams.filter(t => t.players.includes('Player X')).length, 2);
+  eq('A3 keeps its own level', TM.getTeam('A3').level, 'tunga');
+  eq('B3 keeps its own level', TM.getTeam('B3').level, 'kaveri');
+  eq('both Vinay pairs still exist',
+    TM.getState().teams.filter(t => t.players.includes('Vinay')).length, 2);
 
-  // extra: organizer can redistribute beyond the defaults (Level 1 4, Level 2 3, Level 3 3)
+  // extra: organizer can redistribute beyond the defaults (Tunga 4, Bhadra 3, Kaveri 3)
   TM.resetTournament();
   teams = TM.getState().teams.map(t => ({ id: t.id, group: t.group, name: t.name, players: t.players, level: t.level }));
-  teams.find(t => t.id === 'A3').level = 'level-1';
-  teams.find(t => t.id === 'B5').level = 'level-3'; // assign the unassigned pair
+  teams.find(t => t.id === 'A3').level = 'tunga';
+  teams.find(t => t.id === 'B5').level = 'kaveri'; // assign the unassigned pair
   r = TM.applyTeams(teams);
   check('redistribution accepted', r.ok, r.msg);
   counts = TM.levelCounts();
-  eq('Level 1 4 after redistribution', counts['level-1'], 4);
-  eq('Level 3 3 after redistribution', counts['level-3'], 3);
-  eq('Level 2 3 after redistribution', counts['level-2'], 3);
+  eq('Tunga 4 after redistribution', counts.tunga, 4);
+  eq('Kaveri 3 after redistribution', counts.kaveri, 3);
+  eq('Bhadra 3 after redistribution', counts.bhadra, 3);
   eq('nothing unassigned after redistribution', TM.levelSummary().unassigned, 0);
 
   // extra: adding a brand-new level makes it selectable and assignable
   TM.resetTournament();
-  r = TM.applyLevels(TM.levels().map(l => ({ id: l.id, name: l.name, enabled: l.enabled })).concat([{ id: 'level-4', name: 'Level 4', enabled: true }]));
+  r = TM.applyLevels(TM.levels().map(l => ({ id: l.id, name: l.name, enabled: l.enabled })).concat([{ id: 'ganga', name: 'Ganga', enabled: true }]));
   check('new level added', r.ok, r.msg);
-  check('new level is selectable', TM.selectableLevels().some(l => l.id === 'level-4'));
+  check('new level is selectable', TM.selectableLevels().some(l => l.id === 'ganga'));
   teams = TM.getState().teams.map(t => ({ id: t.id, group: t.group, name: t.name, players: t.players, level: t.level }));
-  teams.find(t => t.id === 'A1').level = 'level-4';
+  teams.find(t => t.id === 'A1').level = 'ganga';
   check('pair assigned to new level', TM.applyTeams(teams).ok);
-  eq('new level count = 1', TM.levelCounts()['level-4'], 1);
+  eq('new level count = 1', TM.levelCounts().ganga, 1);
 
   // extra: disabling/removing a level moves its pairs to Unassigned (never blocks)
   TM.resetTournament();
-  const lvl1Teams = TM.getState().teams.filter(t => t.level === 'level-1').map(t => t.id);
-  r = TM.applyLevels(TM.levels().map(l => l.id === 'level-1' ? { id: l.id, name: l.name, enabled: false } : { id: l.id, name: l.name, enabled: l.enabled }));
+  const tungaTeams = TM.getState().teams.filter(t => t.level === 'tunga').map(t => t.id);
+  r = TM.applyLevels(TM.levels().map(l => l.id === 'tunga' ? { id: l.id, name: l.name, enabled: false } : { id: l.id, name: l.name, enabled: l.enabled }));
   check('disable a level', r.ok, r.msg);
-  check('its pairs moved to Unassigned', lvl1Teams.every(id => TM.getTeam(id).level === TM.UNASSIGNED_ID));
-  check('disabled level hidden from dropdown', !TM.selectableLevels().some(l => l.id === 'level-1'));
+  check('its pairs moved to Unassigned', tungaTeams.every(id => TM.getTeam(id).level === TM.UNASSIGNED_ID));
+  check('disabled level hidden from dropdown', !TM.selectableLevels().some(l => l.id === 'tunga'));
   eq('fixtures still intact after level removal', TM.groupMatches().length, 20);
 
   TM.resetTournament();
@@ -976,28 +976,28 @@ const NOON = new Date(2026, 0, 1, 6, 30, 0); // deterministic clock, inside 06:0
     version: 5,
     tournament: { name: 'Legacy', createdAt: '2026-01-01T00:00:00.000Z' },
     teams: [
-      { id: 'A1', group: 'A', name: 'X & Y', players: ['X', 'Y'], level: 'Level 1' },
-      { id: 'A2', group: 'A', name: 'P & Q', players: ['P', 'Q'], level: 'Level 2' },
-      { id: 'B1', group: 'B', name: 'R & S', players: ['R', 'S'], level: 'Level 3' },
-      { id: 'B2', group: 'B', name: 'M & N', players: ['M', 'N'], level: 'Level 3' }
+      { id: 'A1', group: 'A', name: 'X & Y', players: ['X', 'Y'], level: 'Tunga' },
+      { id: 'A2', group: 'A', name: 'P & Q', players: ['P', 'Q'], level: 'Bhadra' },
+      { id: 'B1', group: 'B', name: 'R & S', players: ['R', 'S'], level: 'Kaveri' },
+      { id: 'B2', group: 'B', name: 'M & N', players: ['M', 'N'], level: 'Kaveri' }
     ],
     groups: { A: ['A1', 'A2'], B: ['B1', 'B2'] },
     matches: []
   };
   const mig = TM.migrate(legacy);
-  eq('legacy backup seeds the default levels', mig.settings.levels.map(l => l.name).join(','), 'Level 1,Level 2,Level 3');
-  eq('legacy Level 1 name maps to level-1 id', mig.teams.find(t => t.id === 'A1').level, 'level-1');
-  eq('legacy Level 2 name maps to level-2 id', mig.teams.find(t => t.id === 'A2').level, 'level-2');
-  eq('legacy Level 3 name maps to level-3 id', mig.teams.find(t => t.id === 'B1').level, 'level-3');
+  eq('legacy backup seeds the default levels', mig.settings.levels.map(l => l.name).join(','), 'Tunga,Bhadra,Kaveri');
+  eq('legacy Tunga name maps to tunga id', mig.teams.find(t => t.id === 'A1').level, 'tunga');
+  eq('legacy Bhadra name maps to bhadra id', mig.teams.find(t => t.id === 'A2').level, 'bhadra');
+  eq('legacy Kaveri name maps to kaveri id', mig.teams.find(t => t.id === 'B1').level, 'kaveri');
 
   // importing the legacy document through the real import path works too
   const r = TM.importJSON(JSON.stringify(legacy));
   check('legacy backup imports', r.ok, r.msg);
-  eq('imported Level 3 pair kept its level', TM.getTeam('B2').level, 'level-3');
+  eq('imported Kaveri pair kept its level', TM.getTeam('B2').level, 'kaveri');
 
   // a legacy list of bare level strings is normalized
-  const mig2 = TM.migrate({ teams: [{ id: 'A1', group: 'A', name: 'X & Y', players: ['X', 'Y'], level: 'Level 1' }], matches: [], settings: { levels: ['Level 1', 'Level 2', 'Level 3'] } });
-  eq('string level list normalized to ids', mig2.settings.levels.map(l => l.id).join(','), 'level-1,level-2,level-3');
+  const mig2 = TM.migrate({ teams: [{ id: 'A1', group: 'A', name: 'X & Y', players: ['X', 'Y'], level: 'Tunga' }], matches: [], settings: { levels: ['Tunga', 'Bhadra', 'Kaveri'] } });
+  eq('string level list normalized to ids', mig2.settings.levels.map(l => l.id).join(','), 'tunga,bhadra,kaveri');
 
   // a team whose level no longer exists falls back to Unassigned (never breaks)
   const mig3 = TM.migrate({ teams: [{ id: 'A1', group: 'A', name: 'X & Y', players: ['X', 'Y'], level: 'GhostLevel' }], matches: [] });
@@ -1020,8 +1020,8 @@ const NOON = new Date(2026, 0, 1, 6, 30, 0); // deterministic clock, inside 06:0
   const opts = TM.selectableLevels().map(l => l.name);
   eq('dropdown options come from settings', opts.join(','), TM.levels().map(l => l.name).join(',') + ',Unassigned');
   // and the settings screen count is the same derived count
-  eq('settings count = assignment count', TM.levelCounts()['level-3'],
-    TM.getState().teams.filter(t => t.level === 'level-3').length);
+  eq('settings count = assignment count', TM.levelCounts().kaveri,
+    TM.getState().teams.filter(t => t.level === 'kaveri').length);
 })();
 
 /* ══════════════════════════════════════════════════════════
@@ -1446,16 +1446,16 @@ function assertRoundRobin(label, groupId, n) {
   TM.resetTournament();
   TM.applyTeams(makeTeams({ A: 4, B: 4 }), { regenerate: true });
   // levels derived from assignments, not from group membership
-  TM.updateTeam('A1', { level: 'level-1' });
-  TM.updateTeam('A2', { level: 'level-1' });
-  TM.updateTeam('B1', { level: 'level-2' });
+  TM.updateTeam('A1', { level: 'tunga' });
+  TM.updateTeam('A2', { level: 'tunga' });
+  TM.updateTeam('B1', { level: 'bhadra' });
   const counts = TM.levelCounts();
-  eq('level count level-1 = 2', counts['level-1'], 2);
-  eq('level count level-2 = 1', counts['level-2'], 1);
+  eq('level count tunga = 2', counts.tunga, 2);
+  eq('level count bhadra = 1', counts.bhadra, 1);
   eq('unassigned derived', TM.hasUnassignedTeams(), true);
   // moving a team between groups never changes its level
   TM.assignTeamToGroup('A1', 'B', { regenerate: true });
-  eq('level survives group move', TM.getTeam('A1').level, 'level-1');
+  eq('level survives group move', TM.getTeam('A1').level, 'tunga');
 
   // courts remain independent of pair count
   TM.applyTeams(makeTeams({ A: 3 }), { regenerate: true });
@@ -1546,16 +1546,16 @@ function assertRoundRobin(label, groupId, n) {
   // Build a 9-pair tournament entirely from config — name, pairs, groups,
   // qualification and court count.
   const pairs = [];
-  for (let i = 1; i <= 5; i++) pairs.push({ name: 'Pair A' + i, players: ['a' + i, 'b' + i], level: 'level-1', group: 'A' });
-  for (let i = 1; i <= 4; i++) pairs.push({ name: 'Pair B' + i, players: ['c' + i, 'd' + i], level: 'level-2', group: 'B' });
+  for (let i = 1; i <= 5; i++) pairs.push({ name: 'Pair A' + i, players: ['a' + i, 'b' + i], level: 'tunga', group: 'A' });
+  for (let i = 1; i <= 4; i++) pairs.push({ name: 'Pair B' + i, players: ['c' + i, 'd' + i], level: 'bhadra', group: 'B' });
   const r = TM.createTournament({
-    name: 'Example Badminton Tournament',
+    name: 'Yelahanka Badminton Tournament',
     pairs: pairs,
     qualification: { perGroup: 4 },
     courts: 4
   });
   check('createTournament ok', r.ok, r.msg);
-  eq('createTournament name', TM.getState().tournament.name, 'Example Badminton Tournament');
+  eq('createTournament name', TM.getState().tournament.name, 'Yelahanka Badminton Tournament');
   eq('createTournament 9 pairs', TM.getState().teams.length, 9);
   eq('createTournament distribution', JSON.stringify(TM.groupDistribution()), JSON.stringify({ A: 5, B: 4 }));
   eq('createTournament group matches', TM.totalGroupMatchCount(), 16);
@@ -1563,7 +1563,7 @@ function assertRoundRobin(label, groupId, n) {
   eq('createTournament courts', TM.getState().courts.length, 4);
   check('createTournament ids derived from group', !!TM.getTeam('A1') && !!TM.getTeam('B4'));
   eq('createTournament players preserved', TM.getTeam('A1').players.join('&'), 'a1&b1');
-  eq('createTournament level preserved', TM.getTeam('A1').level, 'level-1');
+  eq('createTournament level preserved', TM.getTeam('A1').level, 'tunga');
   eq('createTournament no fake teams', TM.getState().teams.filter(t => !t.name).length, 0);
 
   // A qualifier count that does not fit the largest group is rejected.
@@ -1845,7 +1845,7 @@ function assertRoundRobin(label, groupId, n) {
   check('rename ok with results present', rename.ok, rename.msg);
   eq('rename did not regenerate', rename.regenerated, false);
   eq('rename preserved results', TM.progress().groupDone, doneBefore);
-  const lv = TM.updateTeam('A1', { level: 'level-1' });
+  const lv = TM.updateTeam('A1', { level: 'tunga' });
   check('level change ok with results', lv.ok, lv.msg);
   eq('level change did not regenerate', lv.regenerated, false);
   eq('level change preserved results', TM.progress().groupDone, doneBefore);
@@ -2162,9 +2162,9 @@ function assertRoundRobin(label, groupId, n) {
 (function () {
   TM.resetTournament();
   const counts = TM.levelCounts();
-  eq('default Level 1 = 3', counts['level-1'], 3);
-  eq('default Level 2 = 3', counts['level-2'], 3);
-  eq('default Level 3 = 3', counts['level-3'], 3);
+  eq('default Tunga = 3', counts.tunga, 3);
+  eq('default Bhadra = 3', counts.bhadra, 3);
+  eq('default Kaveri = 3', counts.kaveri, 3);
   eq('default Unassigned = 1', counts[TM.UNASSIGNED_ID], 1);
   eq('default total = 10', TM.levelSummary().total, 10);
   eq('default assigned = 9', TM.levelSummary().assigned, 9);
@@ -2172,26 +2172,26 @@ function assertRoundRobin(label, groupId, n) {
 
   const byName = {};
   TM.getState().teams.forEach(t => { byName[t.name] = TM.resolveLevel(t.level).id; });
-  eq('Pair A3 → level-3', byName['Pair A3'], 'level-3');
-  eq('Pair A5 → level-3', byName['Pair A5'], 'level-3');
-  eq('Pair B4 → level-3', byName['Pair B4'], 'level-3');
-  eq('Pair B5 → unassigned', byName['Pair B5'], 'unassigned');
+  eq('RK & Vinay → kaveri', byName['RK & Vinay'], 'kaveri');
+  eq('Nihar & Rajeev → kaveri', byName['Nihar & Rajeev'], 'kaveri');
+  eq('Prabhakar & Phani → kaveri', byName['Prabhakar & Phani'], 'kaveri');
+  eq('Anil & TBD → unassigned', byName['Anil & TBD'], 'unassigned');
 })();
 
 /* 54b. resolveLevel handles every canonical and legacy representation */
 (function () {
   TM.resetTournament();
-  eq('exact id level-3 → level-3', TM.resolveLevel('level-3').id, 'level-3');
-  eq('display name Level 3 → level-3', TM.resolveLevel('Level 3').id, 'level-3');
-  eq('upper LEVEL 3 → level-3', TM.resolveLevel('LEVEL 3').id, 'level-3');
-  eq('mixed lEvEl 3 → level-3', TM.resolveLevel('lEvEl 3').id, 'level-3');
-  eq('padded " Level 3 " → level-3', TM.resolveLevel('  Level 3 ').id, 'level-3');
-  eq('slug Level 3- → level-3', TM.resolveLevel('Level 3-').id, 'level-3');
-  eq('legacy id Level 3 → level-3', TM.resolveLevel('Level 3').id, 'level-3');
-  eq('legacy name Level 3 → level-3', TM.resolveLevel('Level 3').id, 'level-3');
-  eq('id Level 1 → level-1', TM.resolveLevel('Level 1').id, 'level-1');
-  eq('id level-2 → level-2', TM.resolveLevel('level-2').id, 'level-2');
-  eq('name Level 2 → level-2', TM.resolveLevel('Level 2').id, 'level-2');
+  eq('exact id kaveri → kaveri', TM.resolveLevel('kaveri').id, 'kaveri');
+  eq('display name Kaveri → kaveri', TM.resolveLevel('Kaveri').id, 'kaveri');
+  eq('upper KAVERI → kaveri', TM.resolveLevel('KAVERI').id, 'kaveri');
+  eq('mixed kAvErI → kaveri', TM.resolveLevel('kAvErI').id, 'kaveri');
+  eq('padded " Kaveri " → kaveri', TM.resolveLevel('  Kaveri ').id, 'kaveri');
+  eq('slug Kaveri- → kaveri', TM.resolveLevel('Kaveri-').id, 'kaveri');
+  eq('legacy id Kaveri → kaveri', TM.resolveLevel('Kaveri').id, 'kaveri');
+  eq('legacy name Kaveri → kaveri', TM.resolveLevel('Kaveri').id, 'kaveri');
+  eq('id Tunga → tunga', TM.resolveLevel('Tunga').id, 'tunga');
+  eq('id bhadra → bhadra', TM.resolveLevel('bhadra').id, 'bhadra');
+  eq('name Bhadra → bhadra', TM.resolveLevel('Bhadra').id, 'bhadra');
   eq('Unassigned → unassigned', TM.resolveLevel('Unassigned').id, 'unassigned');
   eq('UNASSIGNED → unassigned', TM.resolveLevel('UNASSIGNED').id, 'unassigned');
   eq('unknown → unassigned', TM.resolveLevel('GhostLevel').id, 'unassigned');
@@ -2201,66 +2201,66 @@ function assertRoundRobin(label, groupId, n) {
   check('unknown never throws', true);
 
   // levelById / levelForTeam / levelName agree with the resolver
-  eq('levelById Level 3 finds level-3', TM.levelById('Level 3').id, 'level-3');
-  eq('levelById level-3 finds level-3', TM.levelById('level-3').id, 'level-3');
+  eq('levelById Kaveri finds kaveri', TM.levelById('Kaveri').id, 'kaveri');
+  eq('levelById kaveri finds kaveri', TM.levelById('kaveri').id, 'kaveri');
   eq('levelById unknown → null', TM.levelById('Ghost'), null);
-  eq('levelForTeam Level 3 → level-3', TM.levelForTeam({ level: 'Level 3' }).id, 'level-3');
+  eq('levelForTeam Kaveri → kaveri', TM.levelForTeam({ level: 'Kaveri' }).id, 'kaveri');
   eq('levelForTeam unknown → unassigned', TM.levelForTeam({ level: 'Ghost' }).id, 'unassigned');
-  eq('levelName Level 3 → Level 3', TM.levelName('Level 3'), 'Level 3');
+  eq('levelName Kaveri → Kaveri', TM.levelName('Kaveri'), 'Kaveri');
   eq('levelName unknown → Unassigned', TM.levelName('Ghost'), 'Unassigned');
 
   // a case/name variant still counts as assigned
   const teams = TM.getState().teams.map(t => ({ id: t.id, group: t.group, name: t.name, players: t.players, level: t.level }));
-  teams.find(t => t.id === 'A3').level = 'LEVEL 3';
-  teams.find(t => t.id === 'A5').level = 'Level 3';
-  teams.find(t => t.id === 'B4').level = 'level-3';
+  teams.find(t => t.id === 'A3').level = 'KAVERI';
+  teams.find(t => t.id === 'A5').level = 'Kaveri';
+  teams.find(t => t.id === 'B4').level = 'kaveri';
   const r = TM.applyTeams(teams);
   check('legacy-case level change accepted', r.ok, r.msg);
   const c = TM.levelCounts();
-  eq('all three Level 3 pairs counted', c['level-3'], 3);
+  eq('all three Kaveri pairs counted', c.kaveri, 3);
   eq('Unassigned still 1', c[TM.UNASSIGNED_ID], 1);
-  eq('canonical id stored after applyTeams', TM.getTeam('A3').level, 'level-3');
-  eq('canonical id stored for name form', TM.getTeam('A5').level, 'level-3');
+  eq('canonical id stored after applyTeams', TM.getTeam('A3').level, 'kaveri');
+  eq('canonical id stored for name form', TM.getTeam('A5').level, 'kaveri');
 })();
 
 /* 54c. migration preserves valid assignments and is idempotent */
 (function () {
-  // A stored document whose Level 3 pairs use a legacy display name, with a mixed
-  // legacy level list (bare-ish ids in caps plus a name). Level 1/Level 2 valid; B5
+  // A stored document whose Kaveri pairs use a legacy display name, with a mixed
+  // legacy level list (bare-ish ids in caps plus a name). Tunga/Bhadra valid; Anil
   // genuinely unassigned; one truly unknown pair must stay unassigned.
   const legacy = {
     version: 6,
     teams: [
-      { id: 'A1', group: 'A', name: 'Pair A1', players: ['A1a', 'A1b'], level: 'Level 1' },
-      { id: 'A2', group: 'A', name: 'Pair A2', players: ['A2a', 'A2b'], level: 'level-2' },
-      { id: 'A3', group: 'A', name: 'Pair A3', players: ['A3a', 'Player X'], level: 'Level 3' },
-      { id: 'A4', group: 'A', name: 'Pair A4', players: ['A4a', 'A4b'], level: 'Level 1' },
-      { id: 'A5', group: 'A', name: 'Pair A5', players: ['A5a', 'A5b'], level: 'LEVEL 3' },
-      { id: 'B1', group: 'B', name: 'Pair B1', players: ['B1a', 'B1b'], level: 'level-1' },
-      { id: 'B2', group: 'B', name: 'Pair B2', players: ['B2a', 'B2b'], level: 'Level 2' },
-      { id: 'B3', group: 'B', name: 'Pair B3', players: ['B3a', 'Player X'], level: 'level-2' },
-      { id: 'B4', group: 'B', name: 'Pair B4', players: ['B4a', 'B4b'], level: 'level-3' },
-      { id: 'B5', group: 'B', name: 'Pair B5', players: ['B5a', 'B5b'], level: 'Unassigned' },
+      { id: 'A1', group: 'A', name: 'Naveen & Chandan', players: ['Naveen', 'Chandan'], level: 'Tunga' },
+      { id: 'A2', group: 'A', name: 'Harshit & Yakshit', players: ['Harshit', 'Yakshit'], level: 'bhadra' },
+      { id: 'A3', group: 'A', name: 'RK & Vinay', players: ['RK', 'Vinay'], level: 'Kaveri' },
+      { id: 'A4', group: 'A', name: 'Manjanna & Madhu', players: ['Manjanna', 'Madhu'], level: 'Tunga' },
+      { id: 'A5', group: 'A', name: 'Nihar & Rajeev', players: ['Nihar', 'Rajeev'], level: 'KAVERI' },
+      { id: 'B1', group: 'B', name: 'Praveen KG & Gagan', players: ['Praveen KG', 'Gagan'], level: 'tunga' },
+      { id: 'B2', group: 'B', name: 'Gangadhar & Manju', players: ['Gangadhar', 'Manju'], level: 'Bhadra' },
+      { id: 'B3', group: 'B', name: 'Praveen & Vinay', players: ['Praveen', 'Vinay'], level: 'bhadra' },
+      { id: 'B4', group: 'B', name: 'Prabhakar & Phani', players: ['Prabhakar', 'Phani'], level: 'kaveri' },
+      { id: 'B5', group: 'B', name: 'Anil & TBD', players: ['Anil', 'TBD'], level: 'Unassigned' },
       { id: 'C1', group: 'C', name: 'Ghost & Pair', players: ['Ghost', 'Pair'], level: 'MysteryLevel' }
     ],
     groups: { A: ['A1', 'A2', 'A3', 'A4', 'A5'], B: ['B1', 'B2', 'B3', 'B4', 'B5'], C: ['C1'] },
     matches: [],
-    settings: { levels: ['Level 1', 'Level 2', 'Level 3'] }
+    settings: { levels: ['Tunga', 'Bhadra', 'Kaveri'] }
   };
 
   const m1 = TM.migrate(JSON.parse(JSON.stringify(legacy)));
   const lv = {}; m1.teams.forEach(t => { lv[t.id] = t.level; });
-  eq('migration keeps Pair A3 → level-3', lv.A3, 'level-3');
-  eq('migration keeps Pair A5 → level-3', lv.A5, 'level-3');
-  eq('migration keeps Pair B4 → level-3', lv.B4, 'level-3');
-  eq('migration keeps Level 1', lv.A1, 'level-1');
-  eq('migration keeps Level 2', lv.A2, 'level-2');
+  eq('migration keeps RK & Vinay → kaveri', lv.A3, 'kaveri');
+  eq('migration keeps Nihar & Rajeev → kaveri', lv.A5, 'kaveri');
+  eq('migration keeps Prabhakar & Phani → kaveri', lv.B4, 'kaveri');
+  eq('migration keeps Tunga', lv.A1, 'tunga');
+  eq('migration keeps Bhadra', lv.A2, 'bhadra');
   eq('migration keeps genuinely unassigned', lv.B5, 'unassigned');
   eq('migration sends unknown to unassigned', lv.C1, 'unassigned');
   const mc = {}; m1.teams.forEach(t => { mc[t.level] = (mc[t.level] || 0) + 1; });
-  eq('migrated Level 3 count = 3', mc['level-3'], 3);
-  eq('migrated Level 1 count = 3', mc['level-1'], 3);
-  eq('migrated Level 2 count = 3', mc['level-2'], 3);
+  eq('migrated Kaveri count = 3', mc.kaveri, 3);
+  eq('migrated Tunga count = 3', mc.tunga, 3);
+  eq('migrated Bhadra count = 3', mc.bhadra, 3);
   eq('migrated unassigned count = 2', mc.unassigned, 2);
 
   // idempotence: migrating the migrated document changes nothing
@@ -2272,8 +2272,8 @@ function assertRoundRobin(label, groupId, n) {
   // import path preserves the same canonical assignments
   const imp = TM.importJSON(JSON.stringify(legacy));
   check('legacy import ok', imp.ok, imp.msg);
-  eq('import keeps Level 3 pair', TM.getTeam('A3').level, 'level-3');
-  eq('import keeps the other Level 3 pair', TM.getTeam('B4').level, 'level-3');
+  eq('import keeps Kaveri pair', TM.getTeam('A3').level, 'kaveri');
+  eq('import keeps the other Kaveri pair', TM.getTeam('B4').level, 'kaveri');
 })();
 
 /* 54d. level change safety: results, fixtures, groups, knockout untouched */
@@ -2291,9 +2291,9 @@ function assertRoundRobin(label, groupId, n) {
   const standingsBefore = JSON.stringify(TM.computeStandings('A').map(r => [r.team.id, r.played, r.won, r.lost, r.pts, r.pf, r.pa, r.diff]));
   const standingsOf = () => JSON.stringify(TM.computeStandings('A').map(r => [r.team.id, r.played, r.won, r.lost, r.pts, r.pf, r.pa, r.diff]));
 
-  const r = TM.setTeamLevel('A1', 'level-3');
+  const r = TM.setTeamLevel('A1', 'kaveri');
   check('setTeamLevel accepted after results', r.ok, r.msg);
-  eq('A1 now level-3', TM.getTeam('A1').level, 'level-3');
+  eq('A1 now kaveri', TM.getTeam('A1').level, 'kaveri');
 
   const st1 = TM.getState();
   eq('results unchanged after level change', JSON.stringify(st1.matches.filter(m => m.status === 'completed').map(m => [m.id, m.teamA, m.teamB, m.scoreA, m.scoreB, m.winner])), resultsBefore);
@@ -2303,9 +2303,9 @@ function assertRoundRobin(label, groupId, n) {
   eq('standings unchanged after level change', standingsOf(), standingsBefore);
 
   // setting a legacy name/case through the same API also stays canonical + safe
-  const r2 = TM.setTeamLevel('A2', 'LEVEL 2');
+  const r2 = TM.setTeamLevel('A2', 'BHADRA');
   check('setTeamLevel accepts legacy case', r2.ok, r2.msg);
-  eq('A2 canonical level-2', TM.getTeam('A2').level, 'level-2');
+  eq('A2 canonical bhadra', TM.getTeam('A2').level, 'bhadra');
   eq('knockout still unchanged', JSON.stringify(TM.getState().matches.filter(m => m.stage !== 'group').map(m => [m.id, m.stage, m.round, m.teamA, m.teamB, m.status])), koBefore);
 
   // an unknown level through setTeamLevel falls back to Unassigned, never throws
@@ -2325,18 +2325,18 @@ function assertRoundRobin(label, groupId, n) {
   eq('unassigned count matches teams', counts[TM.UNASSIGNED_ID], TM.getState().teams.filter(t => TM.resolveLevel(t.level).id === 'unassigned').length);
 
   // move one pair and re-check
-  TM.setTeamLevel('A1', 'level-3');
+  TM.setTeamLevel('A1', 'kaveri');
   const c2 = TM.levelCounts();
-  eq('counts update after move (level-1)', c2['level-1'], TM.getState().teams.filter(t => TM.resolveLevel(t.level).id === 'level-1').length);
-  eq('counts update after move (level-3)', c2['level-3'], TM.getState().teams.filter(t => TM.resolveLevel(t.level).id === 'level-3').length);
-  eq('total conserved', c2['level-1'] + c2['level-2'] + c2['level-3'] + c2[TM.UNASSIGNED_ID], 10);
+  eq('counts update after move (tunga)', c2.tunga, TM.getState().teams.filter(t => TM.resolveLevel(t.level).id === 'tunga').length);
+  eq('counts update after move (kaveri)', c2.kaveri, TM.getState().teams.filter(t => TM.resolveLevel(t.level).id === 'kaveri').length);
+  eq('total conserved', c2.tunga + c2.bhadra + c2.kaveri + c2[TM.UNASSIGNED_ID], 10);
 })();
 
 /* 54f. persistence: reload, export/import and migration keep canonical levels */
 (function () {
   TM.resetTournament();
-  TM.setTeamLevel('A1', 'Level 3');   // legacy name form through the canonical API
-  TM.setTeamLevel('B5', 'level-1');
+  TM.setTeamLevel('A1', 'Kaveri');   // legacy name form through the canonical API
+  TM.setTeamLevel('B5', 'tunga');
   TM.save();
   const before = JSON.stringify(TM.getState().teams.map(t => t.id + ':' + t.level));
 
@@ -2356,16 +2356,16 @@ function assertRoundRobin(label, groupId, n) {
 /* 54g. repair: fixes legacy, leaves unknown unassigned, touches nothing else */
 (function () {
   TM.resetTournament();
-  // Simulate an already-broken live state: three Level 3 pairs stored by display name,
+  // Simulate an already-broken live state: three Kaveri pairs stored by display name,
   // one pair stored in caps, plus results and a bracket already recorded.
   TM.groupMatches().forEach(m => TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 12, m.teamA < m.teamB ? 12 : 21));
   TM.ensureKnockout();
 
   // Force legacy representations directly on the stored teams (bypassing applyTeams).
   const st = TM.getState();
-  st.teams.find(t => t.id === 'A3').level = 'Level 3';
-  st.teams.find(t => t.id === 'A5').level = 'LEVEL 3';
-  st.teams.find(t => t.id === 'B4').level = 'level-3';
+  st.teams.find(t => t.id === 'A3').level = 'Kaveri';
+  st.teams.find(t => t.id === 'A5').level = 'KAVERI';
+  st.teams.find(t => t.id === 'B4').level = 'kaveri';
   st.teams.find(t => t.id === 'A1').level = 'MysteryLevel';
   st.teams.find(t => t.id === 'B5').level = 'Unassigned';
 
@@ -2374,14 +2374,14 @@ function assertRoundRobin(label, groupId, n) {
   const fixturesBefore = JSON.stringify(st.matches.filter(m => m.stage === 'group').map(m => [m.id, m.teamA, m.teamB]));
 
   // Before repair the counts already route the legacy names correctly via the resolver.
-  eq('pre-repair Level 3 count = 3 (resolver)', TM.levelCounts()['level-3'], 3);
+  eq('pre-repair Kaveri count = 3 (resolver)', TM.levelCounts().kaveri, 3);
 
   const r = TM.repairTeamLevels();
   check('repair ok', r.ok);
   eq('repair reports 4 normalizations', r.repaired, 4); // A3, A5, B4 canonicalized + A1 unknown→unassigned
-  eq('A3 canonicalized', TM.getTeam('A3').level, 'level-3');
-  eq('A5 canonicalized', TM.getTeam('A5').level, 'level-3');
-  eq('B4 canonicalized', TM.getTeam('B4').level, 'level-3');
+  eq('A3 canonicalized', TM.getTeam('A3').level, 'kaveri');
+  eq('A5 canonicalized', TM.getTeam('A5').level, 'kaveri');
+  eq('B4 canonicalized', TM.getTeam('B4').level, 'kaveri');
   eq('A1 unknown left unassigned', TM.getTeam('A1').level, 'unassigned');
 
   const st2 = TM.getState();
@@ -2392,7 +2392,7 @@ function assertRoundRobin(label, groupId, n) {
   // idempotent: a second repair reports nothing to do
   const r2 = TM.repairTeamLevels();
   eq('second repair reports 0', r2.repaired, 0);
-  eq('repair is idempotent', TM.getTeam('A3').level, 'level-3');
+  eq('repair is idempotent', TM.getTeam('A3').level, 'kaveri');
 })();
 
 /* 54g. existing localStorage is self-healed on load (no manual clear needed) */
@@ -2402,39 +2402,39 @@ function assertRoundRobin(label, groupId, n) {
   const legacyDoc = {
     version: 6,
     teams: [
-      { id: 'A1', group: 'A', name: 'Pair A1', players: ['A1a', 'A1b'], level: 'Level 1' },
-      { id: 'A2', group: 'A', name: 'Pair A2', players: ['A2a', 'A2b'], level: 'Level 2' },
-      { id: 'A3', group: 'A', name: 'Pair A3', players: ['A3a', 'Player X'], level: 'Level 3' },
-      { id: 'A4', group: 'A', name: 'Pair A4', players: ['A4a', 'A4b'], level: 'Level 1' },
-      { id: 'A5', group: 'A', name: 'Pair A5', players: ['A5a', 'A5b'], level: 'LEVEL 3' },
-      { id: 'B1', group: 'B', name: 'Pair B1', players: ['B1a', 'B1b'], level: 'level-1' },
-      { id: 'B2', group: 'B', name: 'Pair B2', players: ['B2a', 'B2b'], level: 'Level 2' },
-      { id: 'B3', group: 'B', name: 'Pair B3', players: ['B3a', 'Player X'], level: 'level-2' },
-      { id: 'B4', group: 'B', name: 'Pair B4', players: ['B4a', 'B4b'], level: 'Level 3' },
-      { id: 'B5', group: 'B', name: 'Pair B5', players: ['B5a', 'B5b'], level: 'Unassigned' }
+      { id: 'A1', group: 'A', name: 'Naveen & Chandan', players: ['Naveen', 'Chandan'], level: 'Tunga' },
+      { id: 'A2', group: 'A', name: 'Harshit & Yakshit', players: ['Harshit', 'Yakshit'], level: 'Bhadra' },
+      { id: 'A3', group: 'A', name: 'RK & Vinay', players: ['RK', 'Vinay'], level: 'Kaveri' },
+      { id: 'A4', group: 'A', name: 'Manjanna & Madhu', players: ['Manjanna', 'Madhu'], level: 'Tunga' },
+      { id: 'A5', group: 'A', name: 'Nihar & Rajeev', players: ['Nihar', 'Rajeev'], level: 'KAVERI' },
+      { id: 'B1', group: 'B', name: 'Praveen KG & Gagan', players: ['Praveen KG', 'Gagan'], level: 'tunga' },
+      { id: 'B2', group: 'B', name: 'Gangadhar & Manju', players: ['Gangadhar', 'Manju'], level: 'Bhadra' },
+      { id: 'B3', group: 'B', name: 'Praveen & Vinay', players: ['Praveen', 'Vinay'], level: 'bhadra' },
+      { id: 'B4', group: 'B', name: 'Prabhakar & Phani', players: ['Prabhakar', 'Phani'], level: 'Kaveri' },
+      { id: 'B5', group: 'B', name: 'Anil & TBD', players: ['Anil', 'TBD'], level: 'Unassigned' }
     ],
     groups: { A: ['A1', 'A2', 'A3', 'A4', 'A5'], B: ['B1', 'B2', 'B3', 'B4', 'B5'] },
     matches: [],
-    settings: { levels: [{ id: 'level-1', name: 'Level 1' }, { id: 'level-2', name: 'Level 2' }, { id: 'level-3', name: 'Level 3' }] }
+    settings: { levels: [{ id: 'tunga', name: 'Tunga' }, { id: 'bhadra', name: 'Bhadra' }, { id: 'kaveri', name: 'Kaveri' }] }
   };
   store['shuttledraw_v4'] = JSON.stringify(legacyDoc);
   TM.load();
   const c = TM.levelCounts();
-  eq('live-load Level 1 = 3', c['level-1'], 3);
-  eq('live-load Level 2 = 3', c['level-2'], 3);
-  eq('live-load Level 3 = 3', c['level-3'], 3);
+  eq('live-load Tunga = 3', c.tunga, 3);
+  eq('live-load Bhadra = 3', c.bhadra, 3);
+  eq('live-load Kaveri = 3', c.kaveri, 3);
   eq('live-load Unassigned = 1', c[TM.UNASSIGNED_ID], 1);
   // the healed document was written back to storage
   const healed = JSON.parse(store['shuttledraw_v4']);
-  eq('storage healed: A3 level', healed.teams.find(t => t.id === 'A3').level, 'level-3');
-  eq('storage healed: A5 level', healed.teams.find(t => t.id === 'A5').level, 'level-3');
-  eq('storage healed: B4 level', healed.teams.find(t => t.id === 'B4').level, 'level-3');
-  eq('storage healed: A1 level', healed.teams.find(t => t.id === 'A1').level, 'level-1');
+  eq('storage healed: A3 level', healed.teams.find(t => t.id === 'A3').level, 'kaveri');
+  eq('storage healed: A5 level', healed.teams.find(t => t.id === 'A5').level, 'kaveri');
+  eq('storage healed: B4 level', healed.teams.find(t => t.id === 'B4').level, 'kaveri');
+  eq('storage healed: A1 level', healed.teams.find(t => t.id === 'A1').level, 'tunga');
   eq('storage healed: B5 level', healed.teams.find(t => t.id === 'B5').level, 'unassigned');
   // a second load is stable and reports nothing further to repair
   TM.load();
   const c2 = TM.levelCounts();
-  eq('live-load reload stable (level-3)', c2['level-3'], 3);
+  eq('live-load reload stable (kaveri)', c2.kaveri, 3);
   eq('live-load reload stable (unassigned)', c2[TM.UNASSIGNED_ID], 1);
   eq('live-load repair reports nothing', TM.repairTeamLevels().repaired, 0);
   store['shuttledraw_v4'] = undefined;
@@ -2448,7 +2448,7 @@ function assertRoundRobin(label, groupId, n) {
   // The Settings Team Level Configuration must show every level, the actual pair
   // names, a per-pair assignment control and the assigned/unassigned summary.
   const src = html;
-  check('Settings renders Level 1/Level 2/Level 3/Unassigned blocks', /levelAssignmentBlocks/.test(src));
+  check('Settings renders Tunga/Bhadra/Kaveri/Unassigned blocks', /levelAssignmentBlocks/.test(src));
   check('Settings has assigned/unassigned summary line', /assigned · .*unassigned/.test(src) || /levelSummaryLine/.test(src));
   check('Settings has a level assignment control', /levelSelect/.test(src));
   check('Settings calls the repair action', /App\.repairLevels\(\)/.test(src));
@@ -2508,23 +2508,23 @@ function assertRoundRobin(label, groupId, n) {
   const ld = TM.levelDistribution();
   const byId = {};
   ld.rows.forEach(r => { byId[r.id] = r; });
-  eq('leveldist Level 1 = 3', byId['level-1'].count, 3);
-  eq('leveldist Level 2 = 3', byId['level-2'].count, 3);
-  eq('leveldist Level 3 = 3', byId['level-3'].count, 3);
+  eq('leveldist Tunga = 3', byId.tunga.count, 3);
+  eq('leveldist Bhadra = 3', byId.bhadra.count, 3);
+  eq('leveldist Kaveri = 3', byId.kaveri.count, 3);
   eq('leveldist Unassigned = 1', byId.unassigned.count, 1);
   eq('leveldist unassigned flagged', byId.unassigned.unassigned, true);
   eq('leveldist total = 10', ld.total, 10);
   eq('leveldist max = 3', ld.max, 3);
   // Bar width is proportional to the max.
-  eq('leveldist Level 1 is full width', Math.round((byId['level-1'].count / ld.max) * 100), 100);
+  eq('leveldist Tunga is full width', Math.round((byId.tunga.count / ld.max) * 100), 100);
   eq('leveldist Unassigned is 1/3 width', Math.round((byId.unassigned.count / ld.max) * 100), 33);
 
   // Reassigning changes the distribution and drops the warning.
-  TM.updateTeam('B5', { level: 'level-3' });
+  TM.updateTeam('B5', { level: 'kaveri' });
   const ld2 = TM.levelDistribution();
   const by2 = {};
   ld2.rows.forEach(r => { by2[r.id] = r; });
-  eq('leveldist Level 3 = 4 after reassign', by2['level-3'].count, 4);
+  eq('leveldist Kaveri = 4 after reassign', by2.kaveri.count, 4);
   eq('leveldist Unassigned = 0 after reassign', by2.unassigned.count, 0);
   eq('leveldist unassigned total = 0', ld2.unassigned, 0);
 })();
@@ -3075,10 +3075,10 @@ function finishGroupStage() {
   const legacy = {
     version: 6,
     teams: [
-      { id: 'A1', group: 'A', name: 'A One', players: ['x', 'y'], level: 'level-1' },
-      { id: 'A2', group: 'A', name: 'A Two', players: ['x', 'y'], level: 'level-1' },
-      { id: 'B1', group: 'B', name: 'B One', players: ['x', 'y'], level: 'level-2' },
-      { id: 'B2', group: 'B', name: 'B Two', players: ['x', 'y'], level: 'level-2' }
+      { id: 'A1', group: 'A', name: 'A One', players: ['x', 'y'], level: 'tunga' },
+      { id: 'A2', group: 'A', name: 'A Two', players: ['x', 'y'], level: 'tunga' },
+      { id: 'B1', group: 'B', name: 'B One', players: ['x', 'y'], level: 'bhadra' },
+      { id: 'B2', group: 'B', name: 'B Two', players: ['x', 'y'], level: 'bhadra' }
     ],
     groups: { A: ['A1', 'A2'], B: ['B1', 'B2'] },
     matches: [
