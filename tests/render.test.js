@@ -236,29 +236,29 @@ check('3-group settings shows 6 qualify', s.indexOf('6 pair') !== -1 || s.indexO
 TM.resetTournament();
 App.nav('settings');
 s = getEl('view').innerHTML;
-['Tunga', 'Bhadra', 'Kaveri', 'Unassigned'].forEach(function (name) {
+['Level 1', 'Level 2', 'Level 3', 'Unassigned'].forEach(function (name) {
   check('settings level shows ' + name, s.indexOf(name) !== -1, 'missing ' + name);
 });
-['Naveen &amp; Chandan', 'RK &amp; Vinay', 'Nihar &amp; Rajeev', 'Prabhakar &amp; Phani', 'Anil &amp; TBD'].forEach(function (nm) {
+['Pair A1', 'Pair A3', 'Pair A5', 'Pair B4', 'Pair B5'].forEach(function (nm) {
   check('settings level lists pair ' + nm, s.indexOf(nm) !== -1, 'missing ' + nm);
 });
-check('settings shows 3 pairs for Kaveri', s.indexOf('Kaveri') !== -1 && s.indexOf('3 pairs') !== -1, 'no 3 pairs');
+check('settings shows 3 pairs for Level 3', s.indexOf('Level 3') !== -1 && s.indexOf('3 pairs') !== -1, 'no 3 pairs');
 check('settings shows 1 pair for Unassigned', s.indexOf('1 pair') !== -1, 'no 1 pair');
 check('settings shows assigned/unassigned summary', s.indexOf('10 pairs · 9 assigned · 1 unassigned') !== -1, 'no summary');
-check('settings warning names the unassigned pair', s.indexOf('unassigned: Anil &amp; TBD') !== -1, 'no named warning');
+check('settings warning names the unassigned pair', s.indexOf('unassigned: Pair B5') !== -1, 'no named warning');
 check('settings shows assignment controls', s.indexOf('level-select') !== -1, 'no selects');
 check('settings shows repair button', s.indexOf('Repair level assignments') !== -1, 'no repair button');
 check('settings has no stored-count table', s.indexOf('Number of Pairs') === -1, 'old table remains');
 
 // Assigning the last unassigned pair updates the summary to all-assigned.
-App.setTeamLevel('B5', 'kaveri');
+App.setTeamLevel('B5', 'level-3');
 App.nav('settings');
 s = getEl('view').innerHTML;
 check('summary becomes all-assigned', s.indexOf('10 pairs · 10 assigned · 0 unassigned') !== -1, 'no all-assigned summary');
 check('no unassigned warning once assigned', s.indexOf('pair is unassigned') === -1, 'warning remains');
-eq('B5 now kaveri in state', TM.getTeam('B5').level, 'kaveri');
-eq('level counts agree with assignments', TM.levelCounts().kaveri,
-  TM.getState().teams.filter(function (t) { return TM.resolveLevel(t.level).id === 'kaveri'; }).length);
+eq('B5 now level-3 in state', TM.getTeam('B5').level, 'level-3');
+eq('level counts agree with assignments', TM.levelCounts()['level-3'],
+  TM.getState().teams.filter(function (t) { return TM.resolveLevel(t.level).id === 'level-3'; }).length);
 
 // Repair is idempotent and non-destructive through the UI.
 TM.resetTournament();
@@ -266,7 +266,7 @@ App.nav('settings');
 const fixturesBefore = TM.groupMatches().map(function (m) { return m.id + ':' + m.teamA + ':' + m.teamB; }).join(',');
 App.repairLevels();
 eq('repair left fixtures intact', TM.groupMatches().map(function (m) { return m.id + ':' + m.teamA + ':' + m.teamB; }).join(','), fixturesBefore);
-eq('repair left default Kaveri count at 3', TM.levelCounts().kaveri, 3);
+eq('repair left default Level 3 count at 3', TM.levelCounts()['level-3'], 3);
 
 // ── Dashboard V2 render structure ──────────────────────────────────────────────
 // Every section must appear on the default dashboard, derived from live state.
@@ -368,7 +368,7 @@ check('exactly three suggested courts', (s.match(/→ Court/g) || []).length, 3)
 
 // Branding, theme toggle and Help must remain in the shell regardless of Dashboard
 // layout changes.
-check('BestShot branding remains', html.indexOf('Best<span>Shot</span>') !== -1 || html.indexOf('Best<span>') !== -1, 'no logo');
+check('Tournament branding remains', html.indexOf('class="logo"') !== -1 && html.indexOf('Tournament') !== -1, 'no logo');
 check('theme toggle remains', html.indexOf('id="theme-toggle"') !== -1 && html.indexOf('toggleTheme()') !== -1, 'no theme toggle');
 check('help remains', html.indexOf('App.about()') !== -1, 'no help control');
 
@@ -646,7 +646,7 @@ check('disabled court excluded from enabled list', TM.enabledCourts().every(func
 // regression in the scheduler still fails loudly elsewhere in this file.
 
 // Branding, theme and Help remain in the shell.
-check('polish: BestShot branding remains', html.indexOf('Best<span>Shot</span>') !== -1, 'no logo');
+check('polish: Tournament branding remains', html.indexOf('class="logo"') !== -1 && html.indexOf('Tournament') !== -1, 'no logo');
 check('polish: theme toggle remains', html.indexOf('id="theme-toggle"') !== -1 && html.indexOf('toggleTheme()') !== -1, 'no theme');
 check('polish: help control remains', html.indexOf('App.about()') !== -1, 'no help');
 

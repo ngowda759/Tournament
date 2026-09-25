@@ -9,8 +9,13 @@ Everything is client-side and stores its state in your browser's `localStorage`.
 
 The organizer can run the whole event from a phone.
 
-The familiar **20-player / 10-pair / 2-group / 3-court** tournament is only the *default
-example* the app starts from. Nothing in the tournament engine assumes it.
+The familiar **10-pair / 2-group / 3-court** tournament is only the *default example* the app
+starts from. Nothing in the tournament engine assumes it.
+
+> **Naming in this document.** The app ships with generic placeholder data: pairs are
+> `Pair A1` … `Pair A5` / `Pair B1` … `Pair B5`, players are `A1a`/`A1b` …, and the three default
+> levels are `Level 1`, `Level 2` and `Level 3`. Replace them with your own names on the Teams
+> screen — nothing below depends on the placeholder values.
 
 ---
 
@@ -24,13 +29,16 @@ example* the app starts from. Nothing in the tournament engine assumes it.
 - [Court configuration](#court-configuration)
 - [Team level configuration](#team-level-configuration)
 - [Knockout structure](#knockout-structure)
+- [Knockout scoring configuration](#knockout-scoring-configuration)
 - [Multi-group knockout](#multi-group-knockout)
 - [Qualification](#qualification)
 - [Match numbering](#match-numbering)
 - [Regenerating fixtures](#regenerating-fixtures)
 - [Screens](#screens)
+- [Dashboard analytics](#dashboard-analytics)
 - [Data persistence](#data-persistence)
 - [Backup and restore](#backup-and-restore)
+- [Theming](#theming)
 - [How to run](#how-to-run)
 - [How to reset](#how-to-reset)
 - [Mobile usage](#mobile-usage)
@@ -54,6 +62,7 @@ loaded; change any of it and the fixtures and bracket are regenerated accordingl
 | Pairs per group | 5 / 5 | derived from actual assignments |
 | Qualifiers | top 4 per group | configurable per group |
 | Courts | 3 (fully editable) | 1 – 8 |
+| Levels | 3 (Level 1 / Level 2 / Level 3) | add, rename, disable or remove freely |
 
 The default example uses this pair list (edit or replace it freely):
 
@@ -61,39 +70,39 @@ The default example uses this pair list (edit or replace it freely):
 
 | # | Pair | Level |
 |---|------|-------|
-| A1 | Naveen & Chandan | Tunga |
-| A2 | Harshit & Yakshit | Bhadra |
-| A3 | RK & Vinay | Kaveri |
-| A4 | Manjanna & Madhu | Tunga |
-| A5 | Nihar & Rajeev | Kaveri |
+| A1 | Pair A1 | Level 1 |
+| A2 | Pair A2 | Level 2 |
+| A3 | Pair A3 | Level 3 |
+| A4 | Pair A4 | Level 1 |
+| A5 | Pair A5 | Level 3 |
 
 ### Group B
 
 | # | Pair | Level |
 |---|------|-------|
-| B1 | Praveen KG & Gagan | Tunga |
-| B2 | Gangadhar & Manju | Bhadra |
-| B3 | Praveen & Vinay | Bhadra |
-| B4 | Prabhakar & Phani | Kaveri |
-| B5 | Anil & TBD | Unassigned |
+| B1 | Pair B1 | Level 1 |
+| B2 | Pair B2 | Level 2 |
+| B3 | Pair B3 | Level 2 |
+| B4 | Pair B4 | Level 3 |
+| B5 | Pair B5 | Unassigned |
 
-The default distribution is therefore Tunga = 3, Bhadra = 3, Kaveri = 3, Unassigned = 1.
+The default distribution is therefore Level 1 = 3, Level 2 = 3, Level 3 = 3, Unassigned = 1.
 
-**Two different players are named Vinay** — `RK & Vinay` (A3) and `Praveen & Vinay` (B3).
-They are separate pairs and are never treated as the same player.
+**A player can appear in more than one pair.** `Pair A3` and `Pair B3` share the placeholder
+player `Player X`. They are separate pairs and are never treated as the same team.
 
-**Anil's partner is intentionally `TBD`** and remains editable on the **Teams** screen at any time.
-Pair names, individual player names, and pair levels can all be edited after setup.
+**`Pair B5` is deliberately left `Unassigned`** and remains editable on the **Teams** screen at
+any time. Pair names, individual player names, and pair levels can all be edited after setup.
 
-**Levels are configurable, not hard-coded.** `Tunga`, `Bhadra` and `Kaveri` are only the *default*
-levels. The organizer can add, rename, disable or remove levels in
+**Levels are configurable, not hard-coded.** `Level 1`, `Level 2` and `Level 3` are only the
+*default* levels. The organizer can add, rename, disable or remove levels in
 **Settings → Team Level Configuration**, and the distribution can be changed freely. The level
 dropdown on the Teams screen is populated from this configuration, so there is a single source of
 truth.
 
-**Level and Group are independent.** A pair has a `level` (Tunga / Bhadra / Kaveri / a configured
-level / Unassigned) and a `group` (A or B, or any configured group). Changing a pair's level never
-moves it between groups and never regenerates fixtures.
+**Level and Group are independent.** A pair has a `level` (Level 1 / Level 2 / Level 3 / a
+configured level / Unassigned) and a `group` (A or B, or any configured group). Changing a pair's
+level never moves it between groups and never regenerates fixtures.
 
 **Unassigned pairs never block the tournament.** A pair without a level is valid and is reported
 with a warning so the organizer can assign it later.
@@ -111,6 +120,7 @@ See [Team level configuration](#team-level-configuration) for the full behaviour
 | **Tournament Configuration** | Tournament name, and a read-out of the number of pairs, groups and group matches calculated from your data |
 | **Groups** | Add an (empty) group, rename a group's label, remove an empty group; each row shows its pair count and group-match count, derived from actual assignments |
 | **Qualification** | How many pairs qualify from each group, with a per-group breakdown |
+| **Knockout Scoring** | Match format (Best of 3 or Straight set) and points target for every knockout round in play |
 | **Regenerate Fixtures** | Current vs new pair/group/fixture/result counts, and an explicit regenerate action |
 | **Team Level Configuration** | Add, rename, disable or remove levels; pair counts are derived |
 | **Court configuration** | Court count, names, availability windows, enable/disable |
@@ -172,6 +182,9 @@ Each group match is a **single game to 21 points**.
 
 The winner is calculated automatically from the entered scores — you never pick a winner manually.
 
+A game is won by **2 clear points** at 21 (or more), with a **30-point cap** — 21–20 plays on,
+and 30–29 wins.
+
 ### Tie-breaks
 
 Standings are ordered by:
@@ -179,6 +192,7 @@ Standings are ordered by:
 1. Tournament points
 2. Point difference (PF − PA)
 3. Points scored (PF)
+4. Team name (stable alphabetical fallback)
 
 Standings columns: **# · Team · P · W · L · Pts · PF · PA · Diff**.
 
@@ -251,7 +265,7 @@ Every time the Courts view is rendered, the scheduler:
    same team twice.
 
 Because the ordering is deterministic, the same state always produces the same suggestion,
-and the UI shows the reason each match was chosen (e.g. *“Naveen & Chandan waited 3 · …”*).
+and the UI shows the reason each match was chosen (e.g. *“Pair A1 waited 3 · Pair A2 waited 0”*).
 
 Hard guarantees enforced by `startMatch`:
 
@@ -268,7 +282,7 @@ chosen when one exists — and if one does not, the UI says so explicitly.
 Availability windows are **half-open**: a court configured `06:00 → 08:00` accepts new matches
 from 06:00 up to (but not including) 08:00. They gate **starting a new match only** — a match
 already in progress always plays to a finish, even past its court's closing time. Starting
-matches after a window closes requires the **“Allow starting matches outside court hours”**
+matches after a window closes requires the **“Allow matches outside court availability”**
 setting in Settings (off by default).
 
 > The original venue windows are Court 1 `06:00–09:00` and Courts 2 & 3 `06:00–08:00`. Those are
@@ -330,14 +344,16 @@ Behaviour and safety rules:
   the count, a court that currently has a match in progress is refused with a clear warning
   rather than silently affecting the running match.
 
-Existing backups remain backwards compatible.
+Existing backups remain backwards compatible (the pre-v5 `{ start, end }` court shape is migrated
+onto `{ startTime, endTime, enabled }`).
 
 ---
 
 ## Team level configuration
 
-Team levels are **not** hard-coded. `Tunga`, `Bhadra` and `Kaveri` are only the initial defaults;
-the organizer controls the levels themselves from **Settings → Team Level Configuration**.
+Team levels are **not** hard-coded. `Level 1`, `Level 2` and `Level 3` are only the initial
+defaults; the organizer controls the levels themselves from
+**Settings → Team Level Configuration**.
 
 The section lists every configured level with its pair count and pairs, plus the always-present
 `Unassigned` group:
@@ -345,22 +361,22 @@ The section lists every configured level with its pair count and pairs, plus the
 ```
 10 pairs · 9 assigned · 1 unassigned
 
-Tunga        3 pairs
-  Naveen & Chandan            [ Tunga ▼ ]
-  Manjanna & Madhu            [ Tunga ▼ ]
-  Praveen KG & Gagan          [ Tunga ▼ ]
-Bhadra       3 pairs
-  Harshit & Yakshit           [ Bhadra ▼ ]
-  Gangadhar & Manju           [ Bhadra ▼ ]
-  Praveen & Vinay             [ Bhadra ▼ ]
-Kaveri       3 pairs
-  RK & Vinay                  [ Kaveri ▼ ]
-  Nihar & Rajeev              [ Kaveri ▼ ]
-  Prabhakar & Phani           [ Kaveri ▼ ]
+Level 1      3 pairs
+  Pair A1                     [ Level 1 ▼ ]
+  Pair A4                     [ Level 1 ▼ ]
+  Pair B1                     [ Level 1 ▼ ]
+Level 2      3 pairs
+  Pair A2                     [ Level 2 ▼ ]
+  Pair B2                     [ Level 2 ▼ ]
+  Pair B3                     [ Level 2 ▼ ]
+Level 3      3 pairs
+  Pair A3                     [ Level 3 ▼ ]
+  Pair A5                     [ Level 3 ▼ ]
+  Pair B4                     [ Level 3 ▼ ]
 Unassigned   1 pair
-  Anil & TBD                  [ Unassigned ▼ ]
+  Pair B5                     [ Unassigned ▼ ]
 
-⚠ 1 pair is unassigned: Anil & TBD
+⚠ 1 pair is unassigned: Pair B5
 
 [ Repair level assignments ]
 ```
@@ -373,9 +389,9 @@ membership, alters match history or touches the knockout bracket.
 
 ```js
 settings.levels: [
-  { id: "tunga",  name: "Tunga",  enabled: true },
-  { id: "bhadra", name: "Bhadra", enabled: true },
-  { id: "kaveri", name: "Kaveri", enabled: true }
+  { id: "level-1", name: "Level 1", enabled: true },
+  { id: "level-2", name: "Level 2", enabled: true },
+  { id: "level-3", name: "Level 3", enabled: true }
 ]
 ```
 
@@ -384,7 +400,7 @@ Settings, validation and every display read this one configuration. No screen ke
 
 **Counts are derived, never stored.** Each count shown in Settings is calculated from the actual
 `level` on each pair, so Settings can never disagree with the Teams screen. If three pairs have
-`level: "kaveri"`, Settings shows `Kaveri — 3 pairs`. There is deliberately no separately stored
+`level: "level-3"`, Settings shows `Level 3 — 3 pairs`. There is deliberately no separately stored
 count anywhere.
 
 ### The canonical level resolver
@@ -393,11 +409,11 @@ Every read of a pair's level goes through one resolver, `resolveLevel(value)`, s
 Settings counts, the level chips and the settings dropdowns can never disagree. Given a stored
 value it resolves, in order:
 
-1. exact canonical id — `kaveri` → `kaveri`
-2. case-insensitive id — `KAVERI` → `kaveri`
-3. exact display name — `Kaveri` → `kaveri`
-4. case-insensitive display name — `kaveri` (as a name) → `kaveri`
-5. normalized slug — ` Kaveri! ` → `kaveri`
+1. exact canonical id — `level-3` → `level-3`
+2. case-insensitive id — `LEVEL-3` → `level-3`
+3. exact display name — `Level 3` → `level-3`
+4. case-insensitive display name — `level 3` (as a name) → `level-3`
+5. normalized slug — ` Level 3! ` → `level-3`
 6. only then the `unassigned` sentinel
 
 A validly assigned pair is **never** moved to Unassigned merely because its stored value is a
@@ -405,7 +421,7 @@ display name or a different case. The resolver reads only stored id/name informa
 infers a level from a pair's name or players. An unknown value remains `unassigned`.
 
 Migration uses this same resolver against the document's `settings.levels`, so an existing
-tournament with legacy `"Tunga" / "Bhadra" / "Kaveri"` values loads with the correct assignments.
+tournament with legacy display-name values loads with the correct assignments.
 Migration is idempotent: running it repeatedly produces exactly the same state.
 
 ### Repairing existing assignments
@@ -423,17 +439,17 @@ assignments are fixed on load by migration and can be normalized further with th
 
 What the organizer can do:
 
-- **Add** a level (e.g. `Ganga`). It immediately appears in the Teams level dropdown.
+- **Add** a level (e.g. `Level 4`). It immediately appears in the Teams level dropdown.
 - **Rename** a level — the label updates everywhere.
 - **Enable / disable** a level.
 - **Remove** a level — any pair assigned to it moves to `Unassigned` rather than becoming invalid.
-- **Redistribute freely** — the distribution is not limited to the defaults. Tunga = 4 / Bhadra = 3
-  / Kaveri = 3, or any other split, is allowed.
+- **Redistribute freely** — the distribution is not limited to the defaults. Level 1 = 4 /
+  Level 2 = 3 / Level 3 = 3, or any other split, is allowed.
 
 ### Teams page
 
 The Teams page keeps its level dropdown and uses exactly the same canonical resolver and configured
-level list as Settings. Every row shows `RK & Vinay · Kaveri`, so the two screens cannot disagree.
+level list as Settings. Every row shows `Pair A3 · Level 3`, so the two screens cannot disagree.
 Both derive their information from the same underlying `state.teams`.
 
 ### Level vs Group
@@ -442,10 +458,10 @@ Both derive their information from the same underlying `state.teams`.
 
 | Pair | Level | Group |
 |------|-------|-------|
-| Naveen & Chandan | Tunga | A |
-| RK & Vinay | Kaveri | A |
-| Anil & TBD | Unassigned | B |
-| Praveen & Vinay | Bhadra | B |
+| Pair A1 | Level 1 | A |
+| Pair A3 | Level 3 | A |
+| Pair B5 | Unassigned | B |
+| Pair B3 | Level 2 | B |
 
 - Group-stage fixtures are generated from **Group A / Group B**, never from Level.
 - **Changing a pair's level never moves it between groups and never regenerates fixtures.**
@@ -459,8 +475,8 @@ Both derive their information from the same underlying `state.teams`.
 - An **unassigned** pair is valid. A warning is shown and the tournament runs normally; level is
   never required to start a match.
 
-Existing backups remain backwards compatible: old tournaments that stored levels as
-`"Tunga" / "Bhadra" / "Kaveri"` import correctly and are mapped onto the configured level ids.
+Existing backups remain backwards compatible: old tournaments that stored levels as bare display
+names import correctly and are mapped onto the configured level ids.
 
 ---
 
@@ -472,19 +488,19 @@ pairs qualify, the engine builds the single-elimination bracket for N:
 | Qualifiers | Rounds |
 |------------|--------|
 | 2 | Final |
-| 4 | Semi-finals → Final |
-| 8 | Quarter-finals → Semi-finals → Final |
-| 16 | Round of 16 → Quarter-finals → Semi-finals → Final |
-| 32 | Round of 32 → Round of 16 → Quarter-finals → Semi-finals → Final |
+| 4 | Semi-Finals → Final |
+| 8 | Quarter-Finals → Semi-Finals → Final |
+| 16 | Round of 16 → Quarter-Finals → Semi-Finals → Final |
+| 32 | Round of 32 → Round of 16 → Quarter-Finals → Semi-Finals → Final |
 
-Round formats (best of 3):
+The default points target per round (all best of 3 unless changed in Settings):
 
 | Round | Match IDs | Sets to |
 |-------|-----------|---------|
 | Round of 32 | R32-1 … R32-16 | 11 |
 | Round of 16 | R16-1 … R16-8 | 11 |
-| Quarter-finals | QF-1 … QF-4 | 11 |
-| Semi-finals | SF-1 … SF-2 | 15 |
+| Quarter-Finals | QF-1 … QF-4 | 11 |
+| Semi-Finals | SF-1 … SF-2 | 15 |
 | Final | F-1 | 21 |
 
 Seeding depends on how many groups are configured, and every configured group contributes its
@@ -497,7 +513,6 @@ qualifiers — none is ever dropped or duplicated.
 - **QF-2** Group B #1 vs Group A #4
 - **QF-3** Group A #2 vs Group B #3
 - **QF-4** Group B #2 vs Group A #3
-
 - **SF-1** Winner QF-1 vs Winner QF-2
 - **SF-2** Winner QF-3 vs Winner QF-4
 - **Final** Winner SF-1 vs Winner SF-2
@@ -533,13 +548,36 @@ A bye advances a pair without creating a fake match. A bye:
 For example, with **6 qualifiers** the engine creates an 8-slot bracket: 2 byes and 2 real
 quarter-finals, then semi-finals and a final — 5 real knockout matches in total (`6 − 1`).
 
-Each round unlocks automatically as the previous round finishes. Every set score is validated
-(played to the round's target, won by 2 clear points, a set cannot be tied, sets must be filled in
-order, and a third set is rejected if one team already won the first two).
+Each round unlocks automatically as the previous round finishes. Every game score is validated
+(played to the round's target, won by 2 clear points, a game cannot be tied, games must be filled in
+order, and a third game is rejected if one team already won the first two).
 
 When the final is decided the app shows a clear **🏆 CHAMPION** card.
 
 The total match count is always `group matches + (qualifiers − 1)`; nothing is hard-coded.
+
+---
+
+## Knockout scoring configuration
+
+Each knockout round's match format and points target are configurable in
+**Settings → Knockout Scoring**.
+
+- **Match format** — **Best of 3** (first to two games) or **Straight set** (a single game).
+- **Points target** — labelled *Points per game* for best of 3 and *Points to win* for a straight
+  set. Whole number, `1`–`99`.
+
+The section renders one block per knockout round that is actually in play — the rounds of the
+current bracket, or (before the bracket exists) the rounds predicted by the qualification rule.
+
+**A match keeps the scoring it was created under.** The format and target are snapshotted onto
+each match when it is generated, so changing a round in Settings affects only matches created
+afterwards. An existing or completed match is never rewritten. This is why the concise display
+tag reads from the match itself — e.g. `QF · Best of 3 × 11`, `SF · Best of 3 × 15`,
+`Final · Straight set × 21`.
+
+Invalid input (an unknown format, or a target that is not a whole number in range) is rejected
+before it reaches the scoring engine, with the reason shown inline.
 
 ---
 
@@ -614,6 +652,7 @@ Match IDs are generated from the actual fixtures and rounds, never assumed:
 |-------|-----|
 | Group A (N pairs) | `A-01` … `A-0N(N−1)/2` |
 | Group B (N pairs) | `B-01` … `B-0N(N−1)/2` |
+| Round of 32 | `R32-1` … |
 | Round of 16 | `R16-1` … |
 | Quarter-finals | `QF-1` … |
 | Semi-finals | `SF-1`, `SF-2` |
@@ -656,19 +695,23 @@ Once results exist, the app distinguishes:
 Results are never silently destroyed, and removing a pair never leaves matches pointing at a
 deleted team ID — the fixtures are regenerated from the surviving pairs.
 
+> Correcting a completed group result is routed through **↺ Reset** once the knockout bracket
+> exists, because the bracket was built from those standings. Reset clears the bracket and
+> re-queues the match so both can be rebuilt from the corrected standings.
+
 ---
 
 ## Screens
 
 | Screen | Purpose |
 |--------|---------|
-| **Dashboard** | Progress (Group Stage `n / <group matches>`, Overall `n / <total>` — both computed from the configuration), court cards, next matches, live standings, recent results |
+| **Dashboard** | Live control centre: status strip, KPI cards, stage progress, NOW/NEXT/QUEUE blocks, analytics (group performance, level distribution, current leaders, recent results) and the champion card |
 | **Matches** | All group and knockout matches with enter/edit/undo actions |
 | **Courts** | Operational monitor — current match, next eligible match, start/complete, waiting list (no configuration controls) |
 | **Standings** | One table per group with qualifying positions highlighted |
 | **Knockout** | The generated bracket (whatever rounds apply) plus the champion card |
-| **Teams** | Edit pair names, players, level (dropdown from the configured levels) and group; add/remove pairs |
-| **Settings** | Central configuration: tournament name, groups, qualification, regenerate fixtures, levels, court configuration, scheduling, backup, reset |
+| **Teams** | Edit pair names, players, level (dropdown from the configured levels) and group; add/remove pairs and groups |
+| **Settings** | Central configuration: tournament name, groups, qualification, knockout scoring, regenerate fixtures, levels, court configuration, scheduling, backup, reset |
 
 The dashboard labels are derived from the live configuration, e.g. `Group Stage 7 / 16` and
 `Overall 10 / 21` for a 9-pair tournament — never the fixed `7 / 20` of a 10-pair example.
@@ -683,6 +726,34 @@ eligible match, and Start/Complete buttons.
 
 ---
 
+## Dashboard analytics
+
+Everything on the Dashboard is derived from live state on every render — nothing is cached or
+stored — so a result entered anywhere is reflected immediately.
+
+- **Status strip** — a single sentence for the current phase: empty, group stage (with a live
+  scheduler read-out of matches in progress, courts available and matches queued), group stage
+  complete, knockout round in progress, or tournament complete. It uses the group count during the
+  group stage and the current knockout round during the bracket, so the two are never conflated.
+- **KPI cards** — Pairs · Matches · Completed · Live · Courts · Progress %.
+- **Tournament progress** — a bar per stage (Group Stage plus every knockout round the tournament
+  will play, including rounds not yet created, which show as `—`), plus an Overall row.
+- **NOW — Live courts** — compact, status-led court cards showing what is on court right now.
+- **NEXT — Next matches** — the top-ranked eligible matches, each with the court it would be
+  assigned to (or “No free court”) and the scheduler's plain-language **Reason**.
+- **QUEUE — Waiting queue** — the first few ranked matches plus a “+ N more waiting” tail.
+- **Group performance** — per group: pairs, total matches, completed, remaining and a percentage
+  bar.
+- **Team level distribution** — one bar per configured level (plus Unassigned), scaled to the
+  largest bucket, with a warning when pairs are unassigned.
+- **Current leaders** — the top pairs across all groups using the exact standings ranking and
+  tie-breaks (teams with no play are excluded).
+- **Recent results** — the most recently completed matches, newest first, using the monotonic
+  completion counter.
+- **Champion card** — shown once the final is decided.
+
+---
+
 ## Data persistence
 
 State is saved to `localStorage` under the key `shuttledraw_v4` and includes:
@@ -690,10 +761,11 @@ State is saved to `localStorage` under the key `shuttledraw_v4` and includes:
 - tournament metadata and name
 - teams, players, levels and group membership
 - the **level configuration** (`settings.levels`) and every pair's level assignment
-- groups and all matches
+- groups, group labels and all matches
 - scores, sets, winners and losers
 - court states, **court configuration** (count, names, availability windows, enabled flags) and start/completion timestamps
 - **qualification configuration** (`settings.qualification`)
+- **knockout scoring configuration** (`settings.knockoutRules`), keyed by round id
 - standings (derived live from results)
 - knockout progression and qualifiers
 - settings and the current screen
@@ -719,6 +791,14 @@ Court configuration (count, names, hours, enabled flags) has its own section and
 independently — see [Court configuration](#court-configuration). Changing it never resets
 results or standings, and **Reset tournament** is the way to restore the default three-court
 layout.
+
+---
+
+## Theming
+
+The app ships with a dark theme and a light theme. The toggle in the header switches between them.
+The choice is a display preference only — it is stored under its own `localStorage` key
+(`shuttledraw_theme`) and never touches tournament state.
 
 ---
 
@@ -770,7 +850,7 @@ The UI is mobile-first:
 - Match tiles use a slightly larger, more readable card — match id/stage, group/round, both
   teams with a VS divider, then status/court/level and the score or action. They sit in a
   responsive grid that is two columns on desktop and a single column on phones.
-- The bracket scrolls horizontally (intentional) so all four stages stay readable.
+- The bracket scrolls horizontally (intentional) so all stages stay readable.
 - Standings tables scroll horizontally inside their card, so the page itself never overflows.
 
 Layouts are checked at 375 px, 390 px and 412 px widths, and the desktop header is checked for
@@ -786,18 +866,24 @@ single-row, no-horizontal-overflow behaviour.
 - A match cannot be completed without valid scores.
 - Group scores must reach 21, must be won by 2 clear points (or hit the 30-point cap), and
   cannot be tied.
-- Knockout set scores are validated against the round's target.
-- A third set is rejected when one team has already won the first two.
+- Knockout game scores are validated against the round's target **as snapshotted on that match**.
+- A third game is rejected when one team has already won the first two; a straight-set match
+  rejects any extra game.
 - The first knockout round cannot be generated until the group stage is complete; each later
   round cannot be built until all of its feeders are decided.
 - The qualifying configuration cannot exceed the largest group size, and cannot be changed once
   the bracket exists.
+- Knockout scoring rules reject an unknown format or a target that is not a whole number in `1–99`.
+- Court configuration rejects an empty/duplicate name, a malformed time, an end time not later
+  than the start time, and a count outside `1–8`.
+- Level configuration rejects duplicate or reserved ids/names.
 - Structural changes (pair count or group membership) cannot be applied once matches have started
   without explicit confirmation to regenerate fixtures; renames, player edits and level changes
   stay allowed.
 - A bye is never schedulable, scorable or resettable.
 - The pair list must satisfy the configuration limits: 2–32 pairs, at least 2 pairs per group,
-  at most 8 groups, unique names within a group, and every pair assigned to a group.
+  at most 8 groups, unique pair names across the whole tournament, and every pair assigned to a
+  configured group.
 - Destructive operations require explicit confirmation.
 
 ---
@@ -815,8 +901,11 @@ separated layers:
 │  • dynamic group fixtures + dynamic match ids              │
 │  • rolling court scheduler (eligibility, ranking, suggest) │
 │  • editable court configuration + validation               │
+│  • configurable team levels + canonical level resolver     │
 │  • standings (points / PF / PA / diff / tie-breaks)        │
 │  • qualification + generic knockout generation w/ byes     │
+│  • per-round knockout scoring (format + points target)     │
+│  • dashboard analytics (KPIs, stages, leaders, queue)      │
 │  • fixture regeneration and cascade resets                 │
 │  • localStorage save/load, migrate, export/import          │
 └────────────────────────────────────────────────────────────┘
@@ -824,11 +913,13 @@ separated layers:
                           │
 ┌────────────────────────────────────────────────────────────┐
 │  App  (UI layer, DOM only)                                 │
-│  • tab navigation and view rendering                       │
+│  • tab navigation (desktop single row / mobile More menu)  │
+│  • view rendering for every screen                         │
 │  • score-entry modal with live winner preview              │
 │  • courts, standings, bracket, teams, settings views       │
-│  • settings: tournament, groups, qualification, levels,    │
-│    courts, regenerate, backup                              │
+│  • settings: tournament, groups, qualification, knockout   │
+│    scoring, levels, courts, regenerate, backup             │
+│  • light/dark theme toggle                                 │
 │  • toasts and confirmation dialogs                         │
 └────────────────────────────────────────────────────────────┘
 ```
@@ -854,13 +945,28 @@ getGroupMatchCount(groupId)      getTotalGroupMatchCount()
 getQualifiedTeams()              setQualification(perGroup)
 generateKnockout()               bracketRounds(n)
 getTotalMatchCount()             progress()
+
+newLevel()  levels()  resolveLevel(v)  levelById(id)  levelForTeam(t)
+levelName(id)  selectableLevels()  levelCounts()  levelSummary()
+validateLevels(list)  applyLevels(list)  setTeamLevel(id, level)  repairTeamLevels()
+
+newCourt()  enabledCourts()  courtById(id)  courtName(id)  validateCourts(list)
+setCourtCount(n)  updateCourt(id, patch)  setCourtEnabled(id, on)
+addCourt()  removeCourt(id)
+
+getKnockoutRules()  setKnockoutRule(stage, rule)  knockoutRuleFor(stage)
+matchScoring(m)  knockoutFormatTag(...)  matchFormatDisplay(m)
+
+dashboardKPIs()  dashboardStages()  dashboardLeaders(n)
+dashboardStatus()  levelDistribution()  groupPerformance()
+schedulerSummary()  waitingQueue(n)  recentResults(n)
 ```
 
 ### State model
 
 ```js
 {
-  version,                    // schema version for migrations
+  version,                    // schema version for migrations (currently 6)
   tournament: { name, createdAt },
   teams:      [ { id, group, name, players[], level } ],
   groups:     { /* groupId: [teamId…] */ },   // any number of groups, any size (0 allowed)
@@ -872,14 +978,16 @@ getTotalMatchCount()             progress()
       startedAt, completedAt, completedSeq,
       scoreA, scoreB,         // group stage
       sets[], setsA, setsB,   // knockout
-      winner, loser, target, bye
+      winner, loser, target, bye,
+      scoring                 // per-match knockout snapshot { format, pointsPerGame }
   } ],
   courts:    [ { id, name, startTime, endTime, enabled, closed } ],
-  //           id is stable identity; preparation/UI editor writes name/times/enabled
+  //           id is stable identity; the Settings editor writes name/times/enabled
   knockout:  { generated, champion, qualifiers },
   settings:  {
     allowOutsideAvailability,
-    qualification: { perGroup },  // how many advance from each group
+    qualification: { perGroup },   // how many advance from each group
+    knockoutRules: { /* roundId: { format, pointsPerGame } */ },
     levels:  [ { id, name, enabled } ]
     //       configured levels; each team.level references a level id (or "unassigned")
     //       pair counts are derived from teams, never stored here
@@ -908,7 +1016,7 @@ node tests/core.test.js
 node tests/render.test.js
 ```
 
-It extracts the DOM-free `TM` layer from `index.html` and asserts, among ~1450 checks:
+`core.test.js` extracts the DOM-free `TM` layer from `index.html` and asserts, among ~1800 checks:
 
 - **dynamic group stage**: correct round-robin counts for 2/3/4/5/6 pairs (1/3/6/10/15) and for
   8 pairs 4+4 (12), 9 pairs 5+4 (16), 10 pairs 5+5 (20); no duplicate pairings, no self-matches,
@@ -954,9 +1062,11 @@ It extracts the DOM-free `TM` layer from `index.html` and asserts, among ~1450 c
   deterministic selection, distinct matches per court, disabled courts ignored
 - **dashboard progress** computed for 8/9/10-pair tournaments (`12`/`16`/`20` group and
   `15`/`23`/`27` overall) and partial-progress labels
+- **dashboard analytics**: KPI cards, per-stage progress, group performance, level distribution,
+  current leaders and the waiting queue all derived from live state
 - **levels** derived from assignments and independent of groups (survive a group move), and
   **courts** independent of pair count
-- **end-to-end scenarios A–E**: 8 pairs (4+4, top 2 → 15), 9 pairs (5+4, top 4 → 23),
+- **end-to-end scenarios**: 8 pairs (4+4, top 2 → 15), 9 pairs (5+4, top 4 → 23),
   10 pairs (5+5, top 4 → 27), three groups of three (9 group matches) and 6 qualifiers (5
   knockout matches with 2 byes). Each runs from the group stage through qualifiers and the
   knockout to a champion using the same generic engine with no special-case code
@@ -981,24 +1091,28 @@ It extracts the DOM-free `TM` layer from `index.html` and asserts, among ~1450 c
   invalid names/times/counts rejected atomically, and config surviving reload and backup
 - migration of the pre-v5 `{ start, end }` court shape onto `{ startTime, endTime, enabled }`
 - **configurable team levels**: the default levels and the default distribution
-  (Tunga 3 / Bhadra 3 / Kaveri 3 / Unassigned 1), the Teams dropdown drawing from the configured
-  levels, counts updating as pairs move between levels, moving a pair to Unassigned, level changes
-  never regenerating fixtures or changing Group A/B, level changes allowed after results while
-  group changes stay blocked, level assignments surviving reload and export/import, duplicate and
-  reserved level ids/names rejected, the two Vinay pairs staying distinct, adding a new level,
-  disabling a level moving its pairs to Unassigned, and old backups that stored levels as
-  `"Tunga"/"Bhadra"/"Kaveri"` still importing
+  (Level 1 = 3 / Level 2 = 3 / Level 3 = 3 / Unassigned = 1), the Teams dropdown drawing from the
+  configured levels, counts updating as pairs move between levels, moving a pair to Unassigned,
+  level changes never regenerating fixtures or changing Group A/B, level changes allowed after
+  results while group changes stay blocked, level assignments surviving reload and export/import,
+  duplicate and reserved level ids/names rejected, the two pairs sharing a player staying
+  distinct, adding a new level, disabling a level moving its pairs to Unassigned, and old backups
+  that stored levels as display names still importing
+- **canonical level resolver + repair**: every canonical and legacy representation
+  (id / case / display name / padded / slug) resolves correctly, migration preserves valid
+  assignments and is idempotent, and the live localStorage self-heals on load without a manual
+  clear
+- **knockout scoring configuration**: per-round format (Best of 3 / Straight set) and points
+  target, validation of malformed rules, and the per-match snapshot that protects existing
+  matches from a later Settings change
 - corrupt/absent/denied localStorage never throws and defaults rebuild
 
-Two committed test files, both dependency-free:
-
-- `tests/core.test.js` — extracts the DOM-free `core-logic` script and exercises the whole `TM`
-  engine. Run with `node tests/core.test.js`.
-- `tests/render.test.js` — loads the full single-file app (core + UI) under a minimal DOM shim and
-  renders every screen for the default 10-pair layout, 8 pairs (4+4), 9 pairs (5+4), a
-  6-qualifier bracket with byes, and three groups of three, asserting the dynamic counts appear
-  (e.g. `/ 12` not `/ 20`) and no `undefined`/`NaN` leaks into the markup. Run with
-  `node tests/render.test.js`.
+`render.test.js` loads the full single-file app (core + UI) under a minimal DOM shim and renders
+every screen for the default 10-pair layout, 8 pairs (4+4), 9 pairs (5+4), a 6-qualifier bracket
+with byes, and three groups of three, asserting the dynamic counts appear (e.g. `/ 12` not `/ 20`),
+that the Settings level/court/knockout sections render their real controls, and that no
+`undefined`/`NaN` leaks into the markup. It also asserts the shell (branding, theme toggle, Help),
+the compact single-row desktop header with a scrollable nav, and the mobile More menu.
 
 The browser checks below were run against a real headless Chromium during development and are not
 committed, so the repository keeps zero dependencies:
