@@ -518,6 +518,45 @@ knockout match is in progress or completed, the bracket is protected:
 A single knockout match can still be reset on its own (**↺ Reset** on the match). That clears only
 that match and its later dependants, so the lock stays on.
 
+### Correcting a knockout result
+
+The rules lock, but a result can always be corrected. A completed knockout match shows
+**Correct Result**, which reopens the score entry for that match. When the corrected result changes
+the winner, the bracket is re-derived automatically:
+
+- A later match that has **not started** updates its participant immediately and keeps its own id,
+  scoring snapshot and history.
+- A later match that is **in progress or completed** is never overwritten. The Knockout screen
+  raises a **bracket conflict** naming the affected match, and offers a **Repair** action. Repairing
+  the branch returns the dependent matches to the queue (clearing their recorded result) and
+  re-resolves them from the corrected result. Nothing is destroyed silently — the repair is an
+  explicit, confirmed action.
+
+Corrections are auditable: the previous result is kept in the match's bounded history
+(newest-last) before it is replaced.
+
+### Bracket dependencies
+
+A knockout participant that comes from an earlier match is stored as a **source**, e.g.
+`winner of QF-1`, not as a frozen team id. The display name is resolved from the source match every
+time, so a corrected earlier result can never leave a stale winner in a downstream match. The
+dependency survives reload, export/import and regeneration. A directly seeded entrant has no
+source and keeps its registered id.
+
+### Editing knockout participant names
+
+Knockout matches offer **Edit Participants** from the QF/SF/Final cards. This changes the
+**knockout display name** of a pair without touching the registered team:
+
+- the registered team record, group membership, standings, fixtures and historical group results
+  are all left untouched;
+- the override is keyed by the registered team id and persists across reload, export and import;
+- the bracket marks an edited pair, so the registered name and the display name are never
+  confused. Clearing the field (or typing the registered name) removes the override.
+
+This is useful for correcting a spelling or adding a partner's full name for the knockout stage
+without editing the group-stage team.
+
 The final step's label is derived from the qualifier count: a top-4 field reads
 `QF → SF → Final`, a top-2 field reads `SF → Final`, and a larger bracket reads
 `R16 → QF → SF → Final`.
