@@ -749,7 +749,7 @@
         <li>You choose how many pairs qualify from each group (Settings → Qualification)</li>
         <li>The bracket is built from the number of qualifiers: 4 → SF + Final, 8 → QF onward, 16 → Round of 16 onward</li>
         <li>Each round is configurable (Settings → Knockout Scoring): Best of 3 or a Straight set, with its own points target</li>
-        <li>Knockout rules are locked once the bracket is generated; reset the knockout to change them</li>
+        <li>Knockout rules are locked once the knockout stage has started; a played knockout cannot be reset by accident</li>
         <li>A match keeps the format it was created under, so changing settings never alters existing or completed matches</li>
         <li>If the qualifier count is not a power of two, byes advance teams without a fake match</li>
       </ul>
@@ -1430,7 +1430,7 @@
       groupLabels: {},
       matches: [],
       courts: DEFAULT_COURTS.map(function (c) { return newCourt(c); }),
-      knockout: { generated: false, champion: null, qualifiers: null },
+      knockout: { started: false, generated: false, champion: null, qualifiers: null },
       settings: {
         allowOutsideAvailability: false,
         levels: DEFAULT_LEVELS.map(function (l) { return newLevel(l); }),
@@ -1511,6 +1511,13 @@
       t.level = resolveLevelIn(s.settings.levels, t.level).id;
     });
     s.knockout = Object.assign(base.knockout, s.knockout || {});
+    // Knockout lock latch migration. `started` records that the organiser ran
+    // Generate / Start knockout and is the durable lock signal. A state written
+    // before this field existed (or hand-edited) is healed from the bracket that is
+    // actually present: if any knockout match exists the knockout has started. This
+    // is a one-way latch — a later clear only resets it through the guarded reset.
+    const koMatchesPresent = Array.isArray(s.matches) && s.matches.some(function (m) { return m && m.stage && m.stage !== 'group'; });
+    s.knockout.started = s.knockout.started === true || koMatchesPresent;
     s.meta = Object.assign({ seq: 0 }, s.meta || {});
     s.ui = Object.assign({ screen: 'dashboard' }, s.ui || {});
     if (!Array.isArray(s.matches)) s.matches = [];
@@ -2149,13 +2156,40 @@
     for (let i = state.matches.length - 1; i >= 0; i--) if (pred(state.matches[i])) state.matches.splice(i, 1);
   }
 
-  function clearKnockout() {
+  // Discard the knockout bracket. The default ('safe') mode refuses to destroy a
+  // knockout that has already been played: if any real knockout match is in progress
+  // or completed, the bracket is left intact so a completed result can never be
+  // silently erased by a reset, a settings change or a regeneration. Only the
+  // explicit destructive flows (Clear results / Regenerate / Reset tournament), which
+  // the organiser confirms, pass mode 'force'.
+  function clearKnockout(mode) {
+    if (mode !== 'force' && knockoutProtected()) {
+      return { ok: false, msg: KNOCKOUT_RESET_LOCK_MSG };
+    }
     removeMatches(function (m) { return m.stage !== 'group'; });
     state.knockout.generated = false;
+    // Clearing an unplayed bracket releases the lock latch, so the organiser can
+    // reconfigure and start again. This never happens for a played bracket: that is
+    // refused above before any state is touched.
+    state.knockout.started = false;
     state.knockout.champion = null;
     state.knockout.qualifiers = null;
     save();
     return { ok: true };
+  }
+
+  // A knockout match that is under way or already decided. Byes are excluded: they
+  // carry no score and cannot be "lost" by a reset.
+  function knockoutHasResults() {
+    return state.matches.some(function (m) {
+      return m.stage !== 'group' && !m.bye && (m.status === 'completed' || m.status === 'in_progress');
+    });
+  }
+
+  // Whether the knockout is protected from a silent destructive reset. Derived from
+  // the matches themselves, so it can never disagree with the bracket.
+  function knockoutProtected() {
+    return knockoutHasResults();
   }
 
   // Describe what resetting a match will cascade into (for confirmation UI).
@@ -2165,7 +2199,11 @@
     const impact = [];
     if (m.stage === 'group') {
       const ko = state.matches.filter(function (x) { return x.stage !== 'group'; });
-      if (ko.length) impact.push('The knockout bracket (' + ko.length + ' match' + (ko.length === 1 ? '' : 'es') + ') will be cleared.');
+      if (ko.length) {
+        impact.push(knockoutProtected()
+          ? 'The knockout bracket (' + ko.length + ' match' + (ko.length === 1 ? '' : 'es') + ') has been played and cannot be cleared by this reset.'
+          : 'The knockout bracket (' + ko.length + ' match' + (ko.length === 1 ? '' : 'es') + ') will be cleared.');
+      }
     } else {
       // Knockout matches are generated dynamically; clearing any of them cascades
       // into every later round, whatever those rounds happen to be.
@@ -2180,6 +2218,10 @@
     if (!m) return { ok: false, msg: 'Match not found.' };
 
     if (m.stage === 'group') {
+      // Correcting a group result clears the bracket so it can be rebuilt from the
+      // corrected standings. That is safe while the knockout has not been played;
+      // once it has, refuse so a played knockout is never silently discarded.
+      if (knockoutProtected()) return { ok: false, msg: KNOCKOUT_RESET_LOCK_MSG };
       clearKnockout();
       resetOne(m);
     } else if (m.bye) {
@@ -2387,6 +2429,9 @@
     created.forEach(function (m) { state.matches.push(m); });
 
     state.knockout.generated = true;
+    // The durable lock latch: once the organiser has started the knockout, the
+    // scoring configuration is locked for the rest of the tournament.
+    state.knockout.started = true;
     state.knockout.qualifiers = qualifiers;
     save();
     // A bye advances automatically, which may immediately open the next round.
@@ -2641,7 +2686,7 @@
     const info = knockoutInfo();
     const p = progress();
     const groupDone = info.groupDone && p.groupTotal > 0;
-    const generated = info.exists;
+    const started = state.knockout.started === true || info.exists;
     const champion = !!info.champion;
     let steps = [
       { key: 'group', label: 'Group Stage', state: 'current' },
@@ -2657,12 +2702,13 @@
       return steps;
     }
     steps[0].state = 'done';
-    if (!generated) {
+    if (!started) {
       // Rules are still editable here, and the organiser is asked to start the knockout.
       steps[1].state = 'current';
       steps[2].state = 'current';
       return steps;
     }
+    // Started: the lock has been applied and the bracket is the live step.
     steps[1].state = 'done';
     steps[2].state = 'done';
     steps[3].state = 'done';
@@ -2918,7 +2964,10 @@
     state.groupLabels = next.groupLabels;
     if (!nonStructural && structureChanged) {
       state.matches = buildGroupMatches(state);
-      clearKnockout();
+      // A structural change here is the explicit, confirmed destructive path (the UI
+      // only reaches it after the organiser confirms that results will be lost), so
+      // the knockout is cleared even when it has been played.
+      clearKnockout('force');
       state.meta.seq = 0;
     }
     save();
@@ -3044,6 +3093,10 @@
   }
 
   function regenerateFixtures() {
+    // Regenerating group fixtures discards the knockout too. Refuse while the
+    // knockout has been played so a completed result can never be wiped by a
+    // regeneration; the explicit Clear results flow is the way to do that.
+    if (knockoutProtected()) return { ok: false, msg: KNOCKOUT_RESET_LOCK_MSG };
     state.matches = buildGroupMatches(state);
     clearKnockout();
     state.meta.seq = 0;
@@ -3052,6 +3105,7 @@
   }
 
   function generateGroupFixtures() {
+    if (knockoutProtected()) return { ok: false, msg: KNOCKOUT_RESET_LOCK_MSG };
     state.matches = buildGroupMatches(state);
     clearKnockout();
     state.meta.seq = 0;
@@ -3087,12 +3141,18 @@
   }
 
   /* ── knockout scoring configuration ──────────────────── */
+  // Shown whenever a rule edit, a bracket reset or a regeneration is refused because
+  // the knockout has been started/played. One constant keeps the wording consistent
+  // across the core engine and the UI.
+  const KNOCKOUT_RESET_LOCK_MSG = 'Knockout scoring is locked because the knockout stage has started. Reset the knockout before changing it.';
+  const KNOCKOUT_EDIT_LOCK_MSG = 'Knockout scoring is locked because the knockout stage has started.';
   // Knockout rules are configured during the group stage and locked the moment the
-  // bracket is generated (the 🔒 step in the workflow). The lock is derived from
-  // live state — it is never stored separately — so clearing the bracket unlocks
-  // the rules again and regenerating snapshots them afresh.
+  // knockout is started (the 🔒 step in the workflow). The lock is `started` — a
+  // durable latch set by generateKnockout() — OR the presence of a knockout match, so
+  // a half-torn-down bracket can never expose the configuration. It is never stored
+  // as a separate workflow flag; it is a property of the knockout state itself.
   function knockoutRulesLocked() {
-    return state.matches.some(function (m) { return m.stage !== 'group'; });
+    return state.knockout.started === true || state.matches.some(function (m) { return m.stage !== 'group'; });
   }
 
   // The configured scoring for every round in play, plus the (mutable) full config
@@ -3111,14 +3171,14 @@
   }
 
   // Validate and persist a single round's scoring. Rejects invalid format/target
-  // before anything reaches the scoring engine. Once the knockout has been
-  // generated the rules are locked: changing them could re-interpret a live or
-  // completed match, so the edit is refused until the bracket is reset.
+  // before anything reaches the scoring engine. Once the knockout has been started
+  // the rules are locked: changing them could re-interpret a live or completed match,
+  // so the edit is refused until the knockout is explicitly reset.
   function setKnockoutRule(stage, rule) {
     const def = KNOCKOUT_ROUNDS.find(function (r) { return r.key === stage; });
     if (!def) return { ok: false, msg: 'Unknown knockout round.' };
     if (knockoutRulesLocked()) {
-      return { ok: false, msg: 'Knockout rules are locked because the knockout has been generated. Reset the knockout to change them.' };
+      return { ok: false, msg: KNOCKOUT_EDIT_LOCK_MSG };
     }
     const candidate = {
       format: rule ? rule.format : undefined,
@@ -3304,6 +3364,8 @@
     getKnockoutRules: getKnockoutRules,
     setKnockoutRule: setKnockoutRule,
     knockoutRulesLocked: knockoutRulesLocked,
+    knockoutHasResults: knockoutHasResults,
+    knockoutProtected: knockoutProtected,
     knockoutWorkflow: knockoutWorkflow,
     bracketStageLabel: bracketStageLabel,
 
@@ -5028,7 +5090,7 @@
     html += '<div class="card">';
     const kRules = TM.getKnockoutRules();
     if (kRules.locked) {
-      html += '<div class="alert alert-warn" style="margin:0 0 12px;">🔒 Knockout rules are locked because the knockout has been generated. Reset the knockout to change them.</div>';
+      html += '<div class="alert alert-warn" style="margin:0 0 12px;">🔒 Knockout scoring is locked because the knockout stage has started. Reset the knockout before changing it.</div>';
     }
     if (!kRules.rounds.length) {
       html += '<div class="alert alert-warn" style="margin:0;">⚠️ No knockout rounds yet — configure at least 2 qualifiers above to set round scoring.</div>';
@@ -5055,7 +5117,7 @@
       });
     }
     html += '<div class="cfg-msg" id="ko-msg"></div>';
-    html += '<div class="muted" style="font-size:12px;margin-top:10px;">Each knockout round can be Best of 3 (first to two games) or a Straight set (one game), with its own points target. Set these before starting the knockout — the rules are locked once the bracket is generated, and each match keeps the rules it was created under.</div>';
+    html += '<div class="muted" style="font-size:12px;margin-top:10px;">Each knockout round can be Best of 3 (first to two games) or a Straight set (one game), with its own points target. Set these before starting the knockout — the rules are locked once the knockout stage has started, and each match keeps the rules it was created under.</div>';
     html += '</div>';
 
     // Regenerate fixtures: explicit, safe, with before/after counts.
@@ -5295,14 +5357,18 @@
   }
 
   function askClearResults() {
-    confirm('Clear all results?', 'Teams and fixtures stay, but every recorded score is deleted and the knockout bracket is cleared.', function () {
+    confirm('Clear all results?', 'Teams and fixtures stay, but every recorded score is deleted and the knockout bracket is cleared. This cannot be undone.', function () {
       const st = TM.getState();
       st.matches.forEach(function (m) {
         m.status = 'queued'; m.court = null; m.startedAt = null; m.completedAt = null; m.completedSeq = 0;
         m.scoreA = null; m.scoreB = null; m.sets = null; m.setsA = 0; m.setsB = 0; m.winner = null; m.loser = null;
       });
       st.matches = st.matches.filter(function (m) { return m.stage === 'group'; });
-      st.knockout = { generated: false, champion: null, qualifiers: null };
+      // Explicit, confirmed destructive reset: this is the sanctioned way to unlock a
+      // knockout that has already been played, so it clears the bracket and the lock
+      // latch together through the core engine.
+      const r = TM.clearKnockout('force');
+      if (!r.ok) { toast(r.msg); return; }
       st.meta.seq = 0;
       TM.save();
       toast('All results cleared');

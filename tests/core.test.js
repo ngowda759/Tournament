@@ -3043,6 +3043,72 @@ function finishGroupStage() {
   check('bo3: one game is not enough', needsTwo !== null, needsTwo);
 })();
 
+// TEST 5b — straight set × 21 is exactly one game, and the winner is the higher score.
+(function () {
+  TM.resetTournament();
+  TM.setKnockoutRule('qf', { format: 'single_game', pointsPerGame: 21 });
+  finishGroupStage();
+  ensureBracket();
+  const qf = TM.getMatch('QF-1');
+  // Exactly one game: a single set slot, one score entry per side, no second game.
+  eq('ss21: one game slot', qf.sets.length, 1);
+  check('ss21: single game validates', TM.validateKnockoutSets('QF-1', [{ a: 21, b: 17 }]) === null);
+  check('ss21: a second game is rejected', TM.validateKnockoutSets('QF-1', [{ a: 21, b: 17 }, { a: 21, b: 19 }]) !== null);
+  check('ss21: a third game is rejected', TM.validateKnockoutSets('QF-1', [{ a: 21, b: 17 }, { a: 21, b: 19 }, { a: 21, b: 15 }]) !== null);
+  // Winner is the higher score, decided in one game.
+  const r = TM.saveKnockoutScore('QF-1', [{ a: 21, b: 17 }]);
+  check('ss21: 21–17 accepted', r.ok, r.msg);
+  eq('ss21: winner is team A', qf.winner, qf.teamA);
+  eq('ss21: loser is team B', qf.loser, qf.teamB);
+  eq('ss21: one game won', qf.setsA, 1);
+  eq('ss21: zero games for the loser', qf.setsB, 0);
+  eq('ss21: exactly one game stored', qf.sets.length, 1);
+  eq('ss21: completed', qf.status, 'completed');
+  // The reverse result crowns the other side, still on one game.
+  TM.resetTournament();
+  TM.setKnockoutRule('qf', { format: 'single_game', pointsPerGame: 21 });
+  finishGroupStage();
+  ensureBracket();
+  const qf2 = TM.getMatch('QF-2');
+  TM.saveKnockoutScore('QF-2', [{ a: 15, b: 21 }]);
+  eq('ss21: reverse winner is team B', qf2.winner, qf2.teamB);
+  eq('ss21: reverse one game', qf2.sets.length, 1);
+  // The format tag never reads "Best of 2".
+  check('ss21: format tag is Straight set', TM.knockoutFormatTag('qf', { format: 'single_game', pointsPerGame: 21 }).indexOf('Straight set') !== -1);
+  check('ss21: format tag has no Best of 2', TM.knockoutFormatTag('qf', { format: 'single_game', pointsPerGame: 21 }).indexOf('Best of 2') === -1);
+})();
+
+// TEST 5c — best of 3 completes only when one side wins two games.
+(function () {
+  [11, 15, 21].forEach(function (target) {
+    TM.resetTournament();
+    TM.setKnockoutRule('qf', { format: 'best_of_3', pointsPerGame: target });
+    finishGroupStage();
+    ensureBracket();
+    const qf = TM.getMatch('QF-1');
+    eq('bo3 x' + target + ': snapshot target', TM.matchScoring(qf).pointsPerGame, target);
+    // one game is never enough
+    check('bo3 x' + target + ': one game refused', TM.validateKnockoutSets('QF-1', [{ a: target, b: 5 }]) !== null);
+    // 2–0 decides it
+    const twoNil = TM.saveKnockoutScore('QF-1', [{ a: target, b: 5 }, { a: target, b: 7 }]);
+    check('bo3 x' + target + ': 2–0 accepted', twoNil.ok, twoNil.msg);
+    eq('bo3 x' + target + ': 2–0 wins', qf.setsA, 2);
+    eq('bo3 x' + target + ': 2–0 completed', qf.status, 'completed');
+  });
+  // 1–1 then a decider: 2–1 decides it
+  TM.resetTournament();
+  TM.setKnockoutRule('qf', { format: 'best_of_3', pointsPerGame: 21 });
+  finishGroupStage();
+  ensureBracket();
+  const qf = TM.getMatch('QF-1');
+  const split = TM.saveKnockoutScore('QF-1', [{ a: 21, b: 18 }, { a: 19, b: 21 }, { a: 21, b: 16 }]);
+  check('bo3 x21: 2–1 accepted', split.ok, split.msg);
+  eq('bo3 x21: 2–1 wins', qf.setsA, 2);
+  eq('bo3 x21: 2–1 losses', qf.setsB, 1);
+  eq('bo3 x21: 2–1 completed', qf.status, 'completed');
+})();
+
+
 // TEST 8 — snapshot protection: a generated match keeps the rules it was created
 // under, and once the bracket exists the Settings rules are locked.
 (function () {
@@ -3299,6 +3365,172 @@ function finishGroupStage() {
   TM.getState().matches.push({ id: 'QF-9', stage: 'qf', teamA: 'A1', teamB: 'A2', status: 'queued' });
   eq('workflow: locked once any knockout match exists', TM.knockoutRulesLocked(), true);
 })();
+
+/* ── 47c. knockout scoring lock: edit freely before, locked after ────────── */
+// The business rule: the QF/SF/Final format and points are editable at any time
+// before the knockout is started (during the group stage, after it, before
+// Generate / Start knockout), and permanently locked once it has started.
+(function () {
+  // (A) Configuration before the knockout — during the group stage.
+  TM.resetTournament();
+  eq('lock: unlocked during group stage', TM.knockoutRulesLocked(), false);
+  check('lock: QF editable during group stage', TM.setKnockoutRule('qf', { format: 'single_game', pointsPerGame: 21 }).ok);
+  check('lock: SF editable during group stage', TM.setKnockoutRule('sf', { format: 'best_of_3', pointsPerGame: 15 }).ok);
+  check('lock: Final editable during group stage', TM.setKnockoutRule('final', { format: 'best_of_3', pointsPerGame: 21 }).ok);
+  eq('lock: QF points took effect', TM.getKnockoutRules().rules.qf.pointsPerGame, 21);
+
+  // (A) Configuration before the knockout — group stage complete, not started.
+  finishGroupStage();
+  eq('lock: still unlocked once groups complete', TM.knockoutRulesLocked(), false);
+  check('lock: QF editable before starting', TM.setKnockoutRule('qf', { format: 'single_game', pointsPerGame: 21 }).ok);
+  check('lock: SF editable before starting', TM.setKnockoutRule('sf', { format: 'best_of_3', pointsPerGame: 15 }).ok);
+  check('lock: Final editable before starting', TM.setKnockoutRule('final', { format: 'best_of_3', pointsPerGame: 21 }).ok);
+  eq('lock: no bracket yet', TM.knockoutInfo().exists, false);
+
+  // (A) Generate → all three configured rules are applied to the generated matches.
+  const gen = TM.generateKnockout();
+  check('lock: generate/start ok', gen.ok, gen.msg);
+  const qf = TM.getMatch('QF-1');
+  eq('lock: generated QF = Straight set', TM.matchScoring(qf).format, 'single_game');
+  eq('lock: generated QF = 21', TM.matchScoring(qf).pointsPerGame, 21);
+  eq('lock: generated QF one game slot', qf.sets.length, 1);
+  eq('lock: configured SF rule', TM.getKnockoutRules().rules.sf.format, 'best_of_3');
+  eq('lock: configured SF points', TM.getKnockoutRules().rules.sf.pointsPerGame, 15);
+  eq('lock: configured Final rule', TM.getKnockoutRules().rules.final.pointsPerGame, 21);
+
+  // (B) Lock — every edit to every round is refused, and nothing changes.
+  eq('lock: locked after starting', TM.knockoutRulesLocked(), true);
+  const attempts = [
+    ['QF format', 'qf', { format: 'best_of_3', pointsPerGame: 21 }],
+    ['QF points', 'qf', { format: 'single_game', pointsPerGame: 11 }],
+    ['SF format', 'sf', { format: 'single_game', pointsPerGame: 15 }],
+    ['SF points', 'sf', { format: 'best_of_3', pointsPerGame: 21 }],
+    ['Final format', 'final', { format: 'single_game', pointsPerGame: 21 }],
+    ['Final points', 'final', { format: 'best_of_3', pointsPerGame: 11 }]
+  ];
+  attempts.forEach(function (a) {
+    const r = TM.setKnockoutRule(a[1], a[2]);
+    check('lock: ' + a[0] + ' change rejected', !r.ok, r.msg);
+    check('lock: ' + a[0] + ' refusal explains the lock', /locked/i.test(r.msg) && /knockout stage has started/i.test(r.msg), r.msg);
+  });
+  eq('lock: QF rule unchanged after attempts', TM.getKnockoutRules().rules.qf.format, 'single_game');
+  eq('lock: SF rule unchanged after attempts', TM.getKnockoutRules().rules.sf.pointsPerGame, 15);
+  eq('lock: Final rule unchanged after attempts', TM.getKnockoutRules().rules.final.pointsPerGame, 21);
+
+  // (B) Existing generated matches retain their scoring configuration.
+  eq('lock: existing QF snapshot intact', TM.matchScoring(TM.getMatch('QF-1')).format, 'single_game');
+  eq('lock: existing QF points intact', TM.matchScoring(TM.getMatch('QF-1')).pointsPerGame, 21);
+})();
+
+/* ── 47d. reset protection: a played knockout cannot be silently unlocked ── */
+(function () {
+  // (C) Generated but not played: a safe clear is allowed and unlocks the rules.
+  TM.resetTournament();
+  finishGroupStage();
+  TM.generateKnockout();
+  eq('reset: locked after generate', TM.knockoutRulesLocked(), true);
+  eq('reset: no knockout result yet', TM.knockoutProtected(), false);
+  const safeClear = TM.clearKnockout();
+  check('reset: unplayed bracket clears safely', safeClear.ok, safeClear.msg);
+  eq('reset: unplayed clear unlocks the rules', TM.knockoutRulesLocked(), false);
+  check('reset: editable again after safe clear', TM.setKnockoutRule('qf', { format: 'best_of_3', pointsPerGame: 11 }).ok);
+
+  // (C) In progress: clear/reset cannot silently unlock the scoring.
+  TM.resetTournament();
+  finishGroupStage();
+  TM.generateKnockout();
+  const liveQf = TM.getState().matches.filter(function (m) { return m.stage === 'qf' && !m.bye && m.teamA && m.teamB; })[0];
+  TM.startMatch(liveQf.id, 1);
+  eq('reset: in-progress match protects the bracket', TM.knockoutProtected(), true);
+  const liveClear = TM.clearKnockout();
+  check('reset: in-progress clear refused', !liveClear.ok, liveClear.msg);
+  check('reset: in-progress refusal explains the lock', /locked/i.test(liveClear.msg), liveClear.msg);
+  eq('reset: in-progress clear left the lock on', TM.knockoutRulesLocked(), true);
+  eq('reset: in-progress match survived', TM.getMatch(liveQf.id).status, 'in_progress');
+  check('reset: in-progress rules still locked to edits', !TM.setKnockoutRule('qf', { format: 'single_game', pointsPerGame: 21 }).ok);
+  check('reset: regeneration refused while in progress', !TM.regenerateFixtures().ok);
+
+  // (C) Completed: a completed knockout result cannot be destroyed by a reset.
+  TM.resetTournament();
+  finishGroupStage();
+  TM.generateKnockout();
+  const doneQf = TM.getState().matches.filter(function (m) { return m.stage === 'qf' && !m.bye && m.teamA && m.teamB; })[0];
+  TM.saveKnockoutScore(doneQf.id, [{ a: 11, b: 6 }, { a: 11, b: 8 }]);
+  eq('reset: completed match protects the bracket', TM.knockoutProtected(), true);
+  const doneClear = TM.clearKnockout();
+  check('reset: completed clear refused', !doneClear.ok, doneClear.msg);
+  eq('reset: completed clear left the lock on', TM.knockoutRulesLocked(), true);
+  eq('reset: completed result survived', TM.getMatch(doneQf.id).status, 'completed');
+  eq('reset: completed result score survived', TM.getMatch(doneQf.id).setsA, 2);
+  check('reset: regeneration refused while a result exists', !TM.regenerateFixtures().ok);
+  check('reset: generateGroupFixtures refused while a result exists', !TM.generateGroupFixtures().ok);
+
+  // (C) Correcting a group result cannot silently discard a played knockout.
+  const groupMatch = TM.groupMatches()[0];
+  const groupReset = TM.resetMatch(groupMatch.id);
+  check('reset: group-result reset refused once knockout played', !groupReset.ok, groupReset.msg);
+  check('reset: group-result refusal explains the lock', /locked/i.test(groupReset.msg), groupReset.msg);
+
+  // (C) A completed knockout result cannot be destroyed by a configuration change.
+  const beforeRule = JSON.stringify(TM.getKnockoutRules().rules);
+  const beforeResult = JSON.stringify({ sets: TM.getMatch(doneQf.id).sets, winner: TM.getMatch(doneQf.id).winner, status: TM.getMatch(doneQf.id).status });
+  TM.setKnockoutRule('qf', { format: 'single_game', pointsPerGame: 21 });
+  TM.setKnockoutRule('sf', { format: 'single_game', pointsPerGame: 21 });
+  TM.setKnockoutRule('final', { format: 'single_game', pointsPerGame: 21 });
+  eq('reset: rules unchanged by refused edits', JSON.stringify(TM.getKnockoutRules().rules), beforeRule);
+  eq('reset: result unchanged by refused edits', JSON.stringify({ sets: TM.getMatch(doneQf.id).sets, winner: TM.getMatch(doneQf.id).winner, status: TM.getMatch(doneQf.id).status }), beforeResult);
+
+  // (C) The lock latch survives later-round generation/advancement.
+  const qfIds = TM.getState().matches.filter(function (m) { return m.stage === 'qf' && !m.bye; });
+  qfIds.forEach(function (m) {
+    if (m.status !== 'completed') TM.saveKnockoutScore(m.id, [{ a: 11, b: 4 }, { a: 11, b: 5 }]);
+  });
+  ensureBracket();
+  check('reset: later round generated after QF results', TM.getState().matches.some(function (m) { return m.stage === 'sf'; }));
+  eq('reset: lock survives later-round generation', TM.knockoutRulesLocked(), true);
+
+  // (C) Only the explicit force reset clears a played knockout, and it unlocks.
+  const forced = TM.clearKnockout('force');
+  check('reset: force clear allowed', forced.ok, forced.msg);
+  eq('reset: force clear removed the bracket', TM.getMatch('QF-1'), null);
+  eq('reset: force clear unlocked the rules', TM.knockoutRulesLocked(), false);
+  eq('reset: force clear reset the started latch', TM.getState().knockout.started, false);
+  eq('reset: force clear kept group matches', TM.groupMatches().length > 0, true);
+})();
+
+/* ── 47e. the lock latch is durable state, healed by migration ───────────── */
+(function () {
+  // The latch is a property of state.knockout, not a separate workflow blob.
+  TM.resetTournament();
+  eq('latch: false on a fresh tournament', TM.getState().knockout.started, false);
+  check('latch: no workflow blob stored', !/state\.knockoutWorkflow/.test(html) && !/state\.workflow\b/.test(html));
+
+  // Migration heals a stored knockout that is missing the latch.
+  const withBracket = TM.migrate({
+    teams: [{ id: 'A1', group: 'A', name: 'a1' }, { id: 'A2', group: 'A', name: 'a2' }],
+    groups: { A: ['A1', 'A2'] },
+    matches: [{ id: 'F-1', stage: 'final', teamA: 'A1', teamB: 'A2', status: 'queued' }],
+    knockout: { champion: null, qualifiers: null }
+  });
+  eq('latch: migration heals a bracket without a latch', withBracket.knockout.started, true);
+  const noBracket = TM.migrate({
+    teams: [{ id: 'A1', group: 'A', name: 'a1' }, { id: 'A2', group: 'A', name: 'a2' }],
+    groups: { A: ['A1', 'A2'] },
+    matches: [{ id: 'A-01', stage: 'group', group: 'A', teamA: 'A1', teamB: 'A2', status: 'queued' }]
+  });
+  eq('latch: migration leaves a group-only state unlocked', noBracket.knockout.started, false);
+
+  // The latch round-trips through export/import.
+  TM.resetTournament();
+  finishGroupStage();
+  TM.generateKnockout();
+  const exported = TM.exportJSON();
+  TM.resetTournament();
+  check('latch: import ok', TM.importJSON(exported).ok);
+  eq('latch: imported state keeps the lock', TM.knockoutRulesLocked(), true);
+  check('latch: imported bracket still refuses edits', !TM.setKnockoutRule('qf', { format: 'best_of_3', pointsPerGame: 11 }).ok);
+})();
+
 
 /* ── league-stage score statistics (dashboard) ─────────── */
 // The dashboard's League standings section is a pure view over computeStandings,

@@ -823,6 +823,15 @@ check('straight UI: Final score label rendered', body.indexOf('>Final score<') !
 check('straight UI: no Game 2 input', body.indexOf('>Game 2<') === -1, 'game 2 rendered');
 check('straight UI: no Game 3 input', body.indexOf('>Game 3<') === -1 && body.indexOf('sc-g3-a-row') === -1, 'game 3 rendered');
 check('straight UI: single score input per side', (body.match(/id="sc-a-0"/g) || []).length === 1 && (body.match(/id="sc-a-1"/g) || []).length === 0, 'wrong slots');
+check('straight UI: no Best of 2 wording', body.indexOf('Best of 2') === -1 && sub.indexOf('Best of 2') === -1, 'best of 2 shown');
+check('straight UI: not labelled as two games', body.indexOf('Game 2') === -1 && body.indexOf('games') === -1, 'two-game wording shown');
+// The single game decides the match: 21–17 is a straight-set win for team A.
+TM.saveKnockoutScore('QF-1', [{ a: 21, b: 17 }]);
+const straightQf = TM.getMatch('QF-1');
+eq('straight UI: completed on one game', straightQf.status, 'completed');
+eq('straight UI: winner is the higher score', straightQf.winner, straightQf.teamA);
+eq('straight UI: stored exactly one game', straightQf.sets.length, 1);
+check('straight UI: a second game is refused', TM.saveKnockoutScore('QF-2', [{ a: 21, b: 17 }, { a: 21, b: 19 }]).ok === false);
 App.closeScore();
 
 // Match / knockout views advertise each round's configured format.
@@ -860,7 +869,7 @@ check('ko flow: no undefined/NaN', flowView.indexOf('undefined') === -1 && flowV
 // Settings rules are editable (not disabled) before the knockout is generated.
 App.nav('settings');
 let setView = getEl('view').innerHTML;
-check('ko lock UI: not locked before generation', setView.indexOf('locked because the knockout has been generated') === -1, 'premature lock');
+check('ko lock UI: not locked before generation', setView.indexOf('locked because the knockout stage has started') === -1, 'premature lock');
 check('ko lock UI: format select enabled', setView.indexOf("App.setKnockoutFormat('qf',this.value)\"") !== -1 && setView.indexOf("App.setKnockoutFormat('qf',this.value)\" disabled") === -1, 'select not enabled');
 
 // Group stage complete, knockout not started: the Start control and both steps show.
@@ -876,7 +885,7 @@ App.generateKnockout();
 check('ko lock UI: locked after starting', TM.knockoutRulesLocked(), true);
 App.nav('settings');
 setView = getEl('view').innerHTML;
-check('ko lock UI: locked banner shown', setView.indexOf('🔒 Knockout rules are locked') !== -1, 'no lock banner');
+check('ko lock UI: locked banner shown', setView.indexOf('🔒 Knockout scoring is locked') !== -1, 'no lock banner');
 check('ko lock UI: format select disabled', setView.indexOf("App.setKnockoutFormat('qf',this.value)\" disabled") !== -1, 'select not disabled');
 check('ko lock UI: points input disabled', setView.indexOf("disabled onchange=\"App.setKnockoutPoints('qf',this.value)\"") !== -1, 'input not disabled');
 
@@ -885,12 +894,33 @@ App.setKnockoutFormat('qf', 'single_game');
 eq('ko lock UI: locked format edit refused', TM.getKnockoutRules().rules.qf.format, 'best_of_3');
 check('ko lock UI: refusal message shown', /locked/i.test(getEl('ko-msg').textContent) || /locked/i.test(getEl('toast').textContent), 'no refusal message');
 
-// After a knockout reset the controls are editable again.
-TM.clearKnockout();
+// A played knockout cannot be silently reset from the UI: completing a knockout
+// match and then clearing the bracket through the core API is refused.
+const koFirst = TM.getState().matches.filter(function (m) { return m.stage !== 'group' && !m.bye && m.teamA && m.teamB; })[0];
+TM.saveKnockoutScore(koFirst.id, [{ a: 21, b: 15 }, { a: 21, b: 17 }, { a: null, b: null }]);
+check('ko lock UI: completed knockout protects the bracket', TM.knockoutProtected(), true);
+const refusedClear = TM.clearKnockout();
+check('ko lock UI: clear refused while a knockout result exists', !refusedClear.ok, refusedClear.msg);
+eq('ko lock UI: refused clear left the lock on', TM.knockoutRulesLocked(), true);
+check('ko lock UI: refused clear kept the result', TM.getMatch(koFirst.id).status, 'completed');
 App.nav('settings');
 setView = getEl('view').innerHTML;
-check('ko lock UI: unlocked banner gone after reset', setView.indexOf('🔒 Knockout rules are locked') === -1, 'stale lock banner');
-check('ko lock UI: format select re-enabled', setView.indexOf("App.setKnockoutFormat('qf',this.value)\" disabled") === -1 && setView.indexOf("App.setKnockoutFormat('qf',this.value)\"") !== -1, 'select still disabled');
+check('ko lock UI: controls still disabled after refused clear', setView.indexOf("App.setKnockoutFormat('qf',this.value)\" disabled") !== -1, 'controls re-enabled');
+
+// Only the explicit, confirmed destructive reset clears a played knockout.
+TM.clearKnockout('force');
+App.nav('settings');
+setView = getEl('view').innerHTML;
+check('ko lock UI: unlocked banner gone after forced reset', setView.indexOf('🔒 Knockout scoring is locked') === -1, 'stale lock banner');
+check('ko lock UI: format select re-enabled after forced reset', setView.indexOf("App.setKnockoutFormat('qf',this.value)\" disabled") === -1 && setView.indexOf("App.setKnockoutFormat('qf',this.value)\"") !== -1, 'select still disabled');
+
+// Before a knockout is played, clearing the generated bracket unlocks the rules.
+TM.resetTournament();
+TM.groupMatches().forEach(function (m) { TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 12, m.teamA < m.teamB ? 12 : 21); });
+TM.generateKnockout();
+eq('ko lock UI: generated locks the rules', TM.knockoutRulesLocked(), true);
+check('ko lock UI: unplayed bracket clears safely', TM.clearKnockout().ok);
+eq('ko lock UI: unplayed clear unlocks the rules', TM.knockoutRulesLocked(), false);
 
 // ── Dashboard League standings (score statistics) ─────────────────────────────
 // The dashboard must expose cumulative league-stage P/W/L/PF/PA/PD/Pts per team,
