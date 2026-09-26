@@ -978,6 +978,108 @@ check('league: table wrapped for mobile scroll', /tbl-wrap"><table class="standi
 check('league: tbl-wrap scroll CSS', /\.tbl-wrap\s*\{[^}]*overflow-x:\s*auto/.test(styleText), 'no scroll wrapper');
 check('league: narrow-width rule exists', /@media\s*\(max-width:\s*430px\)\s*\{[\s\S]*?\.league-standings/.test(styleText), 'no mobile rule');
 
+/* ── Knockout correction & participant editing UI ──────────────────────────── */
+// A completed group stage plus a generated bracket, with the QF/SF/Final rules the
+// objective calls out. Uses a deterministic clock so starting a match never depends
+// on the wall clock.
+const NOON = new Date(2026, 0, 1, 6, 30, 0);
+function buildKo() {
+  TM.resetTournament();
+  TM.getState().settings.allowOutsideAvailability = true;
+  TM.groupMatches().forEach(function (m) {
+    TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 12, m.teamA < m.teamB ? 12 : 21);
+  });
+  TM.setKnockoutRule('qf', { format: 'best_of_3', pointsPerGame: 15 });
+  TM.setKnockoutRule('sf', { format: 'straight', pointsPerGame: 15 });
+  TM.setKnockoutRule('final', { format: 'best_of_3', pointsPerGame: 21 });
+  TM.generateKnockout();
+}
+function koMatch(id) { return TM.getMatch(id); }
+function koWin(m) {
+  const sc = TM.matchScoring(m);
+  const t = sc.pointsPerGame;
+  const sets = sc.format === 'single_game' ? [{ a: t, b: t - 5 }] : [{ a: t, b: t - 5 }, { a: t, b: t - 6 }];
+  TM.saveKnockoutScore(m.id, sets);
+}
+// Win the match to side B, so a later correction genuinely flips the winner.
+function koWinB(m) {
+  const sc = TM.matchScoring(m);
+  const t = sc.pointsPerGame;
+  const sets = sc.format === 'single_game' ? [{ a: t - 5, b: t }] : [{ a: t - 5, b: t }, { a: t - 6, b: t }];
+  TM.saveKnockoutScore(m.id, sets);
+}
+
+// (a) A knockout card shows the round id, the per-match format and both actions.
+buildKo();
+App.nav('knockout');
+let ko = getEl('view').innerHTML;
+check('ko card: shows the QF round label', ko.indexOf('Quarter Final') !== -1 || ko.indexOf('Quarter-final') !== -1, 'no QF label');
+check('ko card: shows the per-match format', ko.indexOf('Format: Best of 3 × 15') !== -1, 'no format line');
+check('ko card: shows Enter Result', ko.indexOf('Enter Result') !== -1, 'no enter result');
+check('ko card: shows Edit Participants', ko.indexOf('Edit Participants') !== -1, 'no edit participants');
+check('ko card: no undefined/NaN', ko.indexOf('undefined') === -1 && ko.indexOf('NaN') === -1, 'leak');
+
+// (b) A completed knockout match offers Correct Result (not a bare reset).
+koWin(koMatch('QF-1'));
+App.nav('knockout');
+ko = getEl('view').innerHTML;
+check('ko completed: shows Correct Result', ko.indexOf('Correct Result') !== -1, 'no correct result');
+check('ko completed: still offers Edit Participants', ko.indexOf('Edit Participants') !== -1, 'no edit participants');
+
+// (c) The participant dialog distinguishes the registered team from the display name.
+App.openParticipants('QF-1');
+const partBody = getEl('participant-body').innerHTML;
+check('participant dialog: labels the registered team', partBody.indexOf('Registered team') !== -1, 'no registered label');
+check('participant dialog: offers a knockout display name', partBody.indexOf('Knockout display name') !== -1, 'no display label');
+check('participant dialog: subtitle distinguishes the two', /registered team/i.test(getEl('participant-sub').textContent), 'no subtitle');
+// Editing the display name changes the bracket label only.
+const koTeamA = koMatch('QF-1').teamA;
+const regName = TM.getTeam(koTeamA).name;
+getEl('part-id-A').value = koTeamA;
+getEl('part-A').value = 'Praveen KG & Gagan Kumar';
+getEl('part-id-B').value = koMatch('QF-1').teamB;
+getEl('part-B').value = '';
+App.saveParticipants();
+eq('participant save: registered name intact', TM.getTeam(koTeamA).name, regName);
+eq('participant save: display name set', TM.knockoutDisplayName(koTeamA), 'Praveen KG & Gagan Kumar');
+App.nav('knockout');
+ko = getEl('view').innerHTML;
+check('participant save: bracket shows the edited name', ko.indexOf(escHtml('Praveen KG & Gagan Kumar')) !== -1, 'no edited name');
+check('participant save: bracket flags the override', ko.indexOf('pill-override') !== -1, 'no override pill');
+
+// (d) A conflict on a started dependent match renders a banner with a repair action.
+['QF-2', 'QF-3', 'QF-4'].forEach(function (id) { koWin(koMatch(id)); });
+TM.startMatch('SF-1', 1, NOON);
+koWinB(koMatch('QF-1'));  // SF1 A is QF1's winner; flip it after SF1 started
+App.nav('knockout');
+ko = getEl('view').innerHTML;
+check('conflict: banner shown', ko.indexOf('Bracket conflict detected') !== -1, 'no conflict banner');
+check('conflict: names the affected match', /SF-1/.test(ko), 'no match id');
+check('conflict: repair action offered', ko.indexOf('App.repairConflict') !== -1, 'no repair action');
+check('conflict: card marked as conflicted', /class="bcard[^"]*conflict/.test(ko), 'no conflict card');
+check('conflict: no undefined/NaN', ko.indexOf('undefined') === -1 && ko.indexOf('NaN') === -1, 'leak');
+
+// The conflict is real in core state and the recorded/live participant is preserved.
+eq('conflict: core reports it', TM.scanBracketConflicts().length >= 1, true);
+eq('conflict: live participant preserved', koMatch('SF-1').status, 'in_progress');
+
+// (e) Edit Participants is offered on QF, SF and Final cards, and the Final resolves
+// its participants from the current SF winners.
+buildKo();
+['QF-1', 'QF-2', 'QF-3', 'QF-4'].forEach(function (id) { koWin(koMatch(id)); });
+koWin(koMatch('SF-1'));
+koWin(koMatch('SF-2'));
+App.nav('knockout');
+ko = getEl('view').innerHTML;
+check('ko stages: SF card offers Edit Participants', ko.indexOf('Edit Participants') !== -1, 'no edit participants');
+check('ko stages: Final card renders', /Final/.test(ko), 'no final');
+check('ko stages: Final shows its resolved participants', !!koMatch('F-1') && TM.matchParticipantId(koMatch('F-1'), 'A') !== null, 'final A unresolved');
+check('ko stages: no undefined/NaN', ko.indexOf('undefined') === -1 && ko.indexOf('NaN') === -1, 'leak');
+// Opening the participant dialog on the Final works (participants are resolved).
+App.openParticipants('F-1');
+check('ko stages: Final participant dialog has both participants', /Participant A/.test(getEl('participant-body').innerHTML) && /Participant B/.test(getEl('participant-body').innerHTML), 'final dialog incomplete');
+App.closeParticipant();
+
 console.log('\n' + (fail === 0 ? '✅ ALL RENDERS OK' : '❌ RENDER FAILURES'));
 console.log('passed: ' + pass + '  failed: ' + fail);
 if (failures.length) { console.log('\nFailures:'); failures.forEach(f => console.log('  - ' + f)); process.exit(1); }

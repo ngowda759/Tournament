@@ -3437,10 +3437,12 @@ function finishGroupStage() {
 
   // (C) In progress: clear/reset cannot silently unlock the scoring.
   TM.resetTournament();
+  // Ignore the wall clock so the start is deterministic (Court 1's window is real state).
+  TM.getState().settings.allowOutsideAvailability = true;
   finishGroupStage();
   TM.generateKnockout();
   const liveQf = TM.getState().matches.filter(function (m) { return m.stage === 'qf' && !m.bye && m.teamA && m.teamB; })[0];
-  TM.startMatch(liveQf.id, 1);
+  TM.startMatch(liveQf.id, 1, NOON);
   eq('reset: in-progress match protects the bracket', TM.knockoutProtected(), true);
   const liveClear = TM.clearKnockout();
   check('reset: in-progress clear refused', !liveClear.ok, liveClear.msg);
@@ -3529,6 +3531,399 @@ function finishGroupStage() {
   check('latch: import ok', TM.importJSON(exported).ok);
   eq('latch: imported state keeps the lock', TM.knockoutRulesLocked(), true);
   check('latch: imported bracket still refuses edits', !TM.setKnockoutRule('qf', { format: 'best_of_3', pointsPerGame: 11 }).ok);
+})();
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   HARDENING: real-world corrections and participant editing
+   ═══════════════════════════════════════════════════════════════════════════
+   Covers the objective end to end:
+     A. Knockout format configuration (QF/SF/Final, Straight vs BO3, points)
+     B. Straight-set scoring semantics
+     C. Best-of-3 scoring semantics
+     D. Result correction propagating through the bracket
+     E. Downstream protection (auto-update vs conflict + explicit repair)
+     F. Knockout participant display-name editing
+     G. Regression of existing behaviour
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+// Build a full 4-qualifier bracket (QF1..QF4 → SF1..SF2 → Final) with the given
+// per-round rules. Returns the state; the bracket is left with no results yet.
+function buildBracketWithRules(rules) {
+  TM.resetTournament();
+  finishGroupStage();
+  if (rules) Object.keys(rules).forEach(function (k) { TM.setKnockoutRule(k, rules[k]); });
+  const g = TM.generateKnockout();
+  if (!g.ok) throw new Error('generateKnockout failed: ' + g.msg);
+  return TM.getState();
+}
+// The QF matches in bracket order, byes excluded.
+function qfList() {
+  return TM.getState().matches.filter(function (m) { return m.stage === 'qf' && !m.bye; }).sort(byNum);
+}
+function byNum(a, b) { return (parseInt(String(a.id).replace(/\D/g, ''), 10) || 0) - (parseInt(String(b.id).replace(/\D/g, ''), 10) || 0); }
+// Save a decisive result for a knockout match to the given side, honouring the
+// match's own snapshot: a straight set is one game, a best of 3 is two straight games.
+function winBySide(m, side, sc) {
+  const s = sc || TM.matchScoring(m);
+  const t = s.pointsPerGame;
+  const straight = s.format === 'single_game';
+  const win = straight ? [{ a: t, b: t - 6 }] : [{ a: t, b: t - 6 }, { a: t, b: t - 4 }];
+  const sets = side === 'A' ? win : win.map(function (g) { return { a: g.b, b: g.a }; });
+  return TM.saveKnockoutScore(m.id, sets);
+}
+function winByA(m, sc) { return winBySide(m, 'A', sc); }
+function winByB(m, sc) { return winBySide(m, 'B', sc); }
+// Complete every not-yet-decided QF so the SF round is generated.
+function completeQfs() {
+  qfList().forEach(function (m) { if (m.status !== 'completed') winByA(m); });
+}
+
+/* ── A. configuration: QF/SF/Final independently, editable before, locked after ── */
+(function () {
+  // The exact example matrix from the objective.
+  TM.resetTournament();
+  eq('A: rules editable before generation', TM.knockoutRulesLocked(), false);
+  check('A: QF straight × 21', TM.setKnockoutRule('qf', { format: 'single_game', pointsPerGame: 21 }).ok);
+  check('A: SF best of 3 × 15', TM.setKnockoutRule('sf', { format: 'best_of_3', pointsPerGame: 15 }).ok);
+  check('A: Final straight × 21', TM.setKnockoutRule('final', { format: 'single_game', pointsPerGame: 21 }).ok);
+  let byKey = {};
+  TM.getKnockoutRules().rounds.forEach(function (r) { byKey[r.key] = r; });
+  eq('A: QF stored straight/21', byKey.qf.format + '/' + byKey.qf.pointsPerGame, 'single_game/21');
+  eq('A: SF stored bo3/15', byKey.sf.format + '/' + byKey.sf.pointsPerGame, 'best_of_3/15');
+  eq('A: Final stored straight/21', byKey.final.format + '/' + byKey.final.pointsPerGame, 'single_game/21');
+
+  // Straight → BO3 and back again, before the knockout starts.
+  check('A: straight → bo3 before knockout', TM.setKnockoutRule('qf', { format: 'best_of_3', pointsPerGame: 11 }).ok);
+  eq('A: qf now bo3', TM.getKnockoutRules().rounds.find(function (r) { return r.key === 'qf'; }).format, 'best_of_3');
+  check('A: bo3 → straight before knockout', TM.setKnockoutRule('qf', { format: 'single_game', pointsPerGame: 21 }).ok);
+  eq('A: qf straight again', TM.getKnockoutRules().rounds.find(function (r) { return r.key === 'qf'; }).format, 'single_game');
+
+  // Points change before the knockout.
+  check('A: points change before knockout', TM.setKnockoutRule('sf', { format: 'best_of_3', pointsPerGame: 21 }).ok);
+  eq('A: sf points updated', TM.getKnockoutRules().rounds.find(function (r) { return r.key === 'sf'; }).pointsPerGame, 21);
+
+  // Independent configuration per round — changing one never touches another.
+  check('A: qf independent of sf', TM.setKnockoutRule('qf', { format: 'best_of_3', pointsPerGame: 11 }).ok);
+  byKey = {};
+  TM.getKnockoutRules().rounds.forEach(function (r) { byKey[r.key] = r; });
+  eq('A: sf untouched by qf edit', byKey.sf.pointsPerGame, 21);
+  eq('A: final untouched by qf edit', byKey.final.format, 'single_game');
+
+  // Generate/Start locks everything.
+  finishGroupStage();
+  const gen = TM.generateKnockout();
+  check('A: generate ok', gen.ok, gen.msg);
+  eq('A: locked after generate', TM.knockoutRulesLocked(), true);
+  check('A: qf locked', !TM.setKnockoutRule('qf', { format: 'single_game', pointsPerGame: 21 }).ok);
+  check('A: sf locked', !TM.setKnockoutRule('sf', { format: 'best_of_3', pointsPerGame: 15 }).ok);
+  check('A: final locked', !TM.setKnockoutRule('final', { format: 'best_of_3', pointsPerGame: 21 }).ok);
+  // Each generated round carries its own snapshot, not the current global setting.
+  eq('A: QF snapshot straight/11', TM.matchScoring(TM.getMatch('QF-1')).format + '/' + TM.matchScoring(TM.getMatch('QF-1')).pointsPerGame, 'best_of_3/11');
+
+  // The lock survives reload and export/import.
+  const exported = TM.exportJSON();
+  TM.resetTournament();
+  check('A: import ok', TM.importJSON(exported).ok);
+  eq('A: lock survives import', TM.knockoutRulesLocked(), true);
+  check('A: imported rules still refuse edits', !TM.setKnockoutRule('qf', { format: 'single_game', pointsPerGame: 21 }).ok);
+  // Reload path (localStorage) keeps the latch too.
+  TM.load();
+  eq('A: lock survives reload', TM.knockoutRulesLocked(), true);
+  // No reset/regenerate path silently unlocks a played knockout.
+  const played = TM.getMatch('QF-1');
+  winByA(played);
+  eq('A: clear refused while played', TM.clearKnockout().ok, false);
+  eq('A: lock held after refused clear', TM.knockoutRulesLocked(), true);
+  check('A: regenerate refused while played', !TM.regenerateFixtures().ok);
+})();
+
+/* ── B. straight-set scoring semantics ───────────────────────────────────── */
+(function () {
+  buildBracketWithRules({ qf: { format: 'single_game', pointsPerGame: 21 } });
+  const m = qfList()[0];
+  eq('B: straight snapshot format', TM.matchScoring(m).format, 'single_game');
+  eq('B: straight snapshot points', TM.matchScoring(m).pointsPerGame, 21);
+  eq('B: straight tag is not best-of-2', TM.matchFormatTag(m), 'Straight set × 21');
+
+  // Exactly one game: the higher valid score wins.
+  let r = TM.saveKnockoutScore(m.id, [{ a: 21, b: 15 }]);
+  check('B: single game accepted', r.ok, r.msg);
+  eq('B: one game stored', TM.getMatch(m.id).sets.filter(function (s) { return s.a !== null; }).length, 1);
+  eq('B: higher score wins', TM.getMatch(m.id).winner, m.teamA);
+  eq('B: sets won A', TM.getMatch(m.id).setsA, 1);
+
+  // A straight match must never persist a second or third game.
+  eq('B: no game 2 slot stored', TM.getMatch(m.id).sets.length, 1);
+  // Attempts to submit multiple games are rejected before anything is stored.
+  const before = JSON.stringify(TM.getMatch(m.id).sets);
+  r = TM.saveKnockoutScore(m.id, [{ a: 21, b: 15 }, { a: 21, b: 15 }]);
+  check('B: game 2 rejected', !r.ok, r.msg);
+  r = TM.saveKnockoutScore(m.id, [{ a: 21, b: 15 }, { a: 21, b: 15 }, { a: 21, b: 15 }]);
+  check('B: game 3 rejected', !r.ok, r.msg);
+  eq('B: rejected multi-game left state intact', JSON.stringify(TM.getMatch(m.id).sets), before);
+
+  // A tie / short game is not a valid single game.
+  check('B: tie rejected', !TM.saveKnockoutScore(m.id, [{ a: 21, b: 21 }]).ok);
+  check('B: short game rejected', !TM.saveKnockoutScore(m.id, [{ a: 19, b: 15 }]).ok);
+
+  // The scoring snapshot, not the current global setting, drives validation.
+  const sc = TM.matchScoring(TM.getMatch(m.id));
+  check('B: 21 target enforced by snapshot', TM.validateSetScore(19, 15, sc.pointsPerGame) !== null);
+})();
+
+/* ── C. best-of-3 scoring semantics ──────────────────────────────────────── */
+(function () {
+  buildBracketWithRules({ qf: { format: 'best_of_3', pointsPerGame: 11 } });
+  const m = qfList()[0];
+  eq('C: bo3 snapshot format', TM.matchScoring(m).format, 'best_of_3');
+  eq('C: bo3 tag', TM.matchFormatTag(m), 'Best of 3 × 11');
+
+  // 2–0 finishes without a third game.
+  let r = TM.saveKnockoutScore(m.id, [{ a: 11, b: 5 }, { a: 11, b: 7 }]);
+  check('C: 2–0 accepted', r.ok, r.msg);
+  eq('C: 2–0 sets A/B', TM.getMatch(m.id).setsA + '-' + TM.getMatch(m.id).setsB, '2-0');
+  eq('C: 2–0 winner is A', TM.getMatch(m.id).winner, m.teamA);
+  eq('C: 2–0 no game 3 played', TM.getMatch(m.id).sets[2].a, null);
+
+  // 2–1 needs and accepts the third game.
+  buildBracketWithRules({ qf: { format: 'best_of_3', pointsPerGame: 11 } });
+  const m2 = qfList()[0];
+  r = TM.saveKnockoutScore(m2.id, [{ a: 11, b: 9 }, { a: 8, b: 11 }, { a: 11, b: 6 }]);
+  check('C: 2–1 accepted', r.ok, r.msg);
+  eq('C: 2–1 sets A/B', TM.getMatch(m2.id).setsA + '-' + TM.getMatch(m2.id).setsB, '2-1');
+
+  // A 1–1 split is not a completed result.
+  buildBracketWithRules({ qf: { format: 'best_of_3', pointsPerGame: 11 } });
+  const m3 = qfList()[0];
+  r = TM.saveKnockoutScore(m3.id, [{ a: 11, b: 5 }, { a: 5, b: 11 }]);
+  check('C: 1–1 rejected as a result', !r.ok, r.msg);
+  check('C: 1–1 refusal explains the decider', /game 3|two games/i.test(r.msg), r.msg);
+  eq('C: 1–1 did not complete the match', TM.getMatch(m3.id).status, 'queued');
+
+  // An unnecessary third game after a 2–0 is rejected.
+  r = TM.saveKnockoutScore(m3.id, [{ a: 11, b: 5 }, { a: 11, b: 5 }, { a: 11, b: 5 }]);
+  check('C: unnecessary game 3 rejected', !r.ok, r.msg);
+  // Only two games may decide; three games must be 2–1.
+  r = TM.saveKnockoutScore(m3.id, [{ a: 11, b: 5 }, { a: 5, b: 11 }, { a: 11, b: 5 }]);
+  check('C: valid decider accepted after a split', r.ok, r.msg);
+})();
+
+/* ── D. result correction propagates through the bracket ─────────────────── */
+(function () {
+  buildBracketWithRules({ qf: { format: 'single_game', pointsPerGame: 21 }, sf: { format: 'single_game', pointsPerGame: 21 }, final: { format: 'single_game', pointsPerGame: 21 } });
+  const qfs = qfList();
+  const qf1 = TM.getMatch(qfs[0].id);
+  const origWinner = qf1.teamA, origLoser = qf1.teamB;
+
+  // A wins QF1 → the winner feeds SF1.
+  winByA(qf1);
+  completeQfs();
+  let sf1 = TM.getMatch('SF-1');
+  check('D: SF1 exists after QFs', !!sf1);
+  eq('D: SF1 A is QF1 winner', TM.matchParticipantId(sf1, 'A'), origWinner);
+  eq('D: SF1 A is a source-derived slot', !!sf1.sourceA, true);
+  eq('D: SF1 A source is QF1', sf1.sourceA.matchId, qf1.id);
+  eq('D: SF1 label names the source', TM.sourceLabel(sf1, 'A'), 'Winner of QF-1');
+
+  // Operator corrects QF1: B actually won.
+  const corr = TM.saveKnockoutScore(qf1.id, [{ a: 9, b: 21 }]);
+  check('D: QF1 correction accepted', corr.ok, corr.msg);
+  eq('D: QF1 winner corrected', TM.getMatch(qf1.id).winner, origLoser);
+  // SF1 (not started) is updated automatically and keeps its identity + scoring.
+  eq('D: SF1 A updated to the corrected winner', TM.matchParticipantId(TM.getMatch('SF-1'), 'A'), origLoser);
+  eq('D: SF1 id preserved', !!TM.getMatch('SF-1'), true);
+  eq('D: SF1 scoring preserved', TM.matchScoring(TM.getMatch('SF-1')).pointsPerGame, 21);
+  // No stale name anywhere in the bracket.
+  const stale = TM.getState().matches.filter(function (m) {
+    return m.stage !== 'group' && (m.teamA === origWinner || m.teamB === origWinner) && m.id !== qf1.id;
+  });
+  eq('D: no stale QF1 winner left downstream', stale.length, 0);
+
+  // Correct an SF winner → the Final updates.
+  const sf1Winner = TM.matchParticipantId(TM.getMatch('SF-1'), 'A');
+  const sf1Other = TM.matchParticipantId(TM.getMatch('SF-1'), 'B');
+  winByA(TM.getMatch('SF-1'));
+  winByA(TM.getMatch('SF-2'));
+  let f = TM.getMatch('F-1');
+  check('D: Final exists after SFs', !!f);
+  eq('D: Final A is SF1 winner', TM.matchParticipantId(f, 'A'), sf1Winner);
+  // Correct SF1 to the other side.
+  const corrSf = TM.saveKnockoutScore('SF-1', [{ a: 12, b: 21 }]);
+  check('D: SF1 correction accepted', corrSf.ok, corrSf.msg);
+  eq('D: SF1 winner corrected', TM.getMatch('SF-1').winner, sf1Other);
+  // Final (not started) resolves from the current SF winner — never the old finalist.
+  eq('D: Final A follows the corrected SF1 winner', TM.matchParticipantId(TM.getMatch('F-1'), 'A'), sf1Other);
+  check('D: stale finalist name gone', TM.matchParticipantId(TM.getMatch('F-1'), 'A') !== sf1Winner);
+})();
+
+/* ── E. downstream protection: auto-update vs conflict + explicit repair ─── */
+(function () {
+  buildBracketWithRules({ qf: { format: 'single_game', pointsPerGame: 21 }, sf: { format: 'single_game', pointsPerGame: 21 } });
+  const qf1 = qfList()[0];
+  winByA(qf1);
+  completeQfs();
+  const sf1 = TM.getMatch('SF-1');
+  const sf1A = TM.matchParticipantId(sf1, 'A');
+
+  // (1) Dependent match NOT started → auto-update, preserve the match.
+  winByB(TM.getMatch(qf1.id)); // QF1 flips
+  eq('E: unplayed dependent auto-updates', TM.matchParticipantId(TM.getMatch('SF-1'), 'A') !== sf1A, true);
+  eq('E: unplayed dependent preserved (same id)', !!TM.getMatch('SF-1'), true);
+  eq('E: unplayed dependent not a conflict', TM.scanBracketConflicts().length, 0);
+
+  // (2) Dependent match IN PROGRESS → conflict, never silently overwritten.
+  const nowA = TM.matchParticipantId(TM.getMatch('SF-1'), 'A');
+  TM.startMatch('SF-1', 1, NOON);
+  eq('E: SF1 live participant', TM.getMatch('SF-1').teamA, nowA);
+  // Correct QF1 the other way.
+  winByA(TM.getMatch(qf1.id));
+  let conflicts = TM.scanBracketConflicts();
+  eq('E: live dependent raises a conflict', conflicts.length, 1);
+  eq('E: conflict names the match', conflicts[0].matchId, 'SF-1');
+  eq('E: conflict records the status', conflicts[0].status, 'in_progress');
+  eq('E: live dependent participant preserved', TM.getMatch('SF-1').teamA, nowA);
+  eq('E: live dependent still in progress', TM.getMatch('SF-1').status, 'in_progress');
+
+  // (3) Explicit repair resolves it and preserves the match object + scoring.
+  const sfId = TM.getMatch('SF-1').id;
+  const rep = TM.repairBranch('QF-1');
+  check('E: repair ok', rep.ok, rep.msg);
+  eq('E: repair reset the dependent', rep.reset.indexOf('SF-1') !== -1, true);
+  eq('E: repaired dependent re-queued', TM.getMatch(sfId).status, 'queued');
+  eq('E: repaired dependent re-resolved', TM.matchParticipantId(TM.getMatch(sfId), 'A'), TM.matchParticipantId(TM.getMatch(qf1.id), 'A'));
+  eq('E: repaired dependent keeps its id', !!TM.getMatch(sfId), true);
+  eq('E: repaired dependent keeps scoring', TM.matchScoring(TM.getMatch(sfId)).pointsPerGame, 21);
+  eq('E: no conflicts remain after repair', TM.scanBracketConflicts().length, 0);
+
+  // (4) Dependent match COMPLETED → conflict, and no silent result loss.
+  buildBracketWithRules({ qf: { format: 'single_game', pointsPerGame: 21 }, sf: { format: 'single_game', pointsPerGame: 21 } });
+  const q2 = qfList()[0];
+  winByA(q2);
+  completeQfs();
+  winByA(TM.getMatch('SF-1'));
+  const recordedSf = JSON.stringify(TM.getMatch('SF-1').sets);
+  const recordedWinner = TM.getMatch('SF-1').winner;
+  winByB(TM.getMatch(q2.id)); // flip QF1 after SF1 is completed
+  conflicts = TM.scanBracketConflicts();
+  eq('E: completed dependent raises a conflict', conflicts.length, 1);
+  eq('E: completed dependent status recorded', conflicts[0].status, 'completed');
+  eq('E: completed dependent result untouched', JSON.stringify(TM.getMatch('SF-1').sets), recordedSf);
+  eq('E: completed dependent winner untouched', TM.getMatch('SF-1').winner, recordedWinner);
+  // Repair is explicit; it clears the recorded dependent result and re-resolves.
+  const rep2 = TM.repairBranch('QF-1');
+  check('E: completed-branch repair ok', rep2.ok, rep2.msg);
+  eq('E: completed dependent cleared on repair', TM.getMatch('SF-1').status, 'queued');
+  eq('E: completed dependent winner cleared on repair', TM.getMatch('SF-1').winner, null);
+  // The cleared result is preserved in the match's history, so the repair is auditable.
+  check('E: repair recorded the cleared result in history', Array.isArray(TM.getMatch('SF-1').history) && TM.getMatch('SF-1').history.length >= 1);
+  const hist = TM.getMatch('SF-1').history.slice(-1)[0];
+  eq('E: history entry is marked a branch repair', hist.reason, 'branch-repair');
+  eq('E: history keeps the cleared winner', hist.winner, recordedWinner);
+  eq('E: history keeps the cleared sets', JSON.stringify(hist.sets), recordedSf);
+})();
+
+/* ── E2. sources survive reload / export / import ────────────────────────── */
+(function () {
+  buildBracketWithRules({ qf: { format: 'single_game', pointsPerGame: 21 }, sf: { format: 'single_game', pointsPerGame: 21 } });
+  completeQfs();
+  const sf1 = TM.getMatch('SF-1');
+  eq('E2: SF1 has a source descriptor', !!sf1.sourceA && !!sf1.sourceB, true);
+  eq('E2: source names the feeder', sf1.sourceA.matchId, 'QF-1');
+
+  // Export → import preserves the dependency (not a frozen winner).
+  const exported = TM.exportJSON();
+  TM.resetTournament();
+  check('E2: import ok', TM.importJSON(exported).ok);
+  eq('E2: source survives import', TM.getMatch('SF-1').sourceA.matchId, 'QF-1');
+  // And the import re-derives the participant from the (still correct) feeder.
+  eq('E2: import re-derives the participant', TM.matchParticipantId(TM.getMatch('SF-1'), 'A'), TM.getMatch('QF-1').winner);
+
+  // A corrected feeder after import still flows through (dependency, not a copy).
+  const before = TM.matchParticipantId(TM.getMatch('SF-1'), 'A');
+  winByB(TM.getMatch('QF-1'));
+  check('E2: corrected feeder changes the dependent after import', TM.matchParticipantId(TM.getMatch('SF-1'), 'A') !== before);
+
+  // Reload (localStorage) also keeps the dependency.
+  TM.load();
+  eq('E2: source survives reload', TM.getMatch('SF-1').sourceA.matchId, 'QF-1');
+})();
+
+/* ── F. knockout participant display-name editing ────────────────────────── */
+(function () {
+  buildBracketWithRules({ qf: { format: 'single_game', pointsPerGame: 21 } });
+  const qf = qfList()[0];
+  const teamId = qf.teamA;
+  const registered = TM.getTeam(teamId).name;
+  const teamsBefore = JSON.stringify(TM.getState().teams);
+  const groupsBefore = JSON.stringify(TM.getState().groups);
+  const standingsBefore = JSON.stringify(TM.computeStandings(TM.getTeam(teamId).group));
+
+  // Edit a QF participant's display name.
+  let r = TM.setParticipantName(teamId, 'Praveen KG & Gagan Kumar');
+  check('F: set QF participant name ok', r.ok, r.msg);
+  eq('F: knockout display name set', TM.knockoutDisplayName(teamId), 'Praveen KG & Gagan Kumar');
+  eq('F: registered name unchanged', TM.getTeam(teamId).name, registered);
+  eq('F: override flagged', TM.hasParticipantOverride(teamId), true);
+  eq('F: bracket label uses the override', TM.matchParticipantLabel(qf, 'A'), 'Praveen KG & Gagan Kumar');
+  // Group-stage data is untouched.
+  eq('F: teams untouched', JSON.stringify(TM.getState().teams), teamsBefore);
+  eq('F: groups untouched', JSON.stringify(TM.getState().groups), groupsBefore);
+  eq('F: standings untouched', JSON.stringify(TM.computeStandings(TM.getTeam(teamId).group)), standingsBefore);
+  eq('F: fixtures untouched', TM.groupMatches().length, 20);
+
+  // The override survives export/import and reload.
+  const exported = TM.exportJSON();
+  TM.resetTournament();
+  check('F: import ok', TM.importJSON(exported).ok);
+  eq('F: override survives import', TM.knockoutDisplayName(teamId), 'Praveen KG & Gagan Kumar');
+  TM.load();
+  eq('F: override survives reload', TM.knockoutDisplayName(teamId), 'Praveen KG & Gagan Kumar');
+  eq('F: registered still unchanged after round-trip', TM.getTeam(teamId).name, registered);
+
+  // Edit an SF participant (derived) and a Final participant.
+  buildBracketWithRules({ qf: { format: 'single_game', pointsPerGame: 21 }, sf: { format: 'single_game', pointsPerGame: 21 } });
+  completeQfs();
+  const sf = TM.getMatch('SF-1');
+  const sfTeam = TM.matchParticipantId(sf, 'A');
+  check('F: set SF participant name ok', TM.setParticipantName(sfTeam, 'SF Display Pair').ok);
+  eq('F: SF display name applies', TM.matchParticipantLabel(sf, 'A'), 'SF Display Pair');
+  winByA(TM.getMatch('SF-1'));
+  winByA(TM.getMatch('SF-2'));
+  const f = TM.getMatch('F-1');
+  const fTeam = TM.matchParticipantId(f, 'A');
+  check('F: set Final participant name ok', TM.setParticipantName(fTeam, 'Final Display Pair').ok);
+  eq('F: Final display name applies', TM.matchParticipantLabel(f, 'A'), 'Final Display Pair');
+
+  // Clearing an override restores the registered name.
+  const cleared = TM.setParticipantName(teamId, '');
+  check('F: clearing an override ok', cleared.ok);
+  eq('F: override removed', TM.hasParticipantOverride(teamId), false);
+  eq('F: label falls back to the registered name', TM.knockoutDisplayName(teamId), registered);
+})();
+
+/* ── G. regression: existing behaviour is unchanged ─────────────────────── */
+(function () {
+  // Group scheduling / standings / rolling courts still behave.
+  TM.resetTournament();
+  eq('G: 20 group matches', TM.groupMatches().length, 20);
+  const sug = TM.suggestCourts(NOON);
+  check('G: courts still suggest matches', Object.keys(sug).length > 0);
+  finishGroupStage();
+  eq('G: standings reflect results', TM.computeStandings('A').reduce(function (s, r) { return s + r.played; }, 0), 20);
+
+  // Knockout seeding + dynamic groups still behave.
+  const gen = TM.generateKnockout();
+  check('G: knockout still generates', gen.ok, gen.msg);
+  eq('G: bracket is the classic QF layout', TM.getState().matches.filter(function (m) { return m.stage === 'qf'; }).length, 4);
+  // Every knockout match carries a scoring snapshot and (later rounds) sources.
+  TM.getState().matches.filter(function (m) { return m.stage !== 'group'; }).forEach(function (m) {
+    check('G: ' + m.id + ' has a scoring snapshot', !!TM.matchScoring(m).format);
+  });
+  // Existing reset protection still holds.
+  const firstQf = qfList()[0];
+  winByA(firstQf);
+  eq('G: knockout protected after a result', TM.knockoutProtected(), true);
+  eq('G: clear refused while protected', TM.clearKnockout().ok, false);
 })();
 
 

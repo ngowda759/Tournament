@@ -519,6 +519,20 @@
   .bcard-team.lose { opacity: 0.45; }
   .bcard-team.tbd { color: var(--text3); font-style: italic; }
   .bcard-fmt { font-size: 10.5px; margin-top: 4px; letter-spacing: 0.2px; }
+  .bcard-team .bcard-tail { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; }
+  .bcard-edit { padding: 1px 6px; font-size: 10px; }
+  .bcard.conflict { border-color: var(--danger); box-shadow: 0 0 0 1px rgba(255,107,91,0.25); }
+  .bcard-conflict { font-size: 10.5px; color: var(--danger); margin-top: 5px; line-height: 1.4; }
+  .pill-override { background: var(--blue-bg); border: 1px solid var(--blue-border); color: var(--blue); font-size: 9.5px; padding: 1px 6px; }
+  .conflict-banner .conflict-title { font-weight: 800; font-size: 13.5px; margin-bottom: 4px; }
+  .conflict-banner .conflict-sub { font-size: 12px; line-height: 1.5; margin-bottom: 8px; }
+  .conflict-row { display: flex; gap: 8px; align-items: center; justify-content: space-between; font-size: 12px; padding: 6px 0; border-top: 1px solid rgba(255,107,91,0.2); flex-wrap: wrap; }
+  .part-block { margin-bottom: 12px; }
+  .part-side { font-family: var(--font-head); font-size: 11px; font-weight: 800; letter-spacing: 0.6px; text-transform: uppercase; color: var(--text3); margin-bottom: 4px; }
+  .part-registered { font-size: 12.5px; margin-bottom: 6px; }
+  .part-label { display: block; font-size: 11.5px; color: var(--text2); margin-bottom: 3px; }
+  .part-input { width: 100%; padding: 9px 11px; border-radius: var(--radius); border: 1px solid var(--border2); background: var(--bg2); color: var(--text); font-size: 14px; font-family: var(--font-body); }
+  .part-input:focus { outline: none; border-color: var(--accent-border); }
   .champion-card { background: linear-gradient(135deg, rgba(255,217,61,0.14), rgba(184,245,74,0.08)); border: 1px solid rgba(255,217,61,0.4); border-radius: var(--radius-lg); padding: 1.25rem; text-align: center; }
   .champion-card .crown { font-size: 34px; }
   .champion-card .ctitle { font-family: var(--font-head); font-size: 11px; font-weight: 800; letter-spacing: 2px; color: var(--gold); text-transform: uppercase; }
@@ -709,6 +723,20 @@
   </div>
 </div>
 
+<!-- PARTICIPANT EDIT MODAL -->
+<div class="modal-overlay" id="participant-modal">
+  <div class="modal">
+    <h3 id="participant-title">Edit participants</h3>
+    <p id="participant-sub"></p>
+    <div id="participant-body"></div>
+    <div class="score-err" id="participant-err"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="App.closeParticipant()">Cancel</button>
+      <button class="btn btn-primary" onclick="App.saveParticipants()">Save names</button>
+    </div>
+  </div>
+</div>
+
 <!-- ABOUT MODAL -->
 <div class="modal-overlay" id="about-modal">
   <div class="modal">
@@ -752,6 +780,9 @@
         <li>Knockout rules are locked once the knockout stage has started; a played knockout cannot be reset by accident</li>
         <li>A match keeps the format it was created under, so changing settings never alters existing or completed matches</li>
         <li>If the qualifier count is not a power of two, byes advance teams without a fake match</li>
+        <li><b>Correct Result</b> fixes a wrong knockout winner; later unplayed matches update automatically</li>
+        <li>If a dependent match has already started or finished, a <b>bracket conflict</b> is shown and you choose whether to repair that branch — nothing is overwritten silently</li>
+        <li><b>Edit Participants</b> corrects a knockout display name only; the registered team and group results stay untouched</li>
       </ul>
     </div>
     <div class="about-card" style="margin-bottom:1.25rem;">
@@ -1021,7 +1052,16 @@
       winner: null, loser: null, target: null,
       // Per-match scoring snapshot for knockout matches (format + points per game).
       // Captured at creation so a later Settings change never rewrites a match.
-      scoring: null
+      scoring: null,
+      // Bracket dependency descriptors. A knockout match whose participant is derived
+      // from an earlier match stores { matchId, side } (e.g. winner of QF-1) instead of
+      // a frozen team id, so a corrected earlier result flows through automatically.
+      // A direct (seeded) entrant keeps null here. This is what stops a stale winner
+      // being permanently copied into a downstream match.
+      sourceA: null, sourceB: null,
+      // Undo history for result corrections — the previous result snapshot, newest
+      // last. Kept so a correction is auditable and never a silent overwrite.
+      history: []
     }, o || {});
   }
 
@@ -1430,7 +1470,7 @@
       groupLabels: {},
       matches: [],
       courts: DEFAULT_COURTS.map(function (c) { return newCourt(c); }),
-      knockout: { started: false, generated: false, champion: null, qualifiers: null },
+      knockout: { started: false, generated: false, champion: null, qualifiers: null, participantNames: {} },
       settings: {
         allowOutsideAvailability: false,
         levels: DEFAULT_LEVELS.map(function (l) { return newLevel(l); }),
@@ -1511,6 +1551,16 @@
       t.level = resolveLevelIn(s.settings.levels, t.level).id;
     });
     s.knockout = Object.assign(base.knockout, s.knockout || {});
+    // Knockout participant display names. A knockout team/pair can be relabelled for
+    // display without touching the registered team record; the override lives here,
+    // keyed by the registered team id, so it survives reload/export/import.
+    const rawNames = (s.knockout.participantNames && typeof s.knockout.participantNames === 'object' && !Array.isArray(s.knockout.participantNames)) ? s.knockout.participantNames : {};
+    const cleanNames = {};
+    Object.keys(rawNames).forEach(function (k) {
+      const v = rawNames[k];
+      if (typeof v === 'string' && v.trim()) cleanNames[k] = v.trim().slice(0, 60);
+    });
+    s.knockout.participantNames = cleanNames;
     // Knockout lock latch migration. `started` records that the organiser ran
     // Generate / Start knockout and is the durable lock signal. A state written
     // before this field existed (or hand-edited) is healed from the bracket that is
@@ -1532,6 +1582,16 @@
     }
     if (!s.courts.some(function (c) { return c.enabled !== false; })) s.courts[0].enabled = true;
     s.matches = s.matches.map(function (m) { return newMatch(m); });
+    // Normalize the bracket dependency descriptors and result history of stored
+    // knockout matches. A hand-edited or legacy backup may carry a malformed source;
+    // dropping it is safe because teamA/teamB remain the resolved fallback.
+    s.matches.forEach(function (m) {
+      if (m.stage === 'group') { m.sourceA = null; m.sourceB = null; m.history = []; return; }
+      m.sourceA = normalizeSource(m.sourceA);
+      m.sourceB = normalizeSource(m.sourceB);
+      if (!Array.isArray(m.history)) m.history = [];
+      else m.history = m.history.filter(function (h) { return h && typeof h === 'object'; }).slice(-10);
+    });
     let maxSeq = 0;
     s.matches.forEach(function (m) { if (m.completedSeq > maxSeq) maxSeq = m.completedSeq; });
     if (s.meta.seq < maxSeq) s.meta.seq = maxSeq;
@@ -1737,6 +1797,9 @@
         ? parsed.teams.map(function (t) { return t && t.level; })
         : null;
       state = migrate(parsed);
+      // Re-derive any not-yet-started downstream participants from their source
+      // matches, so a reload always shows the current bracket (never a stale winner).
+      reconcileBracket();
       // If migration normalized legacy level representations (a display name or a
       // different case), persist the healed document so localStorage self-repairs and
       // an existing browser never needs its data cleared. Already-canonical states are
@@ -1772,6 +1835,9 @@
       return { ok: false, msg: 'This backup has no usable teams.' };
     }
     state = migrate(parsed);
+    // Heal the bracket on import too: resolve any derived participant from its source
+    // so an imported backup can never reintroduce a stale winner.
+    reconcileBracket();
     save();
     return { ok: true };
   }
@@ -2130,7 +2196,20 @@
         b: (s.b === null || s.b === undefined) ? null : s.b
       });
     }
+    // A completed result must actually decide the match. A 1–1 split with no decider
+    // is not a valid completed best-of-3 result; the operator must enter game 3.
+    if (!knockoutMatchDecided(sc.format, clean)) {
+      return {
+        ok: false,
+        msg: sc.format === KNOCKOUT_FORMAT_SINGLE_GAME
+          ? 'Enter the game score.'
+          : 'A best-of-3 match must be won by two games (2–0 or 2–1). Enter game 3 to decide a 1–1 split.'
+      };
+    }
     const won = setsWon(clean);
+    // Snapshot the previous result before overwriting it, so a correction is auditable
+    // and never a silent overwrite. Kept to a bounded, newest-last history.
+    snapshotResult(m);
     m.sets = clean; m.setsA = won.a; m.setsB = won.b;
     m.winner = won.a > won.b ? m.teamA : m.teamB;
     m.loser = won.a > won.b ? m.teamB : m.teamA;
@@ -2141,7 +2220,9 @@
     m.completedAt = new Date().toISOString();
     save();
     ensureKnockout();
-    return { ok: true, match: m };
+    // Re-derive downstream participants and refresh conflicts after the correction.
+    propagateBracket();
+    return { ok: true, match: m, conflicts: scanBracketConflicts() };
   }
 
   function resetOne(m) {
@@ -2227,11 +2308,14 @@
     } else if (m.bye) {
       return { ok: false, msg: 'A bye cannot be reset — it advances the pair automatically.' };
     } else {
-      // Remove every knockout match in a later round than the one being reset.
+      // Remove every knockout match in a later round than the one being reset. This is
+      // an explicit, confirmed action (the UI lists the affected rounds); correcting a
+      // *result* while keeping downstream matches uses the repair flow instead.
       const rank = KNOCKOUT_RANK[m.stage];
       removeMatches(function (x) { return x.stage !== 'group' && KNOCKOUT_RANK[x.stage] > rank; });
       resetOne(m);
       state.knockout.champion = null;
+      propagateBracket();
     }
     save();
     return { ok: true };
@@ -2454,7 +2538,14 @@
     const def = KNOCKOUT_ROUNDS.find(function (r) { return r.key === targetKey; });
     const out = [];
     for (let i = 0; i < winners.length; i += 2) {
-      out.push({ id: knockoutMatchId(targetKey, (i / 2) + 1), a: winners[i], b: winners[i + 1] || null });
+      // Each slot is recorded as a dependency on the feeder match, not just its
+      // current winner, so a later correction flows through to this round.
+      out.push({
+        id: knockoutMatchId(targetKey, (i / 2) + 1),
+        a: winners[i], b: winners[i + 1] || null,
+        sourceA: prev[i] ? { matchId: prev[i].id } : null,
+        sourceB: prev[i + 1] ? { matchId: prev[i + 1].id } : null
+      });
     }
     return { def: def, pairs: out };
   }
@@ -2483,12 +2574,16 @@
       built.pairs.forEach(function (p, idx) {
         state.matches.push(newMatch({
           id: p.id, stage: next.key, round: idx + 1, teamA: p.a, teamB: p.b,
+          sourceA: p.sourceA, sourceB: p.sourceB,
           target: nextScoring.pointsPerGame, bye: (!p.a || !p.b),
           scoring: Object.assign({}, nextScoring),
           sets: emptySets(nextScoring.format)
         }));
       });
     }
+    // Re-resolve every derived participant from its live source match, so a corrected
+    // result is reflected immediately and a stale winner is never left behind.
+    reconcileBracket();
     const f = getMatch('F-1');
     state.knockout.champion = (f && f.status === 'completed') ? f.winner : null;
     state.knockout.generated = state.matches.some(function (m) { return m.stage !== 'group'; });
@@ -2519,6 +2614,268 @@
       qualifiers: state.knockout.qualifiers
     };
   }
+
+  /* ── knockout participant resolution & display names ──── */
+  // A bracket dependency descriptor: which match a participant is derived from.
+  // Returns a normalized { matchId } or null. Only the winner of the source match can
+  // feed a bracket slot, so the side is implied.
+  function normalizeSource(src) {
+    if (!src || typeof src !== 'object' || Array.isArray(src)) return null;
+    const matchId = typeof src.matchId === 'string' ? src.matchId : null;
+    if (!matchId) return null;
+    return { matchId: matchId };
+  }
+
+  // The winner a feeder match contributes to the bracket. A bye advances its real
+  // team; a completed match contributes its winner; anything else is undecided.
+  function feederWinner(m) {
+    if (!m) return null;
+    if (m.bye) return m.teamA || m.teamB || null;
+    return m.status === 'completed' ? (m.winner || null) : null;
+  }
+
+  // Resolve a single side's current participant. A side backed by a source match is
+  // always re-derived from that match's live winner — never from the cached teamA/B —
+  // so a corrected earlier result flows through and an undecided feeder shows as TBD
+  // rather than a stale name. The cached id is only a fallback when the source match
+  // no longer exists (e.g. a legacy/hand-edited backup).
+  function resolveParticipant(m, side) {
+    if (!m) return null;
+    const src = side === 'A' ? m.sourceA : m.sourceB;
+    const direct = side === 'A' ? m.teamA : m.teamB;
+    if (src) {
+      const feeder = getMatch(src.matchId);
+      if (feeder) return feederWinner(feeder);
+    }
+    return direct || null;
+  }
+
+  // A human description of a side's dependency ("Winner of QF-1"), or null when the
+  // side is a directly seeded entrant.
+  function sourceLabel(m, side) {
+    if (!m) return null;
+    const src = side === 'A' ? m.sourceA : m.sourceB;
+    if (!src) return null;
+    return 'Winner of ' + src.matchId;
+  }
+
+  // The display label for a knockout participant: the knockout display override when
+  // the operator has set one, otherwise the registered team name. The registered team
+  // record itself is never modified.
+  function knockoutDisplayName(teamId) {
+    if (!teamId) return null;
+    const names = (state.knockout && state.knockout.participantNames) ? state.knockout.participantNames : {};
+    if (Object.prototype.hasOwnProperty.call(names, teamId)) return names[teamId];
+    const t = getTeam(teamId);
+    return t ? t.name : null;
+  }
+
+  // The label a bracket/match card shows for one side of a knockout match. Prefers
+  // the resolved participant; falls back to the source description ("Winner of QF1")
+  // so a downstream slot is never shown as a stale name or a bare TBD.
+  function matchParticipantLabel(m, side) {
+    if (!m) return 'TBD';
+    const id = resolveParticipant(m, side);
+    if (id) return knockoutDisplayName(id) || 'TBD';
+    const src = sourceLabel(m, side);
+    if (src) return src;
+    return 'TBD';
+  }
+
+  function matchParticipantId(m, side) {
+    return resolveParticipant(m, side);
+  }
+
+  // Whether a side's display name is an operator override rather than the registered
+  // team name. The UI uses this to distinguish Registered Team vs Knockout Display.
+  function hasParticipantOverride(teamId) {
+    const names = (state.knockout && state.knockout.participantNames) ? state.knockout.participantNames : {};
+    return !!teamId && Object.prototype.hasOwnProperty.call(names, teamId);
+  }
+
+  // Set (or clear, with an empty value) the knockout display name for a registered
+  // team. Only the knockout label changes — the registered team record, group
+  // membership, standings, fixtures and historical results are all untouched.
+  function setParticipantName(teamId, name) {
+    if (!teamId) return { ok: false, msg: 'Participant not found.' };
+    const t = getTeam(teamId);
+    if (!t) return { ok: false, msg: 'Participant not found.' };
+    if (!state.knockout.participantNames || typeof state.knockout.participantNames !== 'object') state.knockout.participantNames = {};
+    const value = (name == null ? '' : String(name)).trim();
+    if (!value) {
+      delete state.knockout.participantNames[teamId];
+      save();
+      return { ok: true, cleared: true, registeredName: t.name };
+    }
+    if (value.length > 60) return { ok: false, msg: 'A display name must be 60 characters or fewer.' };
+    state.knockout.participantNames[teamId] = value;
+    save();
+    return { ok: true, displayName: value, registeredName: t.name };
+  }
+
+  // Record a knockout display override for a participant without a registered team
+  // record (a legacy/derived entrant). Not used by the current bracket, which is
+  // always seeded from registered teams; kept so a hand-built state can still label.
+  function participantLabelFor(teamId) {
+    return knockoutDisplayName(teamId);
+  }
+
+  /* ── knockout bracket propagation, conflicts and repair ── */
+  // Apply the resolved participants of every knockout match to its stored teamA/teamB
+  // so the scheduler, cards and progress always see current names. Only a side backed
+  // by a source match is rewritten, and only when the match has not started: a match
+  // that is in progress or completed is left exactly as it was so a live or recorded
+  // result is never silently overwritten. Returns the list of matches whose stored
+  // participants changed.
+  function reconcileBracket() {
+    const changed = [];
+    state.matches.forEach(function (m) {
+      if (m.stage === 'group') return;
+      if (!m.sourceA && !m.sourceB) return;
+      if (m.status === 'in_progress' || m.status === 'completed') return;
+      let touched = false;
+      ['A', 'B'].forEach(function (side) {
+        const src = side === 'A' ? m.sourceA : m.sourceB;
+        if (!src) return;
+        const want = resolveParticipant(m, side);
+        const cur = side === 'A' ? m.teamA : m.teamB;
+        if (want !== cur) {
+          if (side === 'A') m.teamA = want; else m.teamB = want;
+          touched = true;
+        }
+      });
+      if (touched) {
+        m.bye = !m.teamA || !m.teamB;
+        changed.push(m);
+      }
+    });
+    return changed;
+  }
+
+  // Detect bracket conflicts: a knockout match whose stored participants no longer
+  // match what its source matches currently resolve to, where the match itself has
+  // already started or been completed. Such a match cannot be auto-updated without
+  // destroying a live/recorded result, so it is reported for an explicit repair.
+  function scanBracketConflicts() {
+    const out = [];
+    state.matches.forEach(function (m) {
+      if (m.stage === 'group') return;
+      if (m.status !== 'in_progress' && m.status !== 'completed') return;
+      ['A', 'B'].forEach(function (side) {
+        const src = side === 'A' ? m.sourceA : m.sourceB;
+        if (!src) return;
+        const expected = resolveParticipant(m, side);
+        const actual = side === 'A' ? m.teamA : m.teamB;
+        if (expected !== actual) {
+          out.push({
+            matchId: m.id, stage: m.stage, side: side,
+            source: src.matchId,
+            expected: expected,
+            expectedName: expected ? (knockoutDisplayName(expected) || 'TBD') : null,
+            actual: actual,
+            actualName: actual ? (knockoutDisplayName(actual) || 'TBD') : null,
+            status: m.status
+          });
+        }
+      });
+    });
+    return out;
+  }
+
+  function bracketHasConflicts() { return scanBracketConflicts().length > 0; }
+
+  // Re-resolve the whole bracket and rebuild any not-yet-started downstream rounds.
+  // Rounds with a conflict are left for the explicit repair flow, never rewritten.
+  // Used after a result correction, a bracket repair and on load.
+  function propagateBracket() {
+    const changed = reconcileBracket();
+    const f = getMatch('F-1');
+    state.knockout.champion = (f && f.status === 'completed') ? f.winner : null;
+    state.knockout.generated = state.matches.some(function (m) { return m.stage !== 'group'; });
+    save();
+    return { changed: changed.map(function (m) { return m.id; }), conflicts: scanBracketConflicts() };
+  }
+
+  // The knockout rounds strictly after `stage`, earliest first. Used to describe the
+  // dependent branch an operator is about to repair.
+  function dependentRounds(stage) {
+    return knockoutRoundsAfter(stage);
+  }
+
+  // The matches that depend (directly or transitively) on `matchId`, i.e. every
+  // knockout match in a later round whose source chain reaches this match.
+  function dependentMatches(matchId) {
+    const byId = {};
+    state.matches.forEach(function (m) { if (m.stage !== 'group') byId[m.id] = m; });
+    const deps = [];
+    state.matches.forEach(function (m) {
+      if (m.stage === 'group' || m.id === matchId) return;
+      let frontier = [matchId];
+      let found = false;
+      const seen = {};
+      while (frontier.length && !found) {
+        const next = [];
+        frontier.forEach(function (id) {
+          if (seen[id]) return;
+          seen[id] = true;
+          Object.keys(byId).forEach(function (mid) {
+            const cand = byId[mid];
+            [cand.sourceA, cand.sourceB].forEach(function (src) {
+              if (src && src.matchId === id) {
+                if (cand.id === m.id) found = true;
+                next.push(cand.id);
+              }
+            });
+          });
+        });
+        frontier = next;
+      }
+      if (found) deps.push(m);
+    });
+    return deps.sort(byMatchNumber);
+  }
+
+  // Snapshot a match's current result into its bounded history so a repair (which
+  // clears the result) stays auditable. A fresh/unplayed match records nothing.
+  function snapshotResult(m) {
+    if (!m) return;
+    if (m.status !== 'completed' && m.status !== 'in_progress' &&
+        !(m.sets && m.sets.some(function (s) { return s && (s.a !== null || s.b !== null); }))) return;
+    if (!Array.isArray(m.history)) m.history = [];
+    m.history.push({
+      at: new Date().toISOString(),
+      sets: copy(m.sets || []), setsA: m.setsA, setsB: m.setsB,
+      winner: m.winner, loser: m.loser,
+      status: m.status, completedAt: m.completedAt, completedSeq: m.completedSeq,
+      reason: 'branch-repair'
+    });
+    if (m.history.length > 10) m.history = m.history.slice(-10);
+  }
+
+  // Explicit, auditable repair of a dependent branch. Resets every dependent match in
+  // a later round than the given match back to queued (clearing its recorded result
+  // and its history) and re-resolves participants from the corrected upstream result.
+  // This is the only way a started/completed dependent match is changed; it is never
+  // done silently. Returns the ids that were reset.
+  function repairBranch(matchId) {
+    const m = getMatch(matchId);
+    if (!m || m.stage === 'group') return { ok: false, msg: 'Only a knockout match can start a branch repair.' };
+    const reset = [];
+    dependentMatches(matchId).forEach(function (d) {
+      if (d.bye) return;
+      // Keep the cleared result in the match's own history so the repair is auditable.
+      snapshotResult(d);
+      resetOne(d);
+      reset.push(d.id);
+    });
+    propagateBracket();
+    return { ok: true, reset: reset, conflicts: scanBracketConflicts() };
+  }
+
+  // Reset a dependent branch but preserve the match objects and their scoring
+  // configuration (only the result/participant is cleared). Alias of repairBranch,
+  // named for the call site's intent.
+  function resetBranch(matchId) { return repairBranch(matchId); }
 
   /* ── progress ────────────────────────────────────────── */
   function progress() {
@@ -3357,6 +3714,24 @@
     generateKnockout: generateKnockout,
     ensureKnockout: ensureKnockout,
     knockoutInfo: knockoutInfo,
+    normalizeSource: normalizeSource,
+    feederWinner: feederWinner,
+    resolveParticipant: resolveParticipant,
+    sourceLabel: sourceLabel,
+    knockoutDisplayName: knockoutDisplayName,
+    matchParticipantLabel: matchParticipantLabel,
+    matchParticipantId: matchParticipantId,
+    hasParticipantOverride: hasParticipantOverride,
+    setParticipantName: setParticipantName,
+    participantLabelFor: participantLabelFor,
+    reconcileBracket: reconcileBracket,
+    scanBracketConflicts: scanBracketConflicts,
+    bracketHasConflicts: bracketHasConflicts,
+    propagateBracket: propagateBracket,
+    dependentRounds: dependentRounds,
+    dependentMatches: dependentMatches,
+    repairBranch: repairBranch,
+    resetBranch: resetBranch,
     predictedKnockoutTotal: predictedKnockoutTotal,
     getQualification: getQualification,
     setQualification: setQualification,
@@ -3427,6 +3802,7 @@
 
   let scoreCtx = null;   // { matchId, from }
   let confirmCtx = null; // { onOk }
+  let participantCtx = null; // { matchId }
 
   function esc(s) {
     return String(s == null ? '' : s)
@@ -3447,7 +3823,7 @@
   /* ── modals ────────────────────────────────────────── */
   function openModal(id) { $('#' + id).classList.add('open'); }
   function closeModal(id) { $('#' + id).classList.remove('open'); }
-  function closeAllModals() { ['score-modal', 'confirm-modal', 'about-modal'].forEach(closeModal); }
+  function closeAllModals() { ['score-modal', 'confirm-modal', 'participant-modal', 'about-modal'].forEach(closeModal); }
 
   /* ── navigation ────────────────────────────────────── */
   function nav(screen) {
@@ -3539,10 +3915,30 @@
     return bits.length ? '<div class="team-cell-sub">' + bits.join(' ') + '</div>' : '';
   }
 
+  // The display name for one side of a match. For a knockout match this resolves the
+  // bracket dependency and applies any knockout display override; for a group match it
+  // is the registered team name. Never mutates the registered team.
+  function sideName(m, side) {
+    if (!m) return 'TBD';
+    if (m.stage === 'group') {
+      const t = TM.getTeam(side === 'A' ? m.teamA : m.teamB);
+      return t ? t.name : 'TBD';
+    }
+    return TM.matchParticipantLabel(m, side);
+  }
+
+  // True when a knockout side's label is an operator override rather than the
+  // registered team name, so the card can distinguish the two.
+  function sideOverridden(m, side) {
+    if (!m || m.stage === 'group') return false;
+    const id = TM.matchParticipantId(m, side);
+    return !!id && TM.hasParticipantOverride(id);
+  }
+
   function teamsBlock(m) {
     const tA = TM.getTeam(m.teamA), tB = TM.getTeam(m.teamB);
-    const dA = '<div class="t"><span class="nm">' + esc(tA ? tA.name : 'TBD') + (tA ? ' ' + levelChip(tA) : '') + '</span>' + scoreSpan(m, 'A') + '</div>';
-    const dB = '<div class="t"><span class="nm">' + esc(tB ? tB.name : 'TBD') + (tB ? ' ' + levelChip(tB) : '') + '</span>' + scoreSpan(m, 'B') + '</div>';
+    const dA = '<div class="t"><span class="nm">' + esc(sideName(m, 'A')) + (tA && m.stage === 'group' ? ' ' + levelChip(tA) : '') + '</span>' + scoreSpan(m, 'A') + '</div>';
+    const dB = '<div class="t"><span class="nm">' + esc(sideName(m, 'B')) + (tB && m.stage === 'group' ? ' ' + levelChip(tB) : '') + '</span>' + scoreSpan(m, 'B') + '</div>';
     return dA + dB;
   }
 
@@ -3581,7 +3977,7 @@
     if (!m) { toast('Match not found.'); return; }
     scoreCtx = { matchId: matchId, from: from || 'matches' };
 
-    const tA = TM.getTeam(m.teamA), tB = TM.getTeam(m.teamB);
+    const nameA = sideName(m, 'A'), nameB = sideName(m, 'B');
     $('#score-title').textContent = m.stage === 'group'
       ? 'Match ' + m.id + ' · Group ' + m.group
       : TM.KNOCKOUT_LABEL[m.stage] + ' ' + m.id;
@@ -3590,11 +3986,11 @@
       $('#score-sub').textContent = 'Single game to ' + TM.GROUP_TARGET + ' points — win by 2 clear points (' + TM.GROUP_CAP + '-point cap). Winner is calculated automatically.';
       $('#score-body').innerHTML =
         '<div class="score-block">' +
-          '<div class="score-team-name">' + esc(tA ? tA.name : 'Team A') + '</div>' +
+          '<div class="score-team-name">' + esc(nameA) + '</div>' +
           '<div class="score-input-row"><label>Score</label><input class="score-input" type="number" inputmode="numeric" min="0" max="99" id="sc-a" oninput="App.previewScore()" value="' + (m.status === 'completed' && m.scoreA != null ? m.scoreA : '') + '"></div>' +
         '</div>' +
         '<div class="score-block">' +
-          '<div class="score-team-name">' + esc(tB ? tB.name : 'Team B') + '</div>' +
+          '<div class="score-team-name">' + esc(nameB) + '</div>' +
           '<div class="score-input-row"><label>Score</label><input class="score-input" type="number" inputmode="numeric" min="0" max="99" id="sc-b" oninput="App.previewScore()" value="' + (m.status === 'completed' && m.scoreB != null ? m.scoreB : '') + '"></div>' +
         '</div>' +
         '<div class="score-preview" id="score-preview">Enter both scores to see the winner</div>';
@@ -3618,11 +4014,11 @@
       };
       $('#score-body').innerHTML =
         '<div class="score-block">' +
-          '<div class="score-team-name">' + esc(tA ? tA.name : 'Team A') + '</div>' +
+          '<div class="score-team-name">' + esc(nameA) + '</div>' +
           Array.from({ length: slots }, function (_, i) { return row('a', i); }).join('') +
         '</div>' +
         '<div class="score-block">' +
-          '<div class="score-team-name">' + esc(tB ? tB.name : 'Team B') + '</div>' +
+          '<div class="score-team-name">' + esc(nameB) + '</div>' +
           Array.from({ length: slots }, function (_, i) { return row('b', i); }).join('') +
         '</div>' +
         '<div class="score-preview" id="score-preview">' + (straight ? 'Enter the game score to see the winner' : 'Enter the games to see the winner') + '</div>';
@@ -3684,8 +4080,7 @@
     const m = TM.getMatch(scoreCtx.matchId);
     const box = $('#score-preview');
     if (!box) return;
-    const tA = TM.getTeam(m.teamA), tB = TM.getTeam(m.teamB);
-    const aName = tA ? tA.name : 'Team A', bName = tB ? tB.name : 'Team B';
+    const aName = sideName(m, 'A') || 'Team A', bName = sideName(m, 'B') || 'Team B';
     const inp = readScoreInputs();
 
     if (m.stage === 'group') {
@@ -3777,6 +4172,96 @@
     confirmCtx = null;
     closeModal('confirm-modal');
     if (ctx && ctx.onOk) ctx.onOk();
+  }
+
+  /* ═══════════════ PARTICIPANT EDITING ═══════════════ */
+  // Open the "Edit Participants" dialog for a knockout match. The dialog shows the
+  // Registered Team (read-only) alongside an editable Knockout Display Name for each
+  // known participant, so the distinction is explicit.
+  function openParticipants(matchId) {
+    const m = TM.getMatch(matchId);
+    if (!m || m.stage === 'group') { toast('Participant editing is available for knockout matches.'); return; }
+    participantCtx = { matchId: matchId };
+    $('#participant-title').textContent = 'Edit participants · ' + m.id;
+    $('#participant-sub').textContent = TM.stageDisplayName(m.stage, TM.KNOCKOUT_LABEL[m.stage]) +
+      '. A knockout display name changes only how the pair is shown here — the registered team, group standings and all results stay untouched.';
+    const block = function (side) {
+      const id = TM.matchParticipantId(m, side);
+      if (!id) {
+        const src = TM.sourceLabel(m, side);
+        return '<div class="part-block"><div class="part-side">Participant ' + side + '</div>' +
+          '<div class="muted">' + esc(src || 'Not decided yet') + ' — editing unlocks once the earlier match is decided.</div></div>';
+      }
+      const registered = TM.getTeam(id);
+      const regName = registered ? registered.name : id;
+      const current = TM.knockoutDisplayName(id) || regName;
+      return '<div class="part-block">' +
+        '<div class="part-side">Participant ' + side + '</div>' +
+        '<div class="part-registered"><span class="muted">Registered team</span> ' + esc(regName) + '</div>' +
+        '<label class="part-label">Knockout display name</label>' +
+        '<input type="text" class="part-input" id="part-' + side + '" value="' + esc(current) + '" maxlength="60" placeholder="' + esc(regName) + '">' +
+        '<input type="hidden" id="part-id-' + side + '" value="' + esc(id) + '">' +
+        '</div>';
+    };
+    $('#participant-body').innerHTML = block('A') + block('B') +
+      '<div class="muted" style="font-size:11.5px;">Leave a field as the registered name (or blank) to remove the override.</div>';
+    $('#participant-err').textContent = '';
+    openModal('participant-modal');
+  }
+
+  function closeParticipant() {
+    closeModal('participant-modal');
+    participantCtx = null;
+  }
+
+  function saveParticipants() {
+    if (!participantCtx) return;
+    const m = TM.getMatch(participantCtx.matchId);
+    if (!m) { closeParticipant(); return; }
+    const errs = [];
+    ['A', 'B'].forEach(function (side) {
+      const idEl = $('#part-id-' + side);
+      const inEl = $('#part-' + side);
+      if (!idEl || !inEl) return;
+      const teamId = idEl.value;
+      if (!teamId) return;
+      const value = (inEl.value || '').trim();
+      const registered = TM.getTeam(teamId);
+      const regName = registered ? registered.name : '';
+      // Storing the registered name verbatim is the same as having no override.
+      const r = TM.setParticipantName(teamId, (value === regName) ? '' : value);
+      if (!r.ok) errs.push(r.msg);
+    });
+    if (errs.length) { $('#participant-err').textContent = errs.join(' '); return; }
+    closeParticipant();
+    toast('Knockout participant names updated');
+    render();
+  }
+
+  // Explicit, confirmed repair of a dependent branch after a bracket conflict. The
+  // dialog spells out which match is affected and that its recorded result will be
+  // cleared; nothing happens until the operator confirms.
+  function repairConflict(matchId) {
+    const m = TM.getMatch(matchId);
+    if (!m) return;
+    const deps = TM.dependentMatches(matchId).filter(function (d) { return !d.bye; });
+    const affected = deps.map(function (d) { return d.id; });
+    const conflicts = TM.scanBracketConflicts().filter(function (c) { return c.matchId === matchId; });
+    const detail = conflicts.map(function (c) {
+      return c.actualName + ' → ' + (c.expectedName || 'TBD') + ' (from ' + c.source + ')';
+    }).join('; ');
+    const text = 'This re-resolves the dependent branch for ' + matchId + '. ' +
+      (detail ? 'Change: ' + detail + '. ' : '') +
+      (affected.length
+        ? 'These matches will be returned to the queue and their recorded results cleared so they can be replayed: ' + affected.join(', ') + '. '
+        : 'No dependent match is currently recorded. ') +
+      'This is the only way a started or completed dependent match is changed — it never happens silently.';
+    confirm('Repair branch from ' + matchId + '?', text, function () {
+      const r = TM.repairBranch(matchId);
+      if (!r.ok) { toast(r.msg); return; }
+      toast('Branch repaired · ' + (r.reset.length ? r.reset.join(', ') + ' returned to the queue' : 'participants updated'));
+      render();
+    });
   }
 
   /* ═══════════════ DASHBOARD ═══════════════ */
@@ -4278,13 +4763,18 @@
   // Team A over a VS divider over Team B, so long names wrap safely and the two
   // sides read as distinct matchup rows.
   function matchTeamsWithVs(m) {
-    const tA = TM.getTeam(m.teamA), tB = TM.getTeam(m.teamB);
-    const row = function (t, side) {
-      return '<div class="t' + teamRowClass(m, side) + '"><span class="nm">' + esc(t ? t.name : 'TBD') + '</span>' + scoreSpan(m, side) + '</div>';
+    const row = function (side) {
+      const t = TM.getTeam(side === 'A' ? m.teamA : m.teamB);
+      const override = sideOverridden(m, side);
+      const name = sideName(m, side);
+      return '<div class="t' + teamRowClass(m, side) + '"><span class="nm">' + esc(name) +
+        (override ? ' <span class="pill pill-override" title="Knockout display name — the registered pair is unchanged">Knockout name</span>' : '') +
+        (t && m.stage === 'group' ? ' ' + levelChip(t) : '') +
+        '</span>' + scoreSpan(m, side) + '</div>';
     };
-    return '<div class="court-teams match-teams">' + row(tA, 'A') +
+    return '<div class="court-teams match-teams">' + row('A') +
       '<div class="vs-label">VS</div>' +
-      row(tB, 'B') + '</div>';
+      row('B') + '</div>';
   }
 
   function matchRow(m, from) {
@@ -4297,20 +4787,27 @@
         '</div>';
     }
     const cls = m.status === 'completed' ? ' done' : (m.status === 'in_progress' ? ' live' : '');
+    const isKo = m.stage !== 'group';
+    const enterLabel = isKo ? 'Enter Result' : 'Enter result';
+    const editParticipants = isKo
+      ? '<button class="btn btn-xs btn-ghost" onclick="App.openParticipants(\'' + m.id + '\',\'' + from + '\')">Edit Participants</button>'
+      : '';
     let actions = '';
     if (m.status === 'queued') {
       if (m.teamA && m.teamB) {
         actions = '<button class="btn btn-xs btn-primary" onclick="App.quickStart(\'' + m.id + '\')">Start</button>' +
-          '<button class="btn btn-xs" onclick="App.openScore(\'' + m.id + '\',\'' + from + '\')">Enter result</button>';
+          '<button class="btn btn-xs" onclick="App.openScore(\'' + m.id + '\',\'' + from + '\')">' + enterLabel + '</button>' + editParticipants;
       } else {
-        actions = '<span class="muted" style="font-size:12px;">Waiting for earlier results</span>';
+        actions = '<span class="muted" style="font-size:12px;">Waiting for earlier results</span>' + editParticipants;
       }
     } else if (m.status === 'in_progress') {
-      actions = '<button class="btn btn-xs btn-primary" onclick="App.openScore(\'' + m.id + '\',\'' + from + '\')">Enter result</button>' +
-        '<button class="btn btn-xs" onclick="App.askReset(\'' + m.id + '\',\'' + from + '\')">↺ Undo start</button>';
+      actions = '<button class="btn btn-xs btn-primary" onclick="App.openScore(\'' + m.id + '\',\'' + from + '\')">' + enterLabel + '</button>' +
+        '<button class="btn btn-xs" onclick="App.askReset(\'' + m.id + '\',\'' + from + '\')">↺ Undo start</button>' + editParticipants;
     } else {
-      actions = '<button class="btn btn-xs" onclick="App.openScore(\'' + m.id + '\',\'' + from + '\')">✎ Edit result</button>' +
-        '<button class="btn btn-xs" onclick="App.askReset(\'' + m.id + '\',\'' + from + '\')">↺ Reset</button>';
+      actions = (isKo
+          ? '<button class="btn btn-xs btn-primary" onclick="App.openScore(\'' + m.id + '\',\'' + from + '\')">Correct Result</button>'
+          : '<button class="btn btn-xs" onclick="App.openScore(\'' + m.id + '\',\'' + from + '\')">✎ Edit result</button>') +
+        '<button class="btn btn-xs" onclick="App.askReset(\'' + m.id + '\',\'' + from + '\')">↺ Reset</button>' + editParticipants;
     }
 
     return '<div class="mrow match-card' + cls + '">' +
@@ -4428,35 +4925,89 @@
 
   function bracketCard(m) {
     if (!m) return '';
-    const tA = TM.getTeam(m.teamA), tB = TM.getTeam(m.teamB);
     const cls = m.status === 'completed' ? ' done' : (m.status === 'in_progress' ? ' live' : '');
+    const shortId = String(m.id).replace('-', '');
     function row(side) {
-      const t = side === 'A' ? tA : tB;
-      const unknown = !t;
-      const won = m.status === 'completed' && m.winner === (side === 'A' ? m.teamA : m.teamB);
+      const id = TM.matchParticipantId(m, side);
+      const unknown = !id;
+      const won = m.status === 'completed' && m.winner === id;
       const lost = m.status === 'completed' && !won;
       const s = m.sets ? m.sets.filter(function (x) { return x.a !== null && x.b !== null; }) : [];
       const sc = s.length ? s.map(function (x) { return side === 'A' ? x.a : x.b; }).join(' ') : '';
+      const override = sideOverridden(m, side);
+      // An Edit control is offered whenever a participant is known; it edits the
+      // knockout display name only, never the registered team record.
+      const editBtn = unknown ? '' :
+        '<button class="btn btn-xs btn-ghost bcard-edit" onclick="App.openParticipants(\'' + m.id + '\')" title="Edit the knockout display name">Edit</button>';
       return '<div class="bcard-team' + (unknown ? ' tbd' : '') + (won ? ' win' : '') + (lost ? ' lose' : '') + '">' +
-        '<span class="nm">' + esc(t ? t.name : 'TBD') + '</span>' +
-        '<span class="sc">' + (sc || (unknown ? '' : '–')) + '</span></div>';
+        '<span class="nm">' + esc(sideName(m, side)) +
+        (override ? ' <span class="pill pill-override" title="Knockout display name — the registered pair is unchanged">edited</span>' : '') +
+        '</span>' +
+        '<span class="bcard-tail">' + editBtn + '<span class="sc">' + (sc || (unknown ? '' : '–')) + '</span></span></div>';
     }
-    return '<div class="bcard' + cls + '">' +
-      '<div class="bcard-id"><span>' + esc(m.id) + '</span><span>' + esc(TM.KNOCKOUT_LABEL[m.stage]) + '</span></div>' +
-      (m.bye
-        ? row('A') + row('B') + '<div class="bcard-bye muted" style="font-size:11px;padding:0 10px 8px;">Bye — advances automatically</div>'
-        : row('A') + row('B') +
-          '<div class="bcard-fmt muted">' + esc(TM.matchFormatTag(m)) + '</div>' +
-          '<div class="mrow-actions">' +
-            (m.status === 'completed'
-              ? '<button class="btn btn-xs" onclick="App.openScore(\'' + m.id + '\',\'knockout\')">✎ Edit</button><button class="btn btn-xs" onclick="App.askReset(\'' + m.id + '\',\'knockout\')">↺</button>'
-              : (m.status === 'in_progress'
-                ? '<button class="btn btn-xs btn-primary" onclick="App.openScore(\'' + m.id + '\',\'knockout\')">Enter result</button>'
-                : (tA && tB
-                  ? '<button class="btn btn-xs btn-primary" onclick="App.quickStart(\'' + m.id + '\')">Start</button><button class="btn btn-xs" onclick="App.openScore(\'' + m.id + '\',\'knockout\')">Result</button>'
-                  : '<span class="muted" style="font-size:11px;">Awaiting teams</span>'))) +
-          '</div>') +
+    if (m.bye) {
+      return '<div class="bcard' + cls + '">' +
+        '<div class="bcard-id"><span>' + esc(shortId) + '</span><span>' + esc(TM.KNOCKOUT_LABEL[m.stage]) + '</span></div>' +
+        row('A') + row('B') +
+        '<div class="bcard-bye muted" style="font-size:11px;padding:0 10px 8px;">Bye — advances automatically</div>' +
+        '</div>';
+    }
+    const conflict = conflictFor(m.id);
+    let actions;
+    if (m.status === 'completed') {
+      actions = '<button class="btn btn-xs btn-primary" onclick="App.openScore(\'' + m.id + '\',\'knockout\')">Correct Result</button>' +
+        '<button class="btn btn-xs btn-ghost" onclick="App.openParticipants(\'' + m.id + '\')">Edit Participants</button>' +
+        '<button class="btn btn-xs" onclick="App.askReset(\'' + m.id + '\',\'knockout\')" title="Reset this result and its dependants">↺</button>';
+    } else if (m.status === 'in_progress') {
+      actions = '<button class="btn btn-xs btn-primary" onclick="App.openScore(\'' + m.id + '\',\'knockout\')">Enter Result</button>' +
+        '<button class="btn btn-xs btn-ghost" onclick="App.openParticipants(\'' + m.id + '\')">Edit Participants</button>' +
+        '<button class="btn btn-xs" onclick="App.askReset(\'' + m.id + '\',\'knockout\')" title="Return to the queue">↺</button>';
+    } else if (m.teamA && m.teamB) {
+      actions = '<button class="btn btn-xs btn-primary" onclick="App.quickStart(\'' + m.id + '\')">Start</button>' +
+        '<button class="btn btn-xs" onclick="App.openScore(\'' + m.id + '\',\'knockout\')">Enter Result</button>' +
+        '<button class="btn btn-xs btn-ghost" onclick="App.openParticipants(\'' + m.id + '\')">Edit Participants</button>';
+    } else {
+      actions = '<span class="muted" style="font-size:11px;">Awaiting teams</span>' +
+        '<button class="btn btn-xs btn-ghost" onclick="App.openParticipants(\'' + m.id + '\')">Edit Participants</button>';
+    }
+    return '<div class="bcard' + cls + (conflict ? ' conflict' : '') + '">' +
+      '<div class="bcard-id"><span>' + esc(shortId) + '</span><span>' + esc(TM.KNOCKOUT_LABEL[m.stage]) + '</span></div>' +
+      row('A') + row('B') +
+      '<div class="bcard-fmt muted">Format: ' + esc(TM.matchFormatTag(m)) + '</div>' +
+      (conflict ? '<div class="bcard-conflict">⚠ Bracket conflict — ' + esc(conflict.actualName || 'the recorded participant') + ' no longer matches ' + esc(conflict.source) + '. Repair required.</div>' : '') +
+      '<div class="mrow-actions">' + actions + '</div>' +
       '</div>';
+  }
+
+  // The first conflict touching a given match, for the bracket card marker.
+  function conflictFor(matchId) {
+    const list = TM.scanBracketConflicts();
+    return list.find(function (c) { return c.matchId === matchId; }) || null;
+  }
+
+  // A banner listing every bracket conflict with a repair action, shown at the top of
+  // the Knockout screen. Nothing is repaired until the operator confirms.
+  function conflictBanner() {
+    const conflicts = TM.scanBracketConflicts();
+    if (!conflicts.length) return '';
+    const byMatch = {};
+    conflicts.forEach(function (c) { (byMatch[c.matchId] = byMatch[c.matchId] || []).push(c); });
+    const rows = Object.keys(byMatch).map(function (id) {
+      const cs = byMatch[id];
+      const m = TM.getMatch(id);
+      const srcs = cs.map(function (c) { return c.source; }).join(', ');
+      const expected = cs.map(function (c) { return c.expectedName || 'TBD'; }).join(' / ');
+      const actual = cs.map(function (c) { return c.actualName || 'TBD'; }).join(' / ');
+      return '<div class="conflict-row"><div><b>' + esc(id) + '</b> (' + esc(TM.stageDisplayName(m ? m.stage : '', id)) +
+        ') is ' + esc(cs[0].status === 'completed' ? 'completed' : 'in progress') + ' with <b>' + esc(actual) +
+        '</b>, but ' + esc(srcs) + ' now decides <b>' + esc(expected) + '</b>.</div>' +
+        '<button class="btn btn-xs btn-danger" onclick="App.repairConflict(\'' + id + '\')">Repair ' + esc(id) + '</button></div>';
+    }).join('');
+    return '<div class="alert alert-danger conflict-banner">' +
+      '<div class="conflict-title">⚠ Bracket conflict detected</div>' +
+      '<div class="conflict-sub">An earlier result changed after a dependent match had already started or finished. ' +
+      'The recorded result has been preserved — nothing was overwritten. Repair the dependent branch to re-resolve it.</div>' +
+      rows + '</div>';
   }
 
   function viewKnockout() {
@@ -4471,6 +5022,7 @@
     let html = '<div class="page-title">Knockout</div>';
     html += '<div class="page-subtitle">' + (roundNames || 'Knockout') + '. Generated from the group standings once you start the knockout.</div>';
     html += knockoutFlowHTML();
+    html += conflictBanner();
 
     if (!info.groupDone) {
       const p = TM.progress();
@@ -4495,7 +5047,7 @@
         '<div style="font-size:13px;line-height:1.9;">' +
         Object.keys(info.qualifiers).map(function (grp) {
           return (info.qualifiers[grp] || []).map(function (id, i) {
-            return '<div><span class="pill">' + esc(grp) + (i + 1) + '</span> ' + esc(TM.teamName(id)) + '</div>';
+            return '<div><span class="pill">' + esc(grp) + (i + 1) + '</span> ' + esc(TM.knockoutDisplayName(id) || TM.teamName(id)) + '</div>';
           }).join('');
         }).join('') + '</div></div>';
     }
@@ -4512,7 +5064,7 @@
     });
     html += '<div class="bracket-col"><div class="bracket-col-head">Champion</div><div class="bracket-col-body">' +
       (info.champion
-        ? '<div class="champion-card"><div class="crown">🏆</div><div class="ctitle">Champion</div><div class="cname">' + esc(TM.teamName(info.champion)) + '</div></div>'
+        ? '<div class="champion-card"><div class="crown">🏆</div><div class="ctitle">Champion</div><div class="cname">' + esc(TM.knockoutDisplayName(info.champion) || TM.teamName(info.champion)) + '</div></div>'
         : '<div class="card"><div class="muted">Awaiting the final result.</div></div>') +
       '</div></div>';
     html += '</div></div>';
@@ -5431,7 +5983,7 @@
   }
 
   // Close modals when clicking the overlay background
-  ['score-modal', 'confirm-modal', 'about-modal'].forEach(function (id) {
+  ['score-modal', 'confirm-modal', 'participant-modal', 'about-modal'].forEach(function (id) {
     document.addEventListener('click', function (e) {
       if (e.target && e.target.id === id) closeModal(id);
     }, false);
@@ -5441,6 +5993,7 @@
     closeAllModals();
     scoreCtx = null;
     confirmCtx = null;
+    participantCtx = null;
   });
 
   global.App = {
@@ -5461,6 +6014,11 @@
     confirm: confirm,
     confirmOk: confirmOk,
     closeConfirm: function () { closeModal('confirm-modal'); confirmCtx = null; },
+
+    openParticipants: openParticipants,
+    closeParticipant: closeParticipant,
+    saveParticipants: saveParticipants,
+    repairConflict: repairConflict,
 
     startMatch: startMatch,
     quickStart: quickStart,
