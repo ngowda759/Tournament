@@ -26,6 +26,13 @@ vm.createContext(sandbox);
 vm.runInContext(core, sandbox, { filename: 'core-logic.js' });
 
 const TM = sandbox.TM;
+// The first knockout round is an explicit organiser step in the app (Generate /
+// Start knockout), after which the rules lock. Tests that only need a built
+// bracket use this convenience wrapper; later rounds still advance automatically.
+function ensureBracket() {
+  if (!TM.knockoutInfo().exists) TM.generateKnockout();
+  TM.ensureKnockout();
+}
 let pass = 0, fail = 0;
 const failures = [];
 function check(name, cond, extra) {
@@ -156,8 +163,12 @@ const NOON = new Date(2026, 0, 1, 6, 30, 0); // deterministic clock, inside 06:0
   });
   check('group stage complete', TM.groupStageComplete());
 
+  // Starting the knockout is an explicit step (not auto-generated on the last result).
+  check('bracket not built until started', !TM.knockoutInfo().exists);
+  const gen = TM.generateKnockout();
+  check('generate knockout ok', gen.ok, gen.msg);
   const info = TM.knockoutInfo();
-  check('QF auto-generated', info.qfExists);
+  check('QF generated', info.qfExists);
   eq('4 QFs', TM.getState().matches.filter(x => x.stage === 'qf').length, 4);
 
   const sa = TM.computeStandings('A'), sb = TM.computeStandings('B');
@@ -416,10 +427,11 @@ const NOON = new Date(2026, 0, 1, 6, 30, 0); // deterministic clock, inside 06:0
 /* ── 14. state integrity: knockout derived from standings ── */
 (function () {
   TM.resetTournament();
-  // play the whole group stage so the bracket is generated
+  // play the whole group stage, then start the knockout
   TM.groupMatches().forEach(m => {
     TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 11, m.teamA < m.teamB ? 11 : 21);
   });
+  TM.generateKnockout();
   check('QF generated for integrity test', !!TM.getMatch('QF-1'));
 
   // editing a completed group result must not silently desync the bracket
@@ -752,7 +764,7 @@ const NOON = new Date(2026, 0, 1, 6, 30, 0); // deterministic clock, inside 06:0
   // knockout progression.
   TM.resetTournament();
   TM.groupMatches().forEach(function (m) { TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 10, m.teamA < m.teamB ? 10 : 21); });
-  TM.ensureKnockout(); // generates QFs from the completed group stage
+  ensureBracket(); // generates QFs from the completed group stage
   const groupIds = TM.groupMatches().map(function (m) { return m.id; }).join(',');
   const standingsA = JSON.stringify(TM.computeStandings('A'));
   const qfIds = ['QF-1', 'QF-2', 'QF-3', 'QF-4'];
@@ -1256,7 +1268,7 @@ function assertRoundRobin(label, groupId, n) {
   // 8 pairs top 2 => SF + Final, no QF
   const gm = TM.groupMatches();
   gm.forEach(mm => TM.saveGroupScore(mm.id, mm.teamA < mm.teamB ? 21 : 12, mm.teamA < mm.teamB ? 12 : 21));
-  TM.ensureKnockout();
+  ensureBracket();
   const info = TM.knockoutInfo();
   check('8p top2: no quarter-finals', !info.rounds.qf.exists);
   check('8p top2: semi-finals exist', info.rounds.sf.exists);
@@ -1282,7 +1294,7 @@ function assertRoundRobin(label, groupId, n) {
     let guard = 0;
     while (!info.champion && guard++ < 40) {
       const ko = TM.getState().matches.filter(mm => mm.stage !== 'group' && mm.status === 'queued' && mm.teamA && mm.teamB && !mm.bye);
-      if (!ko.length) { TM.ensureKnockout(); info = TM.knockoutInfo(); continue; }
+      if (!ko.length) { ensureBracket(); info = TM.knockoutInfo(); continue; }
       ko.forEach(mm => {
         const t = mm.target || 11;
         TM.saveKnockoutScore(mm.id, [{ a: t, b: t - 4 }, { a: t, b: t - 6 }]);
@@ -1323,7 +1335,7 @@ function assertRoundRobin(label, groupId, n) {
   TM.applyTeams(makeTeams({ A: 5, B: 5 }), { regenerate: true });
   TM.setQualification(3); // 6 qualifiers
   TM.groupMatches().forEach(mm => TM.saveGroupScore(mm.id, mm.teamA < mm.teamB ? 21 : 12, mm.teamA < mm.teamB ? 12 : 21));
-  TM.ensureKnockout();
+  ensureBracket();
   const byeMatches = TM.getState().matches.filter(mm => mm.stage !== 'group' && mm.bye);
   check('6 qualifiers: byes created', byeMatches.length === 2, 'got ' + byeMatches.length);
   check('byes have no opponent', byeMatches.every(mm => !mm.teamA || !mm.teamB));
@@ -1487,7 +1499,7 @@ function assertRoundRobin(label, groupId, n) {
     let guard = 0;
     while (!info.champion && guard++ < 40) {
       const ko = TM.getState().matches.filter(mm => mm.stage !== 'group' && mm.status === 'queued' && mm.teamA && mm.teamB && !mm.bye);
-      if (!ko.length) { TM.ensureKnockout(); info = TM.knockoutInfo(); continue; }
+      if (!ko.length) { ensureBracket(); info = TM.knockoutInfo(); continue; }
       ko.forEach(mm => {
         const t = mm.target || 11;
         TM.saveKnockoutScore(mm.id, [{ a: t, b: t - 3 }, { a: t, b: t - 5 }]);
@@ -1511,7 +1523,7 @@ function assertRoundRobin(label, groupId, n) {
   TM.applyTeams(makeTeams({ A: 4, B: 4 }), { regenerate: true });
   TM.setQualification(2);
   TM.groupMatches().forEach(mm => TM.saveGroupScore(mm.id, 21, 15));
-  TM.ensureKnockout();
+  ensureBracket();
   const infoA = TM.knockoutInfo();
   check('Scenario A: no QF matches', !infoA.rounds.qf.exists);
   eq('Scenario A: 12 not 20 group matches', TM.totalGroupMatchCount(), 12);
@@ -1663,7 +1675,7 @@ function assertRoundRobin(label, groupId, n) {
     TM.applyTeams(makeTeams({ A: q }), { regenerate: true, groups: ['A'] });
     TM.setQualification(q);
     TM.groupMatches().forEach(mm => TM.saveGroupScore(mm.id, mm.teamA < mm.teamB ? 21 : 15, mm.teamA < mm.teamB ? 15 : 21));
-    TM.ensureKnockout();
+    ensureBracket();
   }
 
   [2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16].forEach(function (q) {
@@ -1690,7 +1702,7 @@ function assertRoundRobin(label, groupId, n) {
     let guard = 0;
     while (!info.champion && guard++ < 60) {
       const pending = TM.getState().matches.filter(mm => mm.stage !== 'group' && mm.status === 'queued' && mm.teamA && mm.teamB && !mm.bye);
-      if (!pending.length) { TM.ensureKnockout(); info = TM.knockoutInfo(); continue; }
+      if (!pending.length) { ensureBracket(); info = TM.knockoutInfo(); continue; }
       pending.forEach(mm => {
         const t = mm.target || 11;
         TM.saveKnockoutScore(mm.id, [{ a: t, b: t - 3 }, { a: t, b: t - 5 }]);
@@ -1747,6 +1759,7 @@ function assertRoundRobin(label, groupId, n) {
   TM.applyTeams(makeTeams({ A: 5, B: 5 }), { regenerate: true });
   TM.setQualification(3); // top 3 from each = 6 qualifiers
   TM.groupMatches().forEach(mm => TM.saveGroupScore(mm.id, mm.teamA < mm.teamB ? 21 : 15, mm.teamA < mm.teamB ? 15 : 21));
+  TM.generateKnockout();
   const info0 = TM.knockoutInfo();
   const qual = TM.getState().knockout.qualifiers;
   eq('Scenario E: 6 real qualifiers', qual.A.length + qual.B.length, 6);
@@ -1766,7 +1779,7 @@ function assertRoundRobin(label, groupId, n) {
   let guard = 0;
   while (!info.champion && guard++ < 40) {
     const pending = TM.getState().matches.filter(mm => mm.stage !== 'group' && mm.status === 'queued' && mm.teamA && mm.teamB && !mm.bye);
-    if (!pending.length) { TM.ensureKnockout(); info = TM.knockoutInfo(); continue; }
+    if (!pending.length) { ensureBracket(); info = TM.knockoutInfo(); continue; }
     pending.forEach(mm => {
       const t = mm.target || 11;
       TM.saveKnockoutScore(mm.id, [{ a: t, b: t - 3 }, { a: t, b: t - 5 }]);
@@ -1942,7 +1955,7 @@ function assertRoundRobin(label, groupId, n) {
   TM.resetTournament();
   TM.applyTeams(makeTeams({ A: 5, B: 5 }), { regenerate: true });
   TM.groupMatches().forEach(m => TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 12, m.teamA < m.teamB ? 12 : 21));
-  TM.ensureKnockout();
+  ensureBracket();
   const koBefore = JSON.stringify(TM.getState().matches.filter(m => m.stage !== 'group').map(m => [m.id, m.teamA, m.teamB]));
   const completedKoBefore = TM.getState().matches.filter(m => m.status === 'completed').length;
   TM.addGroup('C');
@@ -1989,7 +2002,7 @@ function assertRoundRobin(label, groupId, n) {
     let guard = 0;
     while (!info.champion && guard++ < 60) {
       const ko = TM.getState().matches.filter(m => m.stage !== 'group' && m.status === 'queued' && m.teamA && m.teamB && !m.bye);
-      if (!ko.length) { TM.ensureKnockout(); info = TM.knockoutInfo(); continue; }
+      if (!ko.length) { ensureBracket(); info = TM.knockoutInfo(); continue; }
       ko.forEach(m => { const t = m.target || 11; TM.saveKnockoutScore(m.id, [{ a: t, b: t - 4 }, { a: t, b: t - 6 }]); });
       info = TM.knockoutInfo();
     }
@@ -2131,7 +2144,7 @@ function assertRoundRobin(label, groupId, n) {
   TM.applyTeams(makeTeams({ A: 3, B: 3, C: 3 }), { regenerate: true });
   TM.setQualification(2);
   TM.groupMatches().forEach(m => TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 12, m.teamA < m.teamB ? 12 : 21));
-  TM.ensureKnockout();
+  ensureBracket();
   TM.addGroup('D');
   TM.renameGroup('C', 'Gamma');
   TM.save();
@@ -2281,7 +2294,7 @@ function assertRoundRobin(label, groupId, n) {
   TM.resetTournament();
   // finish the whole group stage and build the bracket
   TM.groupMatches().forEach(m => TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 12, m.teamA < m.teamB ? 12 : 21));
-  TM.ensureKnockout();
+  ensureBracket();
 
   const st0 = TM.getState();
   const resultsBefore = JSON.stringify(st0.matches.filter(m => m.status === 'completed').map(m => [m.id, m.teamA, m.teamB, m.scoreA, m.scoreB, m.winner]));
@@ -2359,7 +2372,7 @@ function assertRoundRobin(label, groupId, n) {
   // Simulate an already-broken live state: three Kaveri pairs stored by display name,
   // one pair stored in caps, plus results and a bracket already recorded.
   TM.groupMatches().forEach(m => TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 12, m.teamA < m.teamB ? 12 : 21));
-  TM.ensureKnockout();
+  ensureBracket();
 
   // Force legacy representations directly on the stored teams (bypassing applyTeams).
   const st = TM.getState();
@@ -2599,7 +2612,7 @@ function assertRoundRobin(label, groupId, n) {
   TM.applyTeams(makeTeams({ A: 3, B: 3 }), { regenerate: true, groups: ['A', 'B'] });
   TM.setQualification(2);
   TM.groupMatches().forEach(m => TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 15, m.teamA < m.teamB ? 15 : 21));
-  TM.ensureKnockout();
+  ensureBracket();
   const st = TM.dashboardStages();
   eq('generated 4-qualifier bracket rounds', JSON.stringify(st.map(s => s.name)), JSON.stringify(['Semi-Final', 'Final']));
   eq('generated semi-final has 2 matches', st[0].total, 2);
@@ -2641,7 +2654,7 @@ function assertRoundRobin(label, groupId, n) {
   // exercise the "group stage complete, awaiting generation" state.
   TM.clearKnockout();
   eq('status ready when group stage complete', TM.dashboardStatus(), 'ready');
-  TM.ensureKnockout();
+  ensureBracket();
   eq('status knockout once bracket exists', TM.dashboardStatus(), 'knockout');
   const fin = TM.getMatch('F-1');
   if (fin && !fin.bye) { TM.saveKnockoutScore('F-1', [{ a: 21, b: 15 }, { a: 21, b: 15 }, { a: null, b: null }]); }
@@ -2720,7 +2733,7 @@ function assertRoundRobin(label, groupId, n) {
     TM.applyTeams(t, { regenerate: true, groups: ['A', 'B', 'C'] });
     TM.setQualification(2);
     TM.groupMatches().forEach(m => TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 15, m.teamA < m.teamB ? 15 : 21));
-    TM.ensureKnockout();
+    ensureBracket();
   }
   setup3();
   eq('3x3 top2 status is knockout', TM.dashboardStatus(), 'knockout');
@@ -2737,7 +2750,7 @@ function assertRoundRobin(label, groupId, n) {
   TM.applyTeams(makeTeams({ A: 4 }), { regenerate: true, groups: ['A'] });
   TM.setQualification(4);
   TM.groupMatches().forEach(m => TM.saveGroupScore(m.id, 21, 15));
-  TM.ensureKnockout();
+  ensureBracket();
   const sf = TM.currentKnockoutRound();
   eq('4-qualifier current round is sf', sf.key, 'sf');
   eq('4-qualifier round name is Semi-finals', sf.name, 'Semi-finals');
@@ -2752,7 +2765,7 @@ function assertRoundRobin(label, groupId, n) {
   ], { regenerate: true, groups: ['A'] });
   TM.setQualification(2);
   TM.groupMatches().forEach(m => TM.saveGroupScore(m.id, 21, 15));
-  TM.ensureKnockout();
+  ensureBracket();
   const finalM = TM.getMatch('F-1');
   if (finalM) TM.saveKnockoutScore('F-1', [{ a: 21, b: 15 }, { a: 21, b: 15 }, { a: null, b: null }]);
   eq('status complete with champion', TM.dashboardStatus(), 'complete');
@@ -2972,7 +2985,7 @@ function finishGroupStage() {
   TM.resetTournament();
   TM.setKnockoutRule('qf', { format: 'best_of_3', pointsPerGame: 11 });
   finishGroupStage();
-  TM.ensureKnockout();
+  ensureBracket();
   const qf = TM.getMatch('QF-1');
   eq('bo3: QF snapshot format', TM.matchScoring(qf).format, 'best_of_3');
   eq('bo3: QF snapshot points', TM.matchScoring(qf).pointsPerGame, 11);
@@ -2988,7 +3001,7 @@ function finishGroupStage() {
   TM.resetTournament();
   TM.setKnockoutRule('qf', { format: 'best_of_3', pointsPerGame: 11 });
   finishGroupStage();
-  TM.ensureKnockout();
+  ensureBracket();
   const r = TM.saveKnockoutScore('QF-1', [{ a: 11, b: 5 }, { a: 11, b: 7 }]);
   check('bo3 early: 2-0 accepted', r.ok, r.msg);
   const qf = TM.getMatch('QF-1');
@@ -3005,7 +3018,7 @@ function finishGroupStage() {
   TM.resetTournament();
   TM.setKnockoutRule('qf', { format: 'single_game', pointsPerGame: 21 });
   finishGroupStage();
-  TM.ensureKnockout();
+  ensureBracket();
   const qf = TM.getMatch('QF-1');
   check('straight: snapshot format', TM.matchScoring(qf).format === 'single_game');
   eq('straight: snapshot points', TM.matchScoring(qf).pointsPerGame, 21);
@@ -3025,46 +3038,53 @@ function finishGroupStage() {
   TM.resetTournament();
   TM.setKnockoutRule('qf', { format: 'best_of_3', pointsPerGame: 11 });
   finishGroupStage();
-  TM.ensureKnockout();
+  ensureBracket();
   const needsTwo = TM.validateKnockoutSets('QF-1', [{ a: 11, b: 7 }]);
   check('bo3: one game is not enough', needsTwo !== null, needsTwo);
 })();
 
-// TEST 8 — snapshot protection: changing Settings does not alter an existing match
+// TEST 8 — snapshot protection: a generated match keeps the rules it was created
+// under, and once the bracket exists the Settings rules are locked.
 (function () {
   TM.resetTournament();
   TM.setKnockoutRule('qf', { format: 'best_of_3', pointsPerGame: 11 });
   finishGroupStage();
-  TM.ensureKnockout();
+  ensureBracket();
   const before = TM.getMatch('QF-1');
   eq('snapshot: QF created best_of_3', TM.matchScoring(before).format, 'best_of_3');
   eq('snapshot: QF created 11', TM.matchScoring(before).pointsPerGame, 11);
-  // change settings to straight set × 21
-  check('snapshot: switch settings', TM.setKnockoutRule('qf', { format: 'single_game', pointsPerGame: 21 }).ok);
+  // the rules are locked while the bracket exists
+  eq('snapshot: rules locked after generation', TM.knockoutRulesLocked(), true);
+  const locked = TM.setKnockoutRule('qf', { format: 'single_game', pointsPerGame: 21 });
+  check('snapshot: locked edit refused', !locked.ok, locked.msg);
+  check('snapshot: refusal explains the lock', /locked/i.test(locked.msg), locked.msg);
   eq('snapshot: existing QF format unchanged', TM.matchScoring(TM.getMatch('QF-1')).format, 'best_of_3');
   eq('snapshot: existing QF points unchanged', TM.matchScoring(TM.getMatch('QF-1')).pointsPerGame, 11);
   // and it still validates as a best-of-3 match
   const okBo3 = TM.validateKnockoutSets('QF-1', [{ a: 11, b: 7 }, { a: 9, b: 11 }, { a: 11, b: 6 }]);
   check('snapshot: existing QF still best of 3', okBo3 === null, okBo3);
-  // a freshly generated QF after a bracket rebuild uses the new rule
+  // resetting the knockout unlocks the rules; a rebuilt QF then uses the new rule
   TM.clearKnockout();
-  TM.ensureKnockout();
+  eq('snapshot: rules unlocked after reset', TM.knockoutRulesLocked(), false);
+  check('snapshot: unlocked edit accepted', TM.setKnockoutRule('qf', { format: 'single_game', pointsPerGame: 21 }).ok);
+  ensureBracket();
   eq('snapshot: regenerated QF uses new setting', TM.matchScoring(TM.getMatch('QF-1')).format, 'single_game');
   eq('snapshot: regenerated QF uses new points', TM.matchScoring(TM.getMatch('QF-1')).pointsPerGame, 21);
 })();
 
-// TEST 9 — completed match protection: settings change never rewrites a result
+// TEST 9 — completed match protection: a completed result is never rewritten
 (function () {
   TM.resetTournament();
   TM.setKnockoutRule('qf', { format: 'best_of_3', pointsPerGame: 11 });
   finishGroupStage();
-  TM.ensureKnockout();
+  ensureBracket();
   TM.saveKnockoutScore('QF-1', [{ a: 11, b: 8 }, { a: 9, b: 11 }, { a: 11, b: 7 }]);
   const qf = TM.getMatch('QF-1');
   const resultBefore = JSON.stringify({ sets: qf.sets, setsA: qf.setsA, setsB: qf.setsB, winner: qf.winner, status: qf.status });
-  TM.setKnockoutRule('qf', { format: 'single_game', pointsPerGame: 21 });
-  TM.setKnockoutRule('sf', { format: 'single_game', pointsPerGame: 21 });
-  TM.setKnockoutRule('final', { format: 'single_game', pointsPerGame: 21 });
+  // every rules edit is refused while the bracket exists
+  check('completed protection: locked edit refused', !TM.setKnockoutRule('qf', { format: 'single_game', pointsPerGame: 21 }).ok);
+  check('completed protection: locked sf edit refused', !TM.setKnockoutRule('sf', { format: 'single_game', pointsPerGame: 21 }).ok);
+  check('completed protection: locked final edit refused', !TM.setKnockoutRule('final', { format: 'single_game', pointsPerGame: 21 }).ok);
   const after = TM.getMatch('QF-1');
   eq('completed protection: result unchanged', JSON.stringify({ sets: after.sets, setsA: after.setsA, setsB: after.setsB, winner: after.winner, status: after.status }), resultBefore);
   eq('completed protection: scoring snapshot unchanged', TM.matchScoring(after).format, 'best_of_3');
@@ -3177,7 +3197,7 @@ function finishGroupStage() {
   TM.resetTournament();
   TM.setKnockoutRule('sf', { format: 'single_game', pointsPerGame: 21 });
   finishGroupStage();
-  TM.ensureKnockout();
+  ensureBracket();
   eq('structure: 20 group matches', TM.groupMatches().length, 20);
   eq('structure: 4 quarter-finals', TM.getState().matches.filter(function (m) { return m.stage === 'qf'; }).length, 4);
   eq('structure: 8 qualifiers', (function () { let c = 0; const q = TM.getState().knockout.qualifiers; Object.keys(q).forEach(function (g) { c += q[g].length; }); return c; })(), 8);
@@ -3185,7 +3205,7 @@ function finishGroupStage() {
   let guard = 0;
   while (!TM.knockoutInfo().champion && guard++ < 40) {
     const queued = TM.getState().matches.filter(function (m) { return m.stage !== 'group' && m.status === 'queued' && m.teamA && m.teamB && !m.bye; });
-    if (!queued.length) { TM.ensureKnockout(); continue; }
+    if (!queued.length) { ensureBracket(); continue; }
     queued.forEach(function (m) {
       const sc = TM.matchScoring(m);
       if (sc.format === 'single_game') TM.saveKnockoutScore(m.id, [{ a: sc.pointsPerGame, b: sc.pointsPerGame - 5 }]);
@@ -3199,6 +3219,85 @@ function finishGroupStage() {
   // the straight-set SF actually stored one game
   const sf = TM.getState().matches.filter(function (m) { return m.stage === 'sf'; })[0];
   eq('structure: straight SF stored one game', sf.sets.length, 1);
+})();
+
+/* ── 47b. staged knockout workflow + rules lock ─────────── */
+// Workflow: Group Stage → Configure Knockout Rules → Generate/Start Knockout
+//   → 🔒 Knockout Rules Locked → QF → SF → Final
+(function () {
+  TM.resetTournament();
+  // Step 1: group stage in progress — Configure is already available, nothing else is ready.
+  let flow = TM.knockoutWorkflow();
+  eq('flow: 5 steps', flow.length, 5);
+  eq('flow: group current', flow[0].state, 'current');
+  eq('flow: configure available during group stage', flow[1].state, 'current');
+  eq('flow: generate pending during group stage', flow[2].state, 'pending');
+  eq('flow: rules not locked before generation', TM.knockoutRulesLocked(), false);
+
+  // Rules are freely configurable during the group stage.
+  check('flow: rules configurable before generation', TM.setKnockoutRule('qf', { format: 'single_game', pointsPerGame: 21 }).ok);
+
+  finishGroupStage();
+  // Step 2: group stage complete, rules configured, knockout not yet started.
+  flow = TM.knockoutWorkflow();
+  eq('flow: group done', flow[0].state, 'done');
+  eq('flow: configure current once group complete', flow[1].state, 'current');
+  eq('flow: generate current once group complete', flow[2].state, 'current');
+  eq('flow: locked still pending', flow[3].state, 'pending');
+  check('flow: no bracket before starting', !TM.knockoutInfo().exists);
+  check('flow: rules still editable before generation', TM.setKnockoutRule('sf', { format: 'single_game', pointsPerGame: 21 }).ok);
+
+  // Step 3: start the knockout — this locks the rules.
+  const gen = TM.generateKnockout();
+  check('flow: generate/start ok', gen.ok, gen.msg);
+  flow = TM.knockoutWorkflow();
+  eq('flow: configure done', flow[1].state, 'done');
+  eq('flow: generate done', flow[2].state, 'done');
+  eq('flow: locked done', flow[3].state, 'done');
+  eq('flow: bracket current', flow[4].state, 'current');
+  eq('flow: rules locked after generation', TM.knockoutRulesLocked(), true);
+  check('flow: locked rules refuse an edit', !TM.setKnockoutRule('qf', { format: 'best_of_3', pointsPerGame: 11 }).ok);
+  check('flow: getKnockoutRules reports the lock', TM.getKnockoutRules().locked === true);
+  // the QF generated from the pre-generation config keeps the configured rule
+  eq('flow: generated QF used the configured rule', TM.matchScoring(TM.getMatch('QF-1')).format, 'single_game');
+
+  // Resetting the knockout unlocks the rules again.
+  TM.clearKnockout();
+  eq('flow: reset unlocks rules', TM.knockoutRulesLocked(), false);
+  check('flow: editable again after reset', TM.setKnockoutRule('qf', { format: 'best_of_3', pointsPerGame: 11 }).ok);
+  flow = TM.knockoutWorkflow();
+  eq('flow: bracket pending after reset', flow[4].state, 'pending');
+  eq('flow: configure current again after reset', flow[1].state, 'current');
+
+  // Full run to a champion ends with the bracket step done.
+  ensureBracket();
+  let guard = 0;
+  while (!TM.knockoutInfo().champion && guard++ < 40) {
+    const queued = TM.getState().matches.filter(function (m) { return m.stage !== 'group' && m.status === 'queued' && m.teamA && m.teamB && !m.bye; });
+    if (!queued.length) { ensureBracket(); continue; }
+    queued.forEach(function (m) {
+      const sc = TM.matchScoring(m);
+      if (sc.format === 'single_game') TM.saveKnockoutScore(m.id, [{ a: sc.pointsPerGame, b: sc.pointsPerGame - 5 }]);
+      else TM.saveKnockoutScore(m.id, [{ a: sc.pointsPerGame, b: sc.pointsPerGame - 5 }, { a: sc.pointsPerGame, b: sc.pointsPerGame - 6 }]);
+    });
+  }
+  check('flow: champion crowned', !!TM.knockoutInfo().champion);
+  flow = TM.knockoutWorkflow();
+  eq('flow: bracket done once champion decided', flow[4].state, 'done');
+})();
+
+// The workflow indicator is derived from live state only — nothing is persisted.
+(function () {
+  TM.resetTournament();
+  const src = html;
+  check('workflow: not stored in state', !/state\.knockoutWorkflow/.test(src) && !/state\.workflow\b/.test(src));
+  check('workflow: no stored lock flag', !/state\.(settings|knockout)\.(rulesLocked|locked|knockoutRulesLocked)/.test(src));
+  const raw = JSON.parse(TM.exportJSON());
+  check('workflow: export has no workflow blob', raw.workflow === undefined && raw.knockoutWorkflow === undefined);
+  // the lock is derived from the presence of knockout matches
+  eq('workflow: unlocked with no bracket', TM.knockoutRulesLocked(), false);
+  TM.getState().matches.push({ id: 'QF-9', stage: 'qf', teamA: 'A1', teamB: 'A2', status: 'queued' });
+  eq('workflow: locked once any knockout match exists', TM.knockoutRulesLocked(), true);
 })();
 
 /* ── league-stage score statistics (dashboard) ─────────── */
@@ -3294,7 +3393,7 @@ function rowFor(group, teamId) {
   TM.resetTournament();
   TM.getState().settings.allowOutsideAvailability = true;
   TM.groupMatches().forEach(m => setScoreFor(m, m.teamA, 21, 12));
-  TM.ensureKnockout();
+  ensureBracket();
   const before = JSON.stringify(TM.getState().matches.filter(m => m.stage === 'group').length) +
     '|' + JSON.stringify(TM.computeStandings('A').map(r => [r.team.id, r.played, r.won, r.lost, r.pts, r.pf, r.pa, r.diff])) +
     '|' + JSON.stringify(TM.computeStandings('B').map(r => [r.team.id, r.played, r.won, r.lost, r.pts, r.pf, r.pa, r.diff]));
@@ -3308,7 +3407,7 @@ function rowFor(group, teamId) {
       if (sc.format === 'single_game') TM.saveKnockoutScore(m.id, [{ a: sc.pointsPerGame, b: sc.pointsPerGame - 5 }]);
       else TM.saveKnockoutScore(m.id, [{ a: sc.pointsPerGame, b: sc.pointsPerGame - 5 }, { a: sc.pointsPerGame, b: sc.pointsPerGame - 6 }]);
     });
-    TM.ensureKnockout();
+    ensureBracket();
   }
   const koDone = TM.getState().matches.filter(m => m.stage !== 'group' && m.status === 'completed');
   check('T5 knockout matches were completed', koDone.length > 0, 'none');
