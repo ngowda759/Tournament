@@ -89,6 +89,12 @@ vm.runInContext(ui[1], sandbox, { filename: 'ui-layer.js' });
 
 const TM = sandbox.TM;
 const App = sandbox.App;
+// Starting the knockout is an explicit organiser step; later rounds still advance
+// automatically. Convenience wrapper for tests that need a built bracket.
+function ensureBracket() {
+  if (!TM.knockoutInfo().exists) TM.generateKnockout();
+  TM.ensureKnockout();
+}
 check('TM exposed', !!TM, 'no TM');
 check('App exposed', !!App, 'no App');
 
@@ -178,6 +184,7 @@ check('9p dashboard shows /23 overall', s.indexOf('/ 23') !== -1, 'no /23');
 // Play the group stage out and render the knockout screen for a 6-qualifier bracket
 // (this is where byes are shown) and the standings screen with real results.
 TM.groupMatches().forEach(function (m) { TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 15, m.teamA < m.teamB ? 15 : 21); });
+ensureBracket();
 App.nav('standings');
 s = getEl('view').innerHTML;
 check('standings renders 5 rows for group A', (s.match(/standings-table/g) || []).length >= 1);
@@ -196,7 +203,11 @@ TM.applyTeams([
 ], { regenerate: true });
 TM.setQualification(3);
 TM.groupMatches().forEach(function (m) { TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 15, m.teamA < m.teamB ? 15 : 21); });
+ensureBracket();
 renderAll('6 qualifiers');
+App.nav('knockout');
+s = getEl('view').innerHTML;
+check('6 qualifiers: bracket rendered with byes', s.indexOf('bracket') !== -1 && s.indexOf('Bye') !== -1, 'no byes');
 
 // 3 groups of 3 (Scenario D)
 TM.resetTournament();
@@ -217,7 +228,7 @@ const three2 = [];
 TM.applyTeams(three2, { regenerate: true, groups: ['A', 'B', 'C'] });
 TM.setQualification(2);
 TM.groupMatches().forEach(function (m) { TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 15, m.teamA < m.teamB ? 15 : 21); });
-TM.ensureKnockout();
+ensureBracket();
 renderAll('3-group knockout');
 App.nav('knockout');
 s = getEl('view').innerHTML;
@@ -342,7 +353,7 @@ TM.applyTeams([
 ], { regenerate: true, groups: ['A'] });
 TM.setQualification(2);
 TM.groupMatches().forEach(function (m) { TM.saveGroupScore(m.id, 21, 15); });
-TM.ensureKnockout();
+ensureBracket();
 const finalM = TM.getMatch('F-1');
 if (finalM) { TM.saveKnockoutScore('F-1', [{ a: 21, b: 15 }, { a: 21, b: 15 }, { a: null, b: null }]); }
 App.nav('dashboard');
@@ -469,7 +480,7 @@ const tk = [];
 TM.applyTeams(tk, { regenerate: true, groups: ['A', 'B', 'C'] });
 TM.setQualification(2);
 TM.groupMatches().forEach(function (m) { TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 15, m.teamA < m.teamB ? 15 : 21); });
-TM.ensureKnockout();
+ensureBracket();
 App.nav('dashboard');
 s = getEl('view').innerHTML;
 check('knockout dashboard names the current round', s.indexOf('Quarter-finals in progress') !== -1, 'no knockout round status');
@@ -788,7 +799,7 @@ App.setKnockoutFormat('qf', 'best_of_3');
 TM.resetTournament();
 TM.setKnockoutRule('qf', { format: 'best_of_3', pointsPerGame: 11 });
 TM.groupMatches().forEach(function (m) { TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 12, m.teamA < m.teamB ? 12 : 21); });
-TM.ensureKnockout();
+ensureBracket();
 App.openScore('QF-1', 'matches');
 let body = getEl('score-body').innerHTML;
 let sub = getEl('score-sub').textContent;
@@ -803,7 +814,7 @@ App.closeScore();
 TM.resetTournament();
 TM.setKnockoutRule('qf', { format: 'single_game', pointsPerGame: 21 });
 TM.groupMatches().forEach(function (m) { TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 12, m.teamA < m.teamB ? 12 : 21); });
-TM.ensureKnockout();
+ensureBracket();
 App.openScore('QF-1', 'matches');
 body = getEl('score-body').innerHTML;
 sub = getEl('score-sub').textContent;
@@ -812,6 +823,15 @@ check('straight UI: Final score label rendered', body.indexOf('>Final score<') !
 check('straight UI: no Game 2 input', body.indexOf('>Game 2<') === -1, 'game 2 rendered');
 check('straight UI: no Game 3 input', body.indexOf('>Game 3<') === -1 && body.indexOf('sc-g3-a-row') === -1, 'game 3 rendered');
 check('straight UI: single score input per side', (body.match(/id="sc-a-0"/g) || []).length === 1 && (body.match(/id="sc-a-1"/g) || []).length === 0, 'wrong slots');
+check('straight UI: no Best of 2 wording', body.indexOf('Best of 2') === -1 && sub.indexOf('Best of 2') === -1, 'best of 2 shown');
+check('straight UI: not labelled as two games', body.indexOf('Game 2') === -1 && body.indexOf('games') === -1, 'two-game wording shown');
+// The single game decides the match: 21–17 is a straight-set win for team A.
+TM.saveKnockoutScore('QF-1', [{ a: 21, b: 17 }]);
+const straightQf = TM.getMatch('QF-1');
+eq('straight UI: completed on one game', straightQf.status, 'completed');
+eq('straight UI: winner is the higher score', straightQf.winner, straightQf.teamA);
+eq('straight UI: stored exactly one game', straightQf.sets.length, 1);
+check('straight UI: a second game is refused', TM.saveKnockoutScore('QF-2', [{ a: 21, b: 17 }, { a: 21, b: 19 }]).ok === false);
 App.closeScore();
 
 // Match / knockout views advertise each round's configured format.
@@ -824,7 +844,7 @@ check('ko view: no undefined/NaN', koView.indexOf('undefined') === -1 && koView.
 // With a generated bracket the match list labels each knockout match with its format.
 TM.setKnockoutRule('final', { format: 'single_game', pointsPerGame: 21 });
 TM.groupMatches().forEach(function (m) { TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 12, m.teamA < m.teamB ? 12 : 21); });
-TM.ensureKnockout();
+ensureBracket();
 App.nav('matches');
 const matchView = getEl('view').innerHTML;
 check('matches view: knockout format tag shown', matchView.indexOf('Best of 3 × 11') !== -1, 'no qf format');
@@ -834,6 +854,73 @@ check('matches view: no undefined/NaN', matchView.indexOf('undefined') === -1 &&
 const qfBefore = TM.matchFormatTag(TM.getMatch('QF-1'));
 App.setKnockoutFormat('qf', 'single_game');
 check('snapshot UI: existing match label unchanged', TM.matchFormatTag(TM.getMatch('QF-1')) === qfBefore, TM.matchFormatTag(TM.getMatch('QF-1')));
+
+/* ── staged knockout workflow UI + rules lock ─────────────────────────────── */
+// Group stage in progress: the flow indicator is rendered and rules are editable.
+TM.resetTournament();
+App.nav('knockout');
+let flowView = getEl('view').innerHTML;
+check('ko flow: indicator rendered', flowView.indexOf('ko-flow') !== -1, 'no flow');
+check('ko flow: group stage step shown', flowView.indexOf('Group Stage') !== -1, 'no group step');
+check('ko flow: configure step shown', flowView.indexOf('Configure Knockout Rules') !== -1, 'no configure step');
+check('ko flow: locked step shown', flowView.indexOf('🔒 Knockout Rules Locked') !== -1, 'no locked step');
+check('ko flow: no undefined/NaN', flowView.indexOf('undefined') === -1 && flowView.indexOf('NaN') === -1, 'leak');
+
+// Settings rules are editable (not disabled) before the knockout is generated.
+App.nav('settings');
+let setView = getEl('view').innerHTML;
+check('ko lock UI: not locked before generation', setView.indexOf('locked because the knockout stage has started') === -1, 'premature lock');
+check('ko lock UI: format select enabled', setView.indexOf("App.setKnockoutFormat('qf',this.value)\"") !== -1 && setView.indexOf("App.setKnockoutFormat('qf',this.value)\" disabled") === -1, 'select not enabled');
+
+// Group stage complete, knockout not started: the Start control and both steps show.
+TM.groupMatches().forEach(function (m) { TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 12, m.teamA < m.teamB ? 12 : 21); });
+App.nav('knockout');
+flowView = getEl('view').innerHTML;
+check('ko flow: start control offered', flowView.indexOf('Generate / Start knockout') !== -1, 'no start control');
+check('ko flow: configure shortcut offered', flowView.indexOf('Configure knockout rules') !== -1, 'no configure shortcut');
+check('ko flow: not generated before starting', !TM.knockoutInfo().exists, 'bracket built early');
+
+// Start the knockout from the UI — the rules then lock and the controls disable.
+App.generateKnockout();
+check('ko lock UI: locked after starting', TM.knockoutRulesLocked(), true);
+App.nav('settings');
+setView = getEl('view').innerHTML;
+check('ko lock UI: locked banner shown', setView.indexOf('🔒 Knockout scoring is locked') !== -1, 'no lock banner');
+check('ko lock UI: format select disabled', setView.indexOf("App.setKnockoutFormat('qf',this.value)\" disabled") !== -1, 'select not disabled');
+check('ko lock UI: points input disabled', setView.indexOf("disabled onchange=\"App.setKnockoutPoints('qf',this.value)\"") !== -1, 'input not disabled');
+
+// A locked edit from the UI is refused and surfaced, never silently applied.
+App.setKnockoutFormat('qf', 'single_game');
+eq('ko lock UI: locked format edit refused', TM.getKnockoutRules().rules.qf.format, 'best_of_3');
+check('ko lock UI: refusal message shown', /locked/i.test(getEl('ko-msg').textContent) || /locked/i.test(getEl('toast').textContent), 'no refusal message');
+
+// A played knockout cannot be silently reset from the UI: completing a knockout
+// match and then clearing the bracket through the core API is refused.
+const koFirst = TM.getState().matches.filter(function (m) { return m.stage !== 'group' && !m.bye && m.teamA && m.teamB; })[0];
+TM.saveKnockoutScore(koFirst.id, [{ a: 21, b: 15 }, { a: 21, b: 17 }, { a: null, b: null }]);
+check('ko lock UI: completed knockout protects the bracket', TM.knockoutProtected(), true);
+const refusedClear = TM.clearKnockout();
+check('ko lock UI: clear refused while a knockout result exists', !refusedClear.ok, refusedClear.msg);
+eq('ko lock UI: refused clear left the lock on', TM.knockoutRulesLocked(), true);
+check('ko lock UI: refused clear kept the result', TM.getMatch(koFirst.id).status, 'completed');
+App.nav('settings');
+setView = getEl('view').innerHTML;
+check('ko lock UI: controls still disabled after refused clear', setView.indexOf("App.setKnockoutFormat('qf',this.value)\" disabled") !== -1, 'controls re-enabled');
+
+// Only the explicit, confirmed destructive reset clears a played knockout.
+TM.clearKnockout('force');
+App.nav('settings');
+setView = getEl('view').innerHTML;
+check('ko lock UI: unlocked banner gone after forced reset', setView.indexOf('🔒 Knockout scoring is locked') === -1, 'stale lock banner');
+check('ko lock UI: format select re-enabled after forced reset', setView.indexOf("App.setKnockoutFormat('qf',this.value)\" disabled") === -1 && setView.indexOf("App.setKnockoutFormat('qf',this.value)\"") !== -1, 'select still disabled');
+
+// Before a knockout is played, clearing the generated bracket unlocks the rules.
+TM.resetTournament();
+TM.groupMatches().forEach(function (m) { TM.saveGroupScore(m.id, m.teamA < m.teamB ? 21 : 12, m.teamA < m.teamB ? 12 : 21); });
+TM.generateKnockout();
+eq('ko lock UI: generated locks the rules', TM.knockoutRulesLocked(), true);
+check('ko lock UI: unplayed bracket clears safely', TM.clearKnockout().ok);
+eq('ko lock UI: unplayed clear unlocks the rules', TM.knockoutRulesLocked(), false);
 
 // ── Dashboard League standings (score statistics) ─────────────────────────────
 // The dashboard must expose cumulative league-stage P/W/L/PF/PA/PD/Pts per team,

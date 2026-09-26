@@ -23,6 +23,7 @@ example* the app starts from. Nothing in the tournament engine assumes it.
 - [Rolling court scheduling](#rolling-court-scheduling)
 - [Court configuration](#court-configuration)
 - [Team level configuration](#team-level-configuration)
+- [Knockout workflow](#knockout-workflow)
 - [Knockout structure](#knockout-structure)
 - [Multi-group knockout](#multi-group-knockout)
 - [Qualification](#qualification)
@@ -111,6 +112,7 @@ See [Team level configuration](#team-level-configuration) for the full behaviour
 | **Tournament Configuration** | Tournament name, and a read-out of the number of pairs, groups and group matches calculated from your data |
 | **Groups** | Add an (empty) group, rename a group's label, remove an empty group; each row shows its pair count and group-match count, derived from actual assignments |
 | **Qualification** | How many pairs qualify from each group, with a per-group breakdown |
+| **Knockout Scoring** | Per-round format (Best of 3 / Straight set) and points target; freely configurable before the knockout starts, locked once it has started |
 | **Regenerate Fixtures** | Current vs new pair/group/fixture/result counts, and an explicit regenerate action |
 | **Team Level Configuration** | Add, rename, disable or remove levels; pair counts are derived |
 | **Court configuration** | Court count, names, availability windows, enable/disable |
@@ -464,6 +466,64 @@ Existing backups remain backwards compatible: old tournaments that stored levels
 
 ---
 
+## Knockout workflow
+
+The knockout follows a staged workflow, shown as an indicator on the **Knockout** screen and in
+**Settings → Knockout Scoring**:
+
+```
+Group Stage
+    ↓
+Configure Knockout Rules
+    ↓
+Generate/Start Knockout
+    ↓
+🔒 Knockout Rules Locked
+    ↓
+QF → SF → Final
+```
+
+Each step is derived from live tournament state — nothing is stored separately — so the indicator
+can never disagree with the engine. The one durable signal is `knockout.started`, a latch set when
+the knockout is started and cleared only by an explicit reset.
+
+1. **Group Stage** — while group matches are being played, the knockout rules can be configured
+   freely (see below). The bracket does not exist yet, and the knockout cannot be started.
+2. **Configure Knockout Rules** — **Settings → Knockout Scoring** sets each round's format and
+   points target. This is the only time the rules can be changed.
+3. **Generate/Start Knockout** — once every group match is complete, the Knockout screen offers
+   **Generate / Start knockout**. Starting the knockout builds the first bracket round from the
+   final standings. This is an explicit step; the bracket is **not** generated automatically on
+   the last group result, so the rules are always configured first.
+4. **🔒 Knockout Rules Locked** — starting the knockout locks the scoring rules permanently. From
+   here the Settings controls are disabled and any attempt to change a rule is refused with a
+   clear message. The lock is a durable latch, so it survives clearing the bracket and cannot be
+   reopened by a side effect.
+5. **QF → SF → Final** — each later round unlocks automatically as the previous round finishes.
+   Every match keeps the rules it was created under, so the lock never rewrites a live or
+   completed match.
+
+### Resetting the knockout
+
+Clearing the bracket unlocks the rules only while the knockout is **unplayed**. As soon as any
+knockout match is in progress or completed, the bracket is protected:
+
+- **Reset** on a group result, **Regenerate fixtures** and the ordinary clear all refuse and
+  explain why, so a played knockout can never be discarded by a side effect.
+- The explicit **Clear results only** action (Settings → Danger zone) is the sanctioned way to
+  discard a played knockout; it asks for confirmation, clears the bracket and releases the lock.
+- An unplayed bracket — generated but with no result recorded — can still be cleared to
+  reconfigure and start again.
+
+A single knockout match can still be reset on its own (**↺ Reset** on the match). That clears only
+that match and its later dependants, so the lock stays on.
+
+The final step's label is derived from the qualifier count: a top-4 field reads
+`QF → SF → Final`, a top-2 field reads `SF → Final`, and a larger bracket reads
+`R16 → QF → SF → Final`.
+
+---
+
 ## Knockout structure
 
 The bracket is generated from the **number of qualifiers**, not from a fixed round list. If N
@@ -536,6 +596,10 @@ quarter-finals, then semi-finals and a final — 5 real knockout matches in tota
 Each round unlocks automatically as the previous round finishes. Every set score is validated
 (played to the round's target, won by 2 clear points, a set cannot be tied, sets must be filled in
 order, and a third set is rejected if one team already won the first two).
+
+**Best of 3** is decided when one team wins two games (2–0 or 2–1); a single game is never enough.
+**Straight set** is decided by exactly one game — the higher score wins, no second game is accepted,
+and there is no best-of-2 variant. Both formats share the round's points-per-game target.
 
 When the final is decided the app shows a clear **🏆 CHAMPION** card.
 
@@ -666,7 +730,7 @@ deleted team ID — the fixtures are regenerated from the surviving pairs.
 | **Matches** | All group and knockout matches with enter/edit/undo actions |
 | **Courts** | Operational monitor — current match, next eligible match, start/complete, waiting list (no configuration controls) |
 | **Standings** | One table per group with qualifying positions highlighted |
-| **Knockout** | The generated bracket (whatever rounds apply) plus the champion card |
+| **Knockout** | The staged workflow indicator (group stage → configure rules → start → 🔒 locked → rounds), the generated bracket (whatever rounds apply) plus the champion card |
 | **Teams** | Edit pair names, players, level (dropdown from the configured levels) and group; add/remove pairs |
 | **Settings** | Central configuration: tournament name, groups, qualification, regenerate fixtures, levels, court configuration, scheduling, backup, reset |
 
@@ -853,8 +917,19 @@ generateGroupFixtures()          buildGroupMatches()
 getGroupMatchCount(groupId)      getTotalGroupMatchCount()
 getQualifiedTeams()              setQualification(perGroup)
 generateKnockout()               bracketRounds(n)
-getTotalMatchCount()             progress()
+ensureKnockout()                 knockoutInfo()
+getKnockoutRules()               setKnockoutRule(stage, rule)
+knockoutRulesLocked()            knockoutWorkflow()
+bracketStageLabel()              getTotalMatchCount()
+progress()
 ```
+
+`generateKnockout()` is the explicit **Generate/Start knockout** step. `ensureKnockout()` only
+advances *later* rounds once their feeders are decided — it never builds the first round, so the
+knockout rules can always be configured first. `setKnockoutRule()` refuses edits while
+`knockoutRulesLocked()` is true (i.e. while any knockout match exists). `knockoutWorkflow()`
+returns the staged indicator (`Group Stage → Configure Knockout Rules → Generate/Start Knockout
+→ 🔒 Knockout Rules Locked → <rounds>`), derived entirely from live state.
 
 ### State model
 
@@ -908,7 +983,7 @@ node tests/core.test.js
 node tests/render.test.js
 ```
 
-It extracts the DOM-free `TM` layer from `index.html` and asserts, among ~1450 checks:
+It extracts the DOM-free `TM` layer from `index.html` and asserts, among ~1900 checks:
 
 - **dynamic group stage**: correct round-robin counts for 2/3/4/5/6 pairs (1/3/6/10/15) and for
   8 pairs 4+4 (12), 9 pairs 5+4 (16), 10 pairs 5+5 (20); no duplicate pairings, no self-matches,
@@ -924,6 +999,12 @@ It extracts the DOM-free `TM` layer from `index.html` and asserts, among ~1450 c
   `regeneratePlan()` reports current pairs, distribution, results and new fixture count
 - **qualification**: per-group qualifier count validated against the largest group; refused once
   the bracket exists; 8-pair top-2 yields SF (no QF) and 4 qualifiers
+- **staged knockout workflow**: the indicator walks `Group Stage → Configure Knockout Rules →
+  Generate/Start Knockout → 🔒 Knockout Rules Locked → <rounds>` and is derived entirely from
+  live state (never persisted or exported); the first bracket round is an explicit
+  `generateKnockout()` step, not auto-generated on the last group result; rules are editable
+  during the group stage, locked the moment the bracket exists, and unlocked again by a knockout
+  reset; a locked `setKnockoutRule()` is refused with an explanatory message and changes nothing
 - **dynamic knockout**: 2 → Final, 4 → SF+Final, 8 → QF onward (7 matches), 16 → R16 onward
   (15 matches), 17–32 → Round of 32 onward; every qualifier count from 2 to 16 is played through
   to a champion; non-power-of-two qualifier counts (3, 5, 6, 7, 9, 10, 12, 14) create byes that
