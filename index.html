@@ -307,6 +307,18 @@
   .dash-col .section-title { margin-top: 1.75rem; }
   @media (min-width: 820px) { .analytics-grid + .analytics-grid { margin-top: 0; } }
 
+  /* Dashboard results area — leaders on the left, results (progress, recent
+     results, champion) on the right. Single column until 1024px, then a 2:3 split
+     that gives the results pane the wider track. minmax(0,1fr) keeps every track
+     shrinkable so the page never overflows horizontally. */
+  .dash-results { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .dash-pane { min-width: 0; }
+  @media (min-width: 1024px) {
+    /* Both panes start at the same y and their first section titles keep the same
+       top margin, so the two columns are aligned; minmax(0,1fr) keeps them shrinkable. */
+    .dash-results { grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 24px; align-items: start; }
+  }
+
   /* Level distribution bars */
   .level-bars { display: flex; flex-direction: column; gap: 9px; }
   .level-bar-row { display: grid; grid-template-columns: 76px minmax(0, 1fr) 28px; align-items: center; gap: 10px; }
@@ -4283,11 +4295,25 @@
     html += statusStrip(status, p, kpi);
     html += kpiCards(kpi);
 
+    // Results area: Current leaders on the left, tournament results (progress,
+    // recent results and the champion) on the right. Two columns from 1024px up;
+    // a single column below, so tablet and phone keep the existing stacked flow.
+    html += '<div class="dash-results">';
+    html += '<div class="dash-pane">' + leadersBlock() + '</div>';
+    html += '<div class="dash-pane">';
     html += '<div class="section-title">Tournament progress <span class="line"></span></div>';
     html += progressCard(stages, p);
+    html += recentBlock();
+    if (ch) {
+      html += '<div class="section-title">Champion <span class="line"></span></div>';
+      html += '<div class="champion-card"><div class="crown">🏆</div><div class="ctitle">Tournament Champion</div>' +
+        '<div class="cname">' + esc(ch.name) + '</div>' + (ch.players && ch.players.length ? '<div class="muted" style="margin-top:4px;">' + esc(ch.players.join(' · ')) + '</div>' : '') + '</div>';
+    }
+    html += '</div>';
+    html += '</div>';
 
-    // Operational blocks come before the analytics so the dashboard reads as a
-    // live control centre: courts, then the next matches, then the waiting queue.
+    // Operational blocks stay full-width below the results area so the dashboard
+    // reads as a live control centre: courts, then the next matches, then the queue.
     html += '<div class="section-title">' + phaseTag('now') + ' Live courts <span class="line"></span></div>';
     html += liveCourtsBlock(st, kpi);
 
@@ -4304,17 +4330,6 @@
     html += '<div class="dash-col">' + groupPerformanceBlock() + '</div>';
     html += '<div class="dash-col">' + levelDistributionBlock() + '</div>';
     html += '</div>';
-
-    html += '<div class="analytics-grid">';
-    html += '<div class="dash-col">' + leadersBlock() + '</div>';
-    html += '<div class="dash-col">' + recentBlock() + '</div>';
-    html += '</div>';
-
-    if (ch) {
-      html += '<div class="section-title">Champion <span class="line"></span></div>';
-      html += '<div class="champion-card"><div class="crown">🏆</div><div class="ctitle">Tournament Champion</div>' +
-        '<div class="cname">' + esc(ch.name) + '</div>' + (ch.players && ch.players.length ? '<div class="muted" style="margin-top:4px;">' + esc(ch.players.join(' · ')) + '</div>' : '') + '</div>';
-    }
 
     return html;
   }

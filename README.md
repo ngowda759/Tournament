@@ -765,7 +765,7 @@ deleted team ID — the fixtures are regenerated from the surviving pairs.
 
 | Screen | Purpose |
 |--------|---------|
-| **Dashboard** | Progress (Group Stage `n / <group matches>`, Overall `n / <total>` — both computed from the configuration), court cards, next matches, live standings, recent results |
+| **Dashboard** | Results area (Current leaders on the left, Tournament progress + recent results + champion on the right — two columns at ≥1024px, stacked below), then full-width court cards, next matches, waiting queue, live standings, group/level analytics |
 | **Matches** | All group and knockout matches with enter/edit/undo actions |
 | **Courts** | Operational monitor — current match, next eligible match, start/complete, waiting list (no configuration controls) |
 | **Standings** | One table per group with qualifying positions highlighted |
@@ -875,6 +875,9 @@ The UI is mobile-first:
   responsive grid that is two columns on desktop and a single column on phones.
 - The bracket scrolls horizontally (intentional) so all four stages stay readable.
 - Standings tables scroll horizontally inside their card, so the page itself never overflows.
+- The Dashboard results area is two columns at ≥1024px — Current leaders on the left,
+  Tournament progress + recent results + champion on the right — and a single stacked column
+  on tablet and phone. Live Courts and Next Matches stay full-width below it at every width.
 
 Layouts are checked at 375 px, 390 px and 412 px widths, and the desktop header is checked for
 single-row, no-horizontal-overflow behaviour.
