@@ -53,6 +53,16 @@
     --shadow-sm: 0 1px 2px rgba(0,0,0,0.35);
     --shadow: 0 4px 14px rgba(0,0,0,0.32);
     --shadow-lg: 0 12px 34px rgba(0,0,0,0.5);
+    /* Fluid content container and the responsive spacing scale. The dashboard now
+       uses the available desktop width instead of a fixed 1080px column, while the
+       1440px ceiling keeps very wide screens readable. Spacing tokens step down from
+       desktop → laptop → tablet → phone in the media queries below. */
+    --content-max: 1440px;
+    --gutter: 1rem;
+    --pad-y: 1.25rem;
+    --card-pad: 1.1rem 1.15rem;
+    --stack-gap: 10px;
+    --section-gap: 2rem;
   }
 
   /* ── LIGHT THEME ───────────────────────────────────────────
@@ -157,12 +167,29 @@
      More button hides and every tab sits inline in the single header row, scrolling
      internally if the strip is too wide rather than overflowing the page. */
   .nav-more-btn { display: none; }
+  /* Mobile header: a compact two-row shell — brand + Theme/Help on the first row,
+     the navigation on a single scrollable second row. Tabs keep a 44px touch target
+     and readable 13.5px labels, and never wrap into an awkward multi-row stack. */
   @media (max-width: 719px) {
-    header { flex-wrap: wrap; }
-    nav.tabs { flex-basis: 100%; flex-wrap: wrap; overflow-x: visible; }
+    header { flex-wrap: wrap; padding: 6px 12px 8px; min-height: auto; gap: 4px 8px; }
+    .logo { font-size: 16px; }
+    .header-actions { gap: 6px; }
+    /* Theme and Help are primary header controls, so they keep a full 44px touch
+       target on phones rather than the compact 40px desktop sizing. */
+    .header-actions .btn { min-height: 44px; }
+    nav.tabs { flex-basis: 100%; flex-wrap: nowrap; overflow-x: auto; gap: 4px; }
+    .tab { padding: 8px 11px; gap: 6px; font-size: 13.5px; min-height: 44px; }
     .nav-more-btn { display: inline-flex; }
     .tab-secondary { display: none; }
+    /* Opening More drops the secondary destinations onto their own wrapped rows. */
+    nav.tabs.more-open { flex-wrap: wrap; overflow-x: visible; }
     nav.tabs.more-open .tab-secondary { display: inline-flex; }
+  }
+  /* Small phones: drop the tab icons so every primary destination plus More fits on
+     one row with readable labels and no horizontal scrolling. The active pill still
+     makes the current page unmistakable. */
+  @media (max-width: 430px) {
+    .tab-ico { display: none; }
   }
   /* At narrower desktop widths the nav strip compresses (still >=14px, never back
      to the old 13px) before it scrolls, so the header remains a single row without
@@ -173,20 +200,37 @@
     .tab { padding: 8px 9px; gap: 5px; font-size: 14px; min-height: 40px; }
   }
 
-  main { padding: 1.25rem 1rem calc(3rem + var(--safe-bottom)); max-width: 1080px; margin: 0 auto; width: 100%; }
-  @media (min-width: 720px) { main { padding: 1.75rem 1.5rem 3rem; } }
+  /* Fluid content container: near-full width on laptops, capped at 1440px on large
+     desktops so the dashboard no longer reads as a narrow 1080px column. The floor
+     uses the 1rem gutter on phones and widens with the viewport. */
+  main { padding: var(--pad-y) var(--gutter) calc(2.5rem + var(--safe-bottom)); max-width: var(--content-max); margin: 0 auto; width: 100%; }
+  /* Desktop / laptop: generous outer margin, almost the full usable width. */
+  @media (min-width: 720px) { main { --gutter: 1.5rem; --pad-y: 1.75rem; } }
+  /* Tablet: pull the gutters in so 1024px keeps usable card widths. */
+  @media (min-width: 720px) and (max-width: 1023px) { main { --gutter: 1.25rem; --pad-y: 1.4rem; } }
+  /* Large desktop: the fluid width grows with the viewport up to the 1440px ceiling. */
+  @media (min-width: 1440px) { main { --gutter: clamp(1.5rem, 2vw, 2.5rem); } }
+  /* Phones: compact but touch-friendly vertical rhythm. */
+  @media (max-width: 719px) { main { --pad-y: 1.1rem; } }
 
   /* TYPOGRAPHY */
   .page-title { font-family: var(--font-head); font-size: 26px; font-weight: 800; letter-spacing: -0.6px; margin-bottom: 0.3rem; line-height: 1.15; }
   .page-subtitle { font-size: 13.5px; color: var(--text2); margin-bottom: 1.5rem; font-weight: 300; max-width: 70ch; }
-  .section-title { font-family: var(--font-head); font-size: 12px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: var(--text2); margin: 2rem 0 0.9rem; display: flex; align-items: center; gap: 10px; }
+  .section-title { font-family: var(--font-head); font-size: 12px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: var(--text2); margin: var(--section-gap) 0 0.9rem; display: flex; align-items: center; gap: 10px; }
   .section-title:first-child { margin-top: 0; }
   .section-title .line { flex: 1; min-width: 0; height: 1px; background: var(--border); }
 
   /* CARDS */
-  .card { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 1.1rem 1.15rem; box-shadow: var(--shadow-sm); }
-  .card + .card { margin-top: 10px; }
+  .card { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--card-pad); box-shadow: var(--shadow-sm); }
+  .card + .card { margin-top: var(--stack-gap); }
   .card.flush { padding: 0; overflow: hidden; }
+
+  /* Responsive spacing scale: laptop → tablet → phone. Vertical section rhythm and
+     card padding tighten progressively so tablet/mobile stay compact without
+     dropping below comfortable touch spacing. */
+  @media (min-width: 1024px) and (max-width: 1439px) { :root { --section-gap: 1.75rem; } }
+  @media (min-width: 768px) and (max-width: 1023px) { :root { --section-gap: 1.4rem; --card-pad: 1rem; --stack-gap: 9px; } }
+  @media (max-width: 767px) { :root { --section-gap: 1.15rem; --card-pad: 0.95rem; --stack-gap: 9px; } }
 
   /* BUTTONS */
   .btn {
@@ -279,8 +323,10 @@
   .status-strip.complete { border-color: rgba(255,217,61,0.4); background: linear-gradient(135deg, rgba(255,217,61,0.12), var(--accent-bg)); color: var(--gold); }
   .status-strip.complete .dot { background: var(--gold); }
 
-  /* Compact KPI cards: 2 cols on phone, 3 on tablet, 6 on desktop. */
-  .kpi-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin-bottom: 4px; }
+  /* Compact KPI cards: 2 cols on phone, 3 on tablet, 6 on desktop. The results area
+     below carries the section rhythm (its first section titles have no top margin),
+     so the KPI row supplies the gap before it. */
+  .kpi-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin-bottom: var(--section-gap); }
   @media (min-width: 560px) { .kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
   @media (min-width: 900px) { .kpi-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
   .kpi-card { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 13px; min-width: 0; box-shadow: var(--shadow-sm); }
@@ -290,6 +336,14 @@
   .kpi-card.accent .kpi-value { color: var(--accent); }
   .kpi-card.live .kpi-value { color: var(--warn); }
   .kpi-label { font-size: 10px; font-weight: 700; letter-spacing: 0.9px; text-transform: uppercase; color: var(--text3); margin-top: 4px; }
+  /* Phones: an intentional 2-column KPI grid with equal-height cards, a large value
+     and a compact label. The six-up desktop layout never squeezes onto a phone. */
+  @media (max-width: 767px) {
+    .kpi-grid { gap: 8px; }
+    .kpi-card { display: flex; flex-direction: column; justify-content: center; min-height: 72px; padding: 12px 13px; }
+    .kpi-value { font-size: 26px; }
+    .kpi-label { font-size: 10.5px; letter-spacing: 0.7px; }
+  }
 
   /* Stage progress */
   .stage-list { display: flex; flex-direction: column; gap: 12px; }
@@ -304,13 +358,16 @@
   .analytics-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
   @media (min-width: 820px) { .analytics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; } }
   .dash-col { min-width: 0; }
-  .dash-col .section-title { margin-top: 1.75rem; }
+  .dash-col .section-title { margin-top: var(--section-gap); }
   @media (min-width: 820px) { .analytics-grid + .analytics-grid { margin-top: 0; } }
+  /* Large desktop: the two analytics columns get a wider gap to match the panes. */
+  @media (min-width: 1440px) { .analytics-grid { gap: 28px; } }
 
   /* Dashboard results area — leaders on the left, results (progress, recent
-     results, champion) on the right. Single column until 1024px, then a 2:3 split
-     that gives the results pane the wider track. minmax(0,1fr) keeps every track
-     shrinkable so the page never overflows horizontally. */
+     results, champion) on the right. Stacked on phones and portrait tablets (the
+     2:3 split would leave the leaders table under ~300px there), then a 2:3 split
+     from 1024px that gives the results pane the wider track. minmax(0,1fr) keeps
+     every track shrinkable so the page never overflows horizontally. */
   .dash-results { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
   .dash-pane { min-width: 0; }
   @media (min-width: 1024px) {
@@ -318,6 +375,11 @@
        top margin, so the two columns are aligned; minmax(0,1fr) keeps them shrinkable. */
     .dash-results { grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 24px; align-items: start; }
   }
+  /* Large desktop: a little more breathing room between the two panes. */
+  @media (min-width: 1440px) { .dash-results { gap: 28px; } }
+  /* The results pane is narrower than the page, so its recent-result tiles stay
+     single-column until the pane itself is wide enough for two comfortable cards. */
+  @media (min-width: 1024px) and (max-width: 1279px) { .dash-pane .mgrid { grid-template-columns: minmax(0, 1fr); } }
 
   /* Level distribution bars */
   .level-bars { display: flex; flex-direction: column; gap: 9px; }
@@ -355,7 +417,9 @@
   .leader-stat .diff { color: var(--text3); font-weight: 600; }
   /* Leaders table: team on the left, tabular stat columns on the right. */
   .leader-cols { display: flex; gap: 10px; flex-shrink: 0; font-family: var(--font-head); font-size: 12.5px; font-weight: 800; color: var(--text2); font-variant-numeric: tabular-nums; }
-  .leader-cols > span { width: 30px; text-align: right; }
+  /* 36px clears the widest header label ("Diff" with its letter-spacing) as well as
+     the widest value ("+18"/"-12") so nothing overflows its column. */
+  .leader-cols > span { width: 36px; text-align: right; }
   .leader-cols .diff { color: var(--text3); font-weight: 600; }
   .leader-row.head { border-bottom: 1px solid var(--border2); padding-bottom: 6px; }
   .leader-row.head .leader-rank, .leader-row.head .leader-body { font-size: 10px; font-weight: 700; letter-spacing: 0.9px; text-transform: uppercase; color: var(--text3); }
@@ -364,9 +428,21 @@
      card without clipping at 320–375px. The head labels are the widest content, so
      their letter-spacing is dropped to keep every column readable. */
   @media (max-width: 430px) {
-    .leader-cols { gap: 5px; font-size: 12px; }
-    .leader-cols > span { width: 27px; }
     .leader-row.head .leader-cols { letter-spacing: 0; font-size: 9.5px; }
+  }
+  /* Phones: the desktop table would be cramped, so each leader becomes a two-line
+     row — rank + team name on the first line, the tabular stat columns right-aligned
+     on a second line under their headers. Same DOM, same numbers, responsive CSS. */
+  @media (max-width: 767px) {
+    .leader-row { flex-wrap: wrap; align-items: flex-start; row-gap: 4px; column-gap: 10px; padding: 10px 0; }
+    .leader-rank { width: auto; min-width: 18px; font-size: 16px; line-height: 1.35; }
+    .leader-body { flex: 1 1 0; }
+    .leader-name { font-size: 14px; line-height: 1.35; }
+    .leader-group { font-size: 11.5px; }
+    .leader-cols { flex: 0 0 100%; justify-content: flex-end; gap: 14px; padding-top: 6px; margin-top: 2px; border-top: 1px dashed var(--border); font-size: 13px; }
+    .leader-cols > span { width: 34px; }
+    .leader-row.head { padding-bottom: 6px; }
+    .leader-row.head .leader-cols { padding-top: 0; margin-top: 0; border-top: none; }
   }
 
   /* Waiting queue summary */
@@ -387,6 +463,48 @@
   .court-card.compact { gap: 8px; padding: 0.85rem; }
   .court-card.compact .court-name { font-size: 13.5px; }
   .court-card.compact .court-teams { font-size: 13px; }
+
+  /* ── MOBILE DASHBOARD ──────────────────────────────────────
+     Phones get a deliberate layout rather than a stacked desktop page: one result
+     per row, one match per row, a prominent-but-compact champion card, and Live
+     Courts tuned for quick courtside scanning with large scores and a full-width
+     44px action. Only presentation changes here — no scoring/scheduling logic. */
+  @media (max-width: 767px) {
+    /* Champion: prominent but compact, never a full screen of vertical space. */
+    .champion-card { padding: 1rem; }
+    .champion-card .crown { font-size: 28px; }
+    .champion-card .ctitle { font-size: 10.5px; letter-spacing: 1.6px; }
+    .champion-card .cname { font-size: 19px; }
+
+    /* Tournament progress: full-width stage rows with a thicker, readable bar. */
+    .stage-list { gap: 14px; }
+    .stage-name { font-size: 13.5px; }
+    .stage-count { font-size: 14px; }
+    .bar { height: 8px; }
+
+    /* Recent results: one card per row with a prominent score and a clear winner. */
+    .result-row .court-teams { font-size: 15px; }
+    .result-row .court-teams .t .sc { font-size: 20px; }
+
+    /* Next matches: one card per row; the action row keeps a comfortable tap size. */
+    .match-card { padding: 15px 16px; }
+    .mrow-actions { gap: 8px; }
+
+    /* Live courts: courtside-first. Strong LIVE indicator, large scores, readable
+       team names, and a full-width action button that meets the 44px touch target. */
+    .courts-grid { gap: 10px; }
+    .court-card.compact { padding: 0.95rem; gap: 10px; }
+    .court-card.compact .court-name { font-size: 14px; }
+    .court-card.compact .court-teams { font-size: 15px; }
+    .court-card.compact .court-teams .t .sc { font-size: 20px; }
+    .court-card.compact .court-reason { font-size: 11.5px; }
+    .court-card.compact .court-actions .btn { flex: 1 1 100%; min-height: 46px; }
+  }
+
+  /* Courts grid: keep two comfortable columns on tablets, never a cramped third. */
+  @media (min-width: 640px) and (max-width: 1023px) { .courts-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  /* Large desktop: more courts per row now that the container is wide. */
+  @media (min-width: 1440px) { .courts-grid { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); } }
 
   /* Light theme surface fixes: cards/inputs already use tokens, but a few shadows
      and the bracket/board backgrounds assume a dark canvas. */
@@ -3864,7 +3982,7 @@
     const active = s.id === cur;
     return '<button class="tab' + (active ? ' active' : '') + '"' + (active ? ' aria-current="page"' : '') +
       ' onclick="App.nav(\'' + s.id + '\')">' +
-      '<span aria-hidden="true">' + s.icon + '</span>' + esc(s.label) + '</button>';
+      '<span class="tab-ico" aria-hidden="true">' + s.icon + '</span>' + esc(s.label) + '</button>';
   }
 
   function renderTabs() {
@@ -4597,7 +4715,7 @@
     else if (m.court) meta.push(TM.courtName(m.court));
     meta.push(m.stage === 'group' ? esc(TM.groupLabel(m.group)) : esc(TM.matchFormatDisplay(m)));
     if (m.completedAt) meta.push(timeOf(m.completedAt));
-    return '<div class="mrow done">' +
+    return '<div class="mrow done result-row">' +
       '<div class="mrow-top"><span class="mrow-id">✓ ' + esc(m.id) + '</span>' + stagePill(m) + '<span class="pill pill-done">Final</span></div>' +
       '<div class="court-teams">' +
         '<div class="t win"><span class="nm">' + esc(w ? w.name : '—') + '</span><span class="sc">' + esc(score) + '</span></div>' +
