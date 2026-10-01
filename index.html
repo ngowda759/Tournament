@@ -117,40 +117,41 @@
   header {
     background: var(--bg2); border-bottom: 1px solid var(--border);
     padding: 0 1rem; display: flex; align-items: center; flex-wrap: nowrap;
-    gap: 4px 10px; min-height: 56px; position: sticky; top: 0; z-index: 100;
+    gap: 4px 10px; min-height: 62px; position: sticky; top: 0; z-index: 100;
     box-shadow: var(--shadow-sm);
   }
   .logo {
-    display: flex; align-items: center; gap: 9px; flex: 0 0 auto;
-    font-family: var(--font-head); font-size: 17px; font-weight: 800;
-    letter-spacing: -0.3px; color: var(--text); text-decoration: none;
+    display: flex; align-items: center; gap: 10px; flex: 0 0 auto;
+    font-family: var(--font-head); font-size: 18px; font-weight: 800;
+    letter-spacing: -0.4px; color: var(--text); text-decoration: none;
     min-height: 44px;
   }
   .logo-icon {
-    width: 30px; height: 30px; background: var(--accent);
-    border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px;
+    width: 32px; height: 32px; background: var(--accent);
+    border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 17px;
   }
   .logo span { color: var(--accent); }
-  .header-actions { display: flex; gap: 6px; align-items: center; flex: 0 0 auto; margin-left: auto; }
+  .header-actions { display: flex; gap: 8px; align-items: center; flex: 0 0 auto; margin-left: auto; }
   .hide-xs { display: none; }
   @media (min-width: 420px) { .hide-xs { display: inline; } }
 
   /* NAV — inline in the header on desktop; its own wrapped row on phones. */
   nav.tabs {
-    display: flex; align-items: center; gap: 3px; flex: 1 1 auto; min-width: 0;
+    display: flex; align-items: center; gap: 4px; flex: 1 1 auto; min-width: 0;
     padding: 0; background: transparent; border: none;
     overflow-x: auto; scrollbar-width: none; scroll-behavior: smooth;
   }
   nav.tabs::-webkit-scrollbar { display: none; }
   .tab {
-    flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px;
-    padding: 8px 12px; border-radius: 20px; border: 1px solid transparent;
+    flex: 0 0 auto; display: inline-flex; align-items: center; gap: 8px;
+    padding: 9px 15px; border-radius: 20px; border: 1px solid transparent;
     background: transparent; color: var(--text2); font-family: var(--font-body);
-    font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap;
-    transition: var(--transition); min-height: 40px;
+    font-size: 14.5px; font-weight: 600; cursor: pointer; white-space: nowrap;
+    transition: var(--transition); min-height: 42px;
   }
-  .tab:hover { background: var(--bg3); color: var(--text); }
-  .tab.active { background: var(--accent); color: var(--on-accent); font-weight: 700; }
+  .tab:hover { background: var(--bg3); color: var(--text); border-color: var(--border); }
+  .tab.active { background: var(--accent); color: var(--on-accent); font-weight: 700; border-color: var(--accent2); }
+  .tab.active:hover { background: var(--accent2); color: var(--on-accent); border-color: var(--accent2); }
   /* Mobile nav: primary destinations are always visible; secondary ones collapse
      behind "More". The nav takes its own wrapped row under the brand. On >=720px the
      More button hides and every tab sits inline in the single header row, scrolling
@@ -163,11 +164,13 @@
     .tab-secondary { display: none; }
     nav.tabs.more-open .tab-secondary { display: inline-flex; }
   }
-  /* At narrower desktop widths the nav strip compresses before it scrolls, so the
-     header remains a single row without clipping any destination. */
-  @media (min-width: 720px) and (max-width: 1080px) {
+  /* At narrower desktop widths the nav strip compresses (still >=14px, never back
+     to the old 13px) before it scrolls, so the header remains a single row without
+     clipping any destination. Above this band the roomier base sizing applies. */
+  @media (min-width: 720px) and (max-width: 1240px) {
     .logo { font-size: 16px; }
-    .tab { padding: 8px 10px; gap: 5px; }
+    .header-actions { gap: 6px; }
+    .tab { padding: 8px 9px; gap: 5px; font-size: 14px; min-height: 40px; }
   }
 
   main { padding: 1.25rem 1rem calc(3rem + var(--safe-bottom)); max-width: 1080px; margin: 0 auto; width: 100%; }
