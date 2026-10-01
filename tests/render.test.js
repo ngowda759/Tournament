@@ -376,9 +376,10 @@ check('next matches shows a suggested court', s.indexOf('→ Court') !== -1, 'no
 check('exactly three suggested courts', (s.match(/→ Court/g) || []).length, 3);
 
 // ── Dashboard results two-column layout ───────────────────────────────────────
-// Desktop (>=1024px) splits the results area into leaders (left) and tournament
-// results + champion (right); below that it is a single stacked column. The
-// operational sections stay full-width beneath the results area at every width.
+// Laptop and up (>=1024px) splits the results area into leaders (left) and
+// tournament results + champion (right); phones and portrait tablets keep a single
+// stacked column so the leaders table never gets too narrow. The operational
+// sections stay full-width beneath the results area at every width.
 check('dash results: single-column base', /\.dash-results\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/.test(styleText), 'no base single column');
 check('dash results: two columns at >=1024px', /@media \(min-width: 1024px\)\s*\{[\s\S]*?\.dash-results\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*2fr\)\s+minmax\(0,\s*3fr\)/.test(styleText), 'no 1024px two-column rule');
 check('dash results: panes can shrink', /\.dash-pane\s*\{[^}]*min-width:\s*0/.test(styleText), 'panes cannot shrink');
@@ -721,7 +722,9 @@ check('polish: help control remains', html.indexOf('App.about()') !== -1, 'no he
 check('polish: header lays out as one row', /header\s*\{[^}]*display:\s*flex/.test(styleText) && /header\s*\{[^}]*flex-wrap:\s*nowrap/.test(styleText), 'header not a single row');
 check('polish: nav can shrink in the header row', /nav\.tabs\s*\{[^}]*flex:\s*1 1 auto[^}]*min-width:\s*0/.test(styleText), 'nav cannot shrink');
 check('polish: nav scrolls internally', /nav\.tabs\s*\{[^}]*overflow-x:\s*auto/.test(styleText), 'nav not scrollable');
-check('polish: mobile nav still wraps to its own row', /@media \(max-width: 719px\)\s*\{[\s\S]*?nav\.tabs\s*\{[^}]*flex-wrap:\s*wrap/.test(styleText), 'mobile nav does not wrap');
+check('polish: mobile nav takes its own row', /@media \(max-width: 719px\)\s*\{[\s\S]*?nav\.tabs\s*\{[^}]*flex-basis:\s*100%/.test(styleText), 'mobile nav not on its own row');
+check('polish: mobile nav scrolls on one line', /@media \(max-width: 719px\)\s*\{[\s\S]*?nav\.tabs\s*\{[^}]*flex-wrap:\s*nowrap/.test(styleText), 'mobile nav not single line');
+check('polish: More still wraps its destinations', /nav\.tabs\.more-open\s*\{[^}]*flex-wrap:\s*wrap/.test(styleText), 'More does not wrap');
 
 // Settings appears exactly once in the rendered navigation.
 App.nav('dashboard');
@@ -1135,6 +1138,62 @@ check('ko stages: no undefined/NaN', ko.indexOf('undefined') === -1 && ko.indexO
 App.openParticipants('F-1');
 check('ko stages: Final participant dialog has both participants', /Participant A/.test(getEl('participant-body').innerHTML) && /Participant B/.test(getEl('participant-body').innerHTML), 'final dialog incomplete');
 App.closeParticipant();
+
+/* ── responsive dashboard (fluid container, tablet, mobile) ─────────────────── */
+// The dashboard is one responsive experience: a fluid container that fills large
+// desktops instead of a fixed 1080px column, an intentional phone layout (2-column
+// KPI grid, two-line leaders, one result/match per row, courtside Live Courts), and
+// a progressive spacing scale. All of it is CSS/markup, so the tournament engine is
+// untouched. Asserted from the stylesheet so the responsive contract cannot silently
+// regress.
+
+// Fluid container replaces the old 1080px cap.
+check('responsive: main uses the fluid container token', /main\s*\{[^}]*max-width:\s*var\(--content-max\)/.test(styleText), 'main not fluid');
+check('responsive: content ceiling is 1440px', /--content-max:\s*1440px/.test(styleText), 'no 1440px ceiling');
+check('responsive: the 1080px cap is gone', !/max-width:\s*1080px/.test(styleText), 'still capped at 1080px');
+check('responsive: container gutter widens on desktop', /@media \(min-width: 720px\)\s*\{\s*main\s*\{[^}]*--gutter:\s*1\.5rem/.test(styleText), 'no desktop gutter');
+
+// Progressive spacing scale tokens.
+check('responsive: spacing scale tokens exist', /--gutter:/.test(styleText) && /--pad-y:/.test(styleText) && /--card-pad:/.test(styleText) && /--section-gap:/.test(styleText), 'no spacing tokens');
+check('responsive: card padding steps down on phones', /@media \(max-width: 767px\)\s*\{[^}]*--card-pad/.test(styleText), 'no mobile card padding');
+check('responsive: tablet tightens the section rhythm', /@media \(min-width: 768px\) and \(max-width: 1023px\)\s*\{[^}]*--section-gap/.test(styleText), 'no tablet rhythm');
+
+// Mobile KPI grid: two columns, equal height, large value.
+check('responsive: KPI base is a two-column grid', /\.kpi-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/.test(styleText), 'KPI base not 2-col');
+check('responsive: mobile KPI cards are equal height', /@media \(max-width: 767px\)\s*\{[\s\S]*?\.kpi-card\s*\{[^}]*min-height:\s*72px/.test(styleText), 'KPI cards not equal height');
+check('responsive: mobile KPI value is large', /@media \(max-width: 767px\)\s*\{[\s\S]*?\.kpi-value\s*\{[^}]*font-size:\s*26px/.test(styleText), 'KPI value not large');
+
+// Mobile leaders: stat columns drop to their own right-aligned line.
+check('responsive: mobile leaders wrap their stats', /@media \(max-width: 767px\)\s*\{[\s\S]*?\.leader-cols\s*\{[^}]*flex:\s*0 0 100%/.test(styleText), 'leaders do not wrap');
+
+// Mobile results/courts: one per row, prominent scores, full-width actions.
+check('responsive: mobile courts action is full width', /@media \(max-width: 767px\)\s*\{[\s\S]*?\.court-card\.compact \.court-actions \.btn\s*\{[^}]*flex:\s*1 1 100%[^}]*min-height:\s*46px/.test(styleText), 'court action not full width');
+check('responsive: mobile court scores are large', /@media \(max-width: 767px\)\s*\{[\s\S]*?\.court-card\.compact \.court-teams \.t \.sc\s*\{[^}]*font-size:\s*20px/.test(styleText), 'court score not large');
+check('responsive: mobile result scores are prominent', /@media \(max-width: 767px\)\s*\{[\s\S]*?\.result-row \.court-teams \.t \.sc\s*\{[^}]*font-size:\s*20px/.test(styleText), 'result score not prominent');
+check('responsive: mobile champion is compact', /@media \(max-width: 767px\)\s*\{[\s\S]*?\.champion-card\s*\{[^}]*padding:\s*1rem/.test(styleText), 'champion not compact');
+
+// Tablet courts keep two comfortable columns.
+check('responsive: tablet courts use two columns', /@media \(min-width: 640px\) and \(max-width: 1023px\)\s*\{\s*\.courts-grid\s*\{[^}]*repeat\(2,\s*minmax\(0,\s*1fr\)\)/.test(styleText), 'tablet courts not 2-col');
+
+// The compact mobile header drops tab icons and keeps labels readable.
+check('responsive: small-phone nav hides tab icons', /@media \(max-width: 430px\)\s*\{[\s\S]*?\.tab-ico\s*\{[^}]*display:\s*none/.test(styleText), 'tab icons not hidden on phones');
+check('responsive: tab icons are classed for the mobile rule', html.indexOf('class="tab-ico"') !== -1, 'no tab-ico markup');
+
+// Recent results now carry the responsive result-row hook.
+TM.resetTournament();
+TM.getState().settings.allowOutsideAvailability = true;
+TM.groupMatches().slice(0, 2).forEach(function (m) { TM.saveGroupScore(m.id, 21, 15); });
+App.nav('dashboard');
+s = getEl('view').innerHTML;
+check('responsive: recent results render the result-row hook', s.indexOf('result-row') !== -1, 'no result-row');
+check('responsive: dashboard has no undefined/NaN after responsive pass', s.indexOf('undefined') === -1 && s.indexOf('NaN') === -1, 'leak');
+
+// Other pages must not break: each shared screen still renders cleanly.
+['matches', 'courts', 'standings', 'knockout', 'teams', 'settings'].forEach(function (screen) {
+  App.nav(screen);
+  const h = getEl('view').innerHTML;
+  check('responsive: ' + screen + ' screen renders without undefined/NaN', h.indexOf('undefined') === -1 && h.indexOf('NaN') === -1, 'leak on ' + screen);
+});
 
 console.log('\n' + (fail === 0 ? '✅ ALL RENDERS OK' : '❌ RENDER FAILURES'));
 console.log('passed: ' + pass + '  failed: ' + fail);
