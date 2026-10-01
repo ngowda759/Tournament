@@ -375,6 +375,60 @@ check('next matches shows a suggested court', s.indexOf('→ Court') !== -1, 'no
 // name (the rest correctly read "no free court").
 check('exactly three suggested courts', (s.match(/→ Court/g) || []).length, 3);
 
+// ── Dashboard results two-column layout ───────────────────────────────────────
+// Desktop (>=1024px) splits the results area into leaders (left) and tournament
+// results + champion (right); below that it is a single stacked column. The
+// operational sections stay full-width beneath the results area at every width.
+check('dash results: single-column base', /\.dash-results\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/.test(styleText), 'no base single column');
+check('dash results: two columns at >=1024px', /@media \(min-width: 1024px\)\s*\{[\s\S]*?\.dash-results\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*2fr\)\s+minmax\(0,\s*3fr\)/.test(styleText), 'no 1024px two-column rule');
+check('dash results: panes can shrink', /\.dash-pane\s*\{[^}]*min-width:\s*0/.test(styleText), 'panes cannot shrink');
+
+TM.resetTournament();
+App.nav('dashboard');
+s = getEl('view').innerHTML;
+const iResults = s.indexOf('class="dash-results"');
+const iPaneL = s.indexOf('class="dash-pane"');
+const iPaneR = s.indexOf('class="dash-pane"', iPaneL + 1);
+const iLeaders = s.indexOf('Current leaders');
+const iProgress = s.indexOf('Tournament progress');
+const iCourts2 = s.indexOf('Live courts');
+check('dash results: container wraps the panes', iResults !== -1 && iResults < iPaneL, 'no container');
+check('dash results: exactly two panes', iPaneR !== -1 && s.indexOf('class="dash-pane"', iPaneR + 1) === -1, 'pane count wrong');
+check('dash results: leaders in the left pane', iPaneL !== -1 && iLeaders > iPaneL && iLeaders < iPaneR, 'leaders not left');
+check('dash results: progress in the right pane', iProgress > iPaneR, 'progress not right');
+check('dash results: operational sections come after the panes', iCourts2 > iPaneR, 'courts not below');
+
+// Dynamic leaders: the left pane tracks completed results without duplication.
+TM.getState().settings.allowOutsideAvailability = true;
+TM.groupMatches().slice(0, 3).forEach(function (m) { TM.saveGroupScore(m.id, 21, 15); });
+App.nav('dashboard');
+s = getEl('view').innerHTML;
+const lPaneStart = s.indexOf('class="dash-pane"');
+const lPaneEnd = s.indexOf('class="dash-pane"', lPaneStart + 1);
+const leftPane = s.slice(lPaneStart, lPaneEnd);
+check('dash results: left pane owns the leaders table', leftPane.indexOf('leader-list') !== -1 && leftPane.indexOf('leader-cols') !== -1, 'leaders not in left pane');
+check('dash results: leaders appear once', (s.match(/class="leader-list"/g) || []).length === 1, 'leaders duplicated');
+
+// Dynamic champion: the champion card renders inside the right (results) pane.
+TM.resetTournament();
+TM.applyTeams([
+  { id: 'A1', group: 'A', name: 'Alpha Pair' }, { id: 'A2', group: 'A', name: 'Beta Pair' }
+], { regenerate: true, groups: ['A'] });
+TM.setQualification(2);
+TM.groupMatches().forEach(function (m) { TM.saveGroupScore(m.id, 21, 15); });
+ensureBracket();
+const finalM2 = TM.getMatch('F-1');
+if (finalM2) { TM.saveKnockoutScore('F-1', [{ a: 21, b: 15 }, { a: 21, b: 15 }, { a: null, b: null }]); }
+App.nav('dashboard');
+s = getEl('view').innerHTML;
+if (TM.knockoutInfo().champion) {
+  const rPaneStart = s.indexOf('class="dash-pane"', s.indexOf('class="dash-pane"') + 1);
+  const rPaneEnd = s.indexOf('Live courts', rPaneStart);
+  const rightPane = s.slice(rPaneStart, rPaneEnd);
+  check('dash results: champion card lives in the right pane', rightPane.indexOf('Tournament Champion') !== -1, 'champion not in right pane');
+  check('dash results: champion appears once', (s.match(/Tournament Champion/g) || []).length === 1, 'champion duplicated');
+}
+
 // ── Dashboard V3 live control centre ──────────────────────────────────────────
 
 // Branding, theme toggle and Help must remain in the shell regardless of Dashboard
@@ -680,10 +734,12 @@ check('polish: active tab marks aria-current', navCourts.indexOf('aria-current="
 check('polish: mobile nav keeps the More control', navCourts.indexOf('nav-more-btn') !== -1, 'no More');
 
 // Dashboard section order (information hierarchy preserved).
+// The results area groups leaders (left) and results (right) above the full-width
+// operational sections; on mobile/tablet the same DOM order stacks into one column.
 TM.resetTournament();
 App.nav('dashboard');
 s = getEl('view').innerHTML;
-const ORDER = ['Tournament progress', 'Live courts', 'Next matches', 'Waiting queue', 'Group performance', 'Team level distribution', 'Current leaders', 'Recent results'];
+const ORDER = ['Current leaders', 'Tournament progress', 'Recent results', 'Live courts', 'Next matches', 'Waiting queue', 'Group performance', 'Team level distribution'];
 let orderOk = true, prev = -1;
 ORDER.forEach(function (label) {
   const at = s.indexOf(label);
