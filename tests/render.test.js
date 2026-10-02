@@ -817,11 +817,62 @@ check('polish: settings court config has add court', polishSettings.indexOf('App
 check('polish: settings no undefined/NaN', polishSettings.indexOf('undefined') === -1 && polishSettings.indexOf('NaN') === -1, 'leak');
 
 // Light/dark theming: both token sets exist and the polish leans on tokens.
-check('polish: dark theme token set exists', /:root\s*\{[^}]*--bg:\s*#0d0f0e/.test(styleText), 'no dark theme');
+check('polish: dark theme token set exists', /:root\s*\{[^}]*--bg:\s*#0b1320/.test(styleText), 'no dark theme');
 check('polish: light theme overrides surfaces', /\[data-theme="light"\]\s*\{[^}]*--bg:/.test(styleText), 'no light theme');
 check('polish: elevation uses shadow tokens', /--shadow-sm:/.test(styleText) && /--shadow-lg:/.test(styleText), 'no shadow tokens');
 check('polish: light theme softens the shadow tokens', /\[data-theme="light"\]\s*\{[^}]*--shadow-sm/.test(styleText), 'no light shadows');
 check('polish: visible keyboard focus exists', /:focus-visible\s*\{[^}]*outline:/.test(styleText), 'no focus ring');
+
+/* ── Stitch design integration ────────────────────────────────────────────── */
+// The Stitch "Apex Shuttle Tournament Engine" system: fonts, Material Symbols,
+// the hero hub, KPI tiles, page heads and the live/luminescence treatments.
+check('stitch: Space Grotesk headline font loaded', /family=Space\+Grotesk/.test(html), 'no Space Grotesk');
+check('stitch: Plus Jakarta Sans body font loaded', /family=Plus\+Jakarta\+Sans/.test(html), 'no Plus Jakarta Sans');
+check('stitch: Material Symbols font loaded', /Material\+Symbols\+Outlined/.test(html), 'no Material Symbols');
+check('stitch: .ms icon helper defined', /\.ms\s*\{[^}]*Material Symbols Outlined/.test(styleText), 'no .ms helper');
+check('stitch: emerald primary token', /--accent:\s*#10b981/.test(styleText), 'no emerald primary');
+check('stitch: dashboard hero styled', /\.dash-hero\s*\{/.test(styleText), 'no hero');
+check('stitch: page-head styled', /\.page-head\s*\{/.test(styleText), 'no page head');
+check('stitch: kpi tile caption row styled', /\.kpi-top\s*\{/.test(styleText), 'no kpi top');
+check('stitch: live court luminescence styled', /\.court-card\.live[\s\S]*?--glow-live/.test(styleText), 'no live glow');
+
+// Every screen renders the Stitch page-head/hero shell with its telemetry chips.
+TM.resetTournament();
+App.nav('dashboard');
+let stitchView = getEl('view').innerHTML;
+check('stitch: dashboard renders the hero hub', stitchView.indexOf('dash-hero') !== -1, 'no dashboard hero');
+check('stitch: dashboard hero shows the tournament name', stitchView.indexOf('Badminton Doubles Tournament') !== -1, 'no hero name');
+check('stitch: dashboard hero has parameter chips', stitchView.indexOf('hero-chip-meta') !== -1, 'no hero chips');
+check('stitch: dashboard KPI tiles carry icons', stitchView.indexOf('kpi-top') !== -1 && stitchView.indexOf('kpi-ico') !== -1, 'no kpi icons');
+['matches', 'courts', 'standings', 'knockout', 'teams', 'settings'].forEach(function (screen) {
+  App.nav(screen);
+  const h = getEl('view').innerHTML;
+  check('stitch: ' + screen + ' renders the page head', h.indexOf('page-head') !== -1, 'no page head on ' + screen);
+  check('stitch: ' + screen + ' renders telemetry chips', h.indexOf('head-chip') !== -1, 'no chips on ' + screen);
+  check('stitch: ' + screen + ' keeps its title', h.indexOf('page-title') !== -1, 'no title on ' + screen);
+});
+// The nav still renders as buttons wired to App.nav, with a Material Symbols icon
+// nested in the tab-ico hook so the small-phone rule can hide it.
+App.nav('dashboard');
+const stitchNav = getEl('nav-tabs').innerHTML;
+check('stitch: nav tabs carry a Material Symbols icon', /class="tab-ico"[^>]*><span class="ms">/.test(stitchNav), 'no nav icons');
+check('stitch: nav still wires every destination', (stitchNav.match(/App\.nav\(/g) || []).length >= 7, 'nav destinations lost');
+
+// The score modal is still driven end-to-end through App.* — open, live preview,
+// then submit — and the result flows straight into the standings.
+TM.resetTournament();
+TM.getState().settings.allowOutsideAvailability = true;
+const stitchMatch = TM.groupMatches()[0];
+TM.startMatch(stitchMatch.id, 1);
+App.openScore(stitchMatch.id, 'courts');
+check('stitch: score modal opens on the live match', getEl('score-body').innerHTML.indexOf('score-block') !== -1, 'no score body');
+getEl('sc-a').value = '21'; getEl('sc-b').value = '15';
+App.previewScore();
+check('stitch: score preview announces the winner', getEl('score-preview').textContent.indexOf('wins') !== -1, 'no preview winner');
+App.submitScore();
+const stitchDone = TM.getMatch(stitchMatch.id);
+check('stitch: submitting the score completes the match', stitchDone.status === 'completed' && stitchDone.scoreA === 21 && stitchDone.scoreB === 15, 'score not saved');
+check('stitch: standings reflect the submitted result', TM.computeStandings(stitchMatch.group)[0].pts === TM.GROUP_WIN_POINTS, 'standings not updated');
 
 // Mobile touch targets and no page overflow.
 check('polish: card selects are touch sized', /\.card select\s*\{[^}]*min-height:\s*44px/.test(styleText), 'select too small');
