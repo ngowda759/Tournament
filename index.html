@@ -3,60 +3,67 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="theme-color" content="#0d0f0e">
+<meta name="theme-color" content="#0b1320">
 <title>Tournament — Badminton Doubles Tournament Manager</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%F0%9F%8F%B8%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap" rel="stylesheet">
 <style>
+  /* ── STITCH DESIGN TOKENS — "Apex Shuttle Tournament Engine" ─────────────────
+     Dark-first palette from the Stitch DESIGN.md: deep court-navy surfaces, an
+     emerald primary, a neon-citron secondary and an aerodynamic cyan tertiary.
+     The existing token names are kept so every component rule below continues to
+     resolve; only the values move to the Stitch system. */
   :root {
-    --bg: #0d0f0e;
-    --bg2: #141614;
-    --bg3: #1a1d1a;
-    --bg4: #212421;
-    --border: rgba(255,255,255,0.07);
-    --border2: rgba(255,255,255,0.12);
-    --text: #f0f2ef;
-    --text2: #8a9088;
-    --text3: #555d53;
-    --accent: #b8f54a;
-    --accent2: #8fc436;
-    --accent-bg: rgba(184,245,74,0.08);
-    --accent-border: rgba(184,245,74,0.25);
-    --blue: #60a5fa;
-    --blue-bg: rgba(96,165,250,0.08);
-    --blue-border: rgba(96,165,250,0.25);
-    --pink: #f472b6;
-    --pink-bg: rgba(244,114,182,0.08);
-    --pink-border: rgba(244,114,182,0.25);
-    --danger: #ff6b5b;
-    --danger-bg: rgba(255,107,91,0.08);
-    --warn: #f5a623;
-    --warn-bg: rgba(245,166,35,0.08);
-    --gold: #ffd93d;
+    /* Surfaces (tonal stratification: canvas → plate → raised) */
+    --bg: #0b1320;          /* Surface Level 0 — canvas */
+    --bg2: #0f172a;         /* Surface Level 1 — cards / containers */
+    --bg3: #0f172a;         /* card plate */
+    --bg4: #1e293b;         /* Surface Level 2 — elevated / inputs */
+    --border: rgba(255,255,255,0.06);
+    --border2: #334155;
+    /* Text */
+    --text: #dbe2f5;
+    --text2: #94a3b8;
+    --text3: #64748b;
+    /* Emerald primary */
+    --accent: #10b981;
+    --accent2: #059669;
+    --accent-bg: rgba(16,185,129,0.10);
+    --accent-border: rgba(16,185,129,0.35);
+    /* Tertiary cyan kept under the legacy --blue token name */
+    --blue: #06b6d4;
+    --blue-bg: rgba(6,182,212,0.10);
+    --blue-border: rgba(6,182,212,0.35);
+    /* Neon citron secondary kept under the legacy --pink token name */
+    --pink: #84cc16;
+    --pink-bg: rgba(132,204,22,0.10);
+    --pink-border: rgba(132,204,22,0.35);
+    --danger: #ef4444;
+    --danger-bg: rgba(239,68,68,0.10);
+    --warn: #84cc16;         /* live / urgency cue uses the citron volt */
+    --warn-bg: rgba(132,204,22,0.10);
+    --gold: #a3e635;
     --silver: #c0c8c4;
     --bronze: #d4856a;
-    --radius: 10px;
-    --radius-lg: 16px;
-    --radius-xl: 24px;
-    --font-head: 'Syne', sans-serif;
-    --font-body: 'DM Sans', sans-serif;
+    --radius: 0.5rem;
+    --radius-lg: 1rem;
+    --radius-xl: 1.5rem;
+    --font-head: 'Space Grotesk', sans-serif;
+    --font-body: 'Plus Jakarta Sans', sans-serif;
     --transition: 0.18s ease;
     --safe-bottom: env(safe-area-inset-bottom, 0px);
-    /* Theme-dependent surfaces that are not part of the palette above: text drawn
-       on the accent, and the modal scrim. Both are overridden by the light theme. */
-    --on-accent: #0d0f0e;
-    --overlay: rgba(0,0,0,0.75);
-    /* Restrained elevation. Kept as tokens so the light theme can soften them
-       without touching any component rule. */
-    --shadow-sm: 0 1px 2px rgba(0,0,0,0.35);
-    --shadow: 0 4px 14px rgba(0,0,0,0.32);
-    --shadow-lg: 0 12px 34px rgba(0,0,0,0.5);
-    /* Fluid content container and the responsive spacing scale. The dashboard now
-       uses the available desktop width instead of a fixed 1080px column, while the
-       1440px ceiling keeps very wide screens readable. Spacing tokens step down from
-       desktop → laptop → tablet → phone in the media queries below. */
+    /* Text drawn on the accent, and the modal scrim. */
+    --on-accent: #0b1320;
+    --overlay: rgba(3,7,14,0.72);
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
+    --shadow: 0 4px 14px rgba(0,0,0,0.4);
+    --shadow-lg: 0 12px 34px rgba(0,0,0,0.55);
+    /* Active-court / match-point luminescence from the Stitch elevation spec. */
+    --glow-live: 0 0 24px rgba(16,185,129,0.12), 0 8px 32px rgba(11,19,32,0.6);
+    --glow-volt: 0 0 20px rgba(132,204,22,0.18);
     --content-max: 1440px;
     --gutter: 1rem;
     --pad-y: 1.25rem;
@@ -67,48 +74,61 @@
 
   /* ── LIGHT THEME ───────────────────────────────────────────
      The dark palette is the product identity; the light theme is the same layout
-     and typography with the surface tokens inverted. The lime accent is darkened
-     so accent-on-white text stays readable, and --on-accent flips to white. */
+     and typography with the surface tokens inverted. The emerald accent is
+     darkened so accent-on-white text stays readable, and --on-accent flips. */
   [data-theme="light"] {
-    --bg: #f2f4ef;
+    --bg: #f1f5f9;
     --bg2: #ffffff;
     --bg3: #ffffff;
-    --bg4: #e9ece5;
-    --border: rgba(20,24,15,0.10);
-    --border2: rgba(20,24,15,0.18);
-    --text: #15180f;
-    --text2: #5b6353;
-    --text3: #8b9285;
-    --accent: #5f9414;
-    --accent2: #4d7a0f;
-    --accent-bg: rgba(95,148,20,0.10);
-    --accent-border: rgba(95,148,20,0.32);
-    --blue: #2563eb;
-    --blue-bg: rgba(37,99,235,0.08);
-    --blue-border: rgba(37,99,235,0.28);
-    --pink: #db2777;
-    --pink-bg: rgba(219,39,119,0.08);
-    --pink-border: rgba(219,39,119,0.28);
-    --danger: #d6402e;
-    --danger-bg: rgba(214,64,46,0.08);
-    --warn: #b26a00;
-    --warn-bg: rgba(178,106,0,0.10);
-    --gold: #b8860b;
+    --bg4: #e2e8f0;
+    --border: rgba(15,23,42,0.10);
+    --border2: rgba(15,23,42,0.20);
+    --text: #0f172a;
+    --text2: #475569;
+    --text3: #94a3b8;
+    --accent: #047857;
+    --accent2: #065f46;
+    --accent-bg: rgba(4,120,87,0.10);
+    --accent-border: rgba(4,120,87,0.32);
+    --blue: #0e7490;
+    --blue-bg: rgba(14,116,144,0.08);
+    --blue-border: rgba(14,116,144,0.28);
+    --pink: #4d7c0f;
+    --pink-bg: rgba(77,124,15,0.10);
+    --pink-border: rgba(77,124,15,0.30);
+    --danger: #dc2626;
+    --danger-bg: rgba(220,38,38,0.08);
+    --warn: #4d7c0f;
+    --warn-bg: rgba(77,124,15,0.12);
+    --gold: #65a30d;
     --silver: #6b7280;
     --bronze: #a05a2c;
     --on-accent: #ffffff;
-    --overlay: rgba(20,24,15,0.45);
-    --shadow-sm: 0 1px 2px rgba(20,24,15,0.06);
-    --shadow: 0 3px 12px rgba(20,24,15,0.08);
-    --shadow-lg: 0 12px 30px rgba(20,24,15,0.16);
+    --overlay: rgba(15,23,42,0.45);
+    --shadow-sm: 0 1px 2px rgba(15,23,42,0.06);
+    --shadow: 0 3px 12px rgba(15,23,42,0.08);
+    --shadow-lg: 0 12px 30px rgba(15,23,42,0.16);
+    --glow-live: 0 0 24px rgba(4,120,87,0.12), 0 8px 32px rgba(15,23,42,0.10);
+    --glow-volt: 0 0 20px rgba(77,124,15,0.18);
   }
 
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   body {
     background: var(--bg); color: var(--text); font-family: var(--font-body);
-    font-size: 15px; line-height: 1.6; min-height: 100vh; -webkit-font-smoothing: antialiased;
+    font-size: 14px; line-height: 1.6; min-height: 100vh; -webkit-font-smoothing: antialiased;
     overscroll-behavior-y: none;
+  }
+
+  /* Material Symbols icon helper (Stitch iconography). Inline with the surrounding
+     text, sized by font-size so it scales with each component. */
+  .ms {
+    font-family: 'Material Symbols Outlined';
+    font-weight: normal; font-style: normal; line-height: 1;
+    letter-spacing: normal; text-transform: none; white-space: nowrap;
+    word-wrap: normal; direction: ltr; display: inline-block; vertical-align: middle;
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    font-size: 18px; flex-shrink: 0; user-select: none;
   }
 
   /* Visible keyboard focus in both themes. Mouse clicks stay clean because only
@@ -125,17 +145,27 @@
      the navigation wraps onto its own second line so the primary + More behaviour
      is preserved. */
   header {
-    background: var(--bg2); border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+    background: color-mix(in srgb, var(--bg2) 92%, transparent);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border-bottom: 1px solid var(--border);
     padding: 0 1rem; display: flex; align-items: center; flex-wrap: nowrap;
-    gap: 4px 10px; min-height: 62px; position: sticky; top: 0; z-index: 100;
-    box-shadow: var(--shadow-sm);
+    gap: 4px 10px; min-height: 64px; position: sticky; top: 0; z-index: 100;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.35);
   }
   .logo {
-    display: flex; align-items: center; gap: 10px; flex: 0 0 auto;
-    font-family: var(--font-head); font-size: 18px; font-weight: 800;
-    letter-spacing: -0.4px; color: var(--text); text-decoration: none;
+    display: flex; align-items: center; gap: 9px; flex: 0 0 auto;
+    font-family: var(--font-head); font-size: 17px; font-weight: 700;
+    letter-spacing: -0.4px; text-transform: uppercase; color: var(--text); text-decoration: none;
     min-height: 44px;
   }
+  .logo-live {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-family: var(--font-head); font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+    padding: 2px 8px; border-radius: 9999px;
+    background: var(--accent-bg); color: var(--accent); border: 1px solid var(--accent-border);
+  }
+  .logo-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
   .logo-icon {
     width: 32px; height: 32px; background: var(--accent);
     border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 17px;
@@ -245,8 +275,8 @@
   .btn:disabled { opacity: 0.4; cursor: not-allowed; }
   .btn-primary { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 700; }
   .btn-primary:hover { background: var(--accent2); }
-  .btn-danger { background: var(--danger-bg); color: var(--danger); border-color: rgba(255,107,91,0.25); }
-  .btn-danger:hover { background: rgba(255,107,91,0.16); }
+  .btn-danger { background: var(--danger-bg); color: var(--danger); border-color: rgba(239,68,68,0.25); }
+  .btn-danger:hover { background: rgba(239,68,68,0.16); }
   .btn-ghost { border-color: transparent; color: var(--text2); }
   .btn-ghost:hover { color: var(--text); }
   .btn-sm { padding: 8px 14px; font-size: 13px; min-height: 44px; }
@@ -258,10 +288,10 @@
   /* ALERTS */
   .alert { border-radius: var(--radius); padding: 11px 14px; font-size: 13px; margin-bottom: 1rem; line-height: 1.5; }
   .alert:last-child { margin-bottom: 0; }
-  .alert-warn { background: var(--warn-bg); border: 1px solid rgba(245,166,35,0.2); color: var(--warn); }
+  .alert-warn { background: var(--warn-bg); border: 1px solid rgba(132,204,22,0.2); color: var(--warn); }
   .alert-success { background: var(--accent-bg); border: 1px solid var(--accent-border); color: var(--accent); }
   .alert-info { background: var(--blue-bg); border: 1px solid var(--blue-border); color: var(--blue); }
-  .alert-danger { background: var(--danger-bg); border: 1px solid rgba(255,107,91,0.25); color: var(--danger); }
+  .alert-danger { background: var(--danger-bg); border: 1px solid rgba(239,68,68,0.25); color: var(--danger); }
 
   /* FORM */
   .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 1rem; }
@@ -272,7 +302,7 @@
     outline: none; transition: var(--transition); width: 100%; min-height: 44px;
   }
   input[type=text]:focus, input[type=number]:focus {
-    border-color: var(--accent-border); box-shadow: 0 0 0 3px rgba(184,245,74,0.08);
+    border-color: var(--accent-border); box-shadow: 0 0 0 3px rgba(16,185,129,0.08);
   }
   input::placeholder { color: var(--text3); }
   .court-count-select {
@@ -281,7 +311,7 @@
     outline: none; transition: var(--transition); width: 100%; min-height: 44px;
     -webkit-appearance: none; appearance: none;
   }
-  .court-count-select:focus { border-color: var(--accent-border); box-shadow: 0 0 0 3px rgba(184,245,74,0.08); }
+  .court-count-select:focus { border-color: var(--accent-border); box-shadow: 0 0 0 3px rgba(16,185,129,0.08); }
   /* Selects used in Settings/Teams. Sized to a comfortable touch target so the
      level/group pickers do not fall below the 44px guideline on phones. */
   select.level-select, .team-edit-controls select {
@@ -289,7 +319,7 @@
     color: var(--text); padding: 8px 10px; font-size: 13px; font-family: var(--font-body);
     min-height: 40px; max-width: 100%; outline: none; transition: var(--transition);
   }
-  select.level-select:focus, .team-edit-controls select:focus { border-color: var(--accent-border); box-shadow: 0 0 0 3px rgba(184,245,74,0.08); }
+  select.level-select:focus, .team-edit-controls select:focus { border-color: var(--accent-border); box-shadow: 0 0 0 3px rgba(16,185,129,0.08); }
   /* Any bare select inside a card (e.g. qualifiers per group) gets the same
      comfortable touch target as the styled pickers. */
   .card select {
@@ -298,7 +328,7 @@
     min-height: 44px; max-width: 100%; outline: none; transition: var(--transition);
     -webkit-appearance: none; appearance: none;
   }
-  .card select:focus { border-color: var(--accent-border); box-shadow: 0 0 0 3px rgba(184,245,74,0.08); }
+  .card select:focus { border-color: var(--accent-border); box-shadow: 0 0 0 3px rgba(16,185,129,0.08); }
 
   /* PROGRESS */
   .progress-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.4rem; font-size: 13px; color: var(--text2); }
@@ -316,11 +346,11 @@
   /* DASHBOARD V2 */
   .status-strip { display: flex; align-items: center; gap: 11px; padding: 12px 15px; border-radius: var(--radius); background: var(--bg2); border: 1px solid var(--border); font-size: 13px; font-weight: 600; color: var(--text2); margin-bottom: 14px; box-shadow: var(--shadow-sm); }
   .status-strip .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--text3); flex-shrink: 0; }
-  .status-strip.live { border-color: rgba(245,166,35,0.3); background: var(--warn-bg); color: var(--warn); }
+  .status-strip.live { border-color: rgba(132,204,22,0.3); background: var(--warn-bg); color: var(--warn); }
   .status-strip.live .dot { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-bg); }
   .status-strip.ready { border-color: var(--blue-border); background: var(--blue-bg); color: var(--blue); }
   .status-strip.ready .dot { background: var(--blue); }
-  .status-strip.complete { border-color: rgba(255,217,61,0.4); background: linear-gradient(135deg, rgba(255,217,61,0.12), var(--accent-bg)); color: var(--gold); }
+  .status-strip.complete { border-color: rgba(163,230,53,0.4); background: linear-gradient(135deg, rgba(163,230,53,0.12), var(--accent-bg)); color: var(--gold); }
   .status-strip.complete .dot { background: var(--gold); }
 
   /* Compact KPI cards: 2 cols on phone, 3 on tablet, 6 on desktop. The results area
@@ -331,7 +361,7 @@
   @media (min-width: 900px) { .kpi-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
   .kpi-card { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 13px; min-width: 0; box-shadow: var(--shadow-sm); }
   .kpi-card.accent { border-color: var(--accent-border); background: var(--accent-bg); }
-  .kpi-card.live { border-color: rgba(245,166,35,0.35); background: var(--warn-bg); }
+  .kpi-card.live { border-color: rgba(132,204,22,0.35); background: var(--warn-bg); }
   .kpi-value { font-family: var(--font-head); font-size: 25px; font-weight: 800; line-height: 1.1; letter-spacing: -0.5px; color: var(--text); font-variant-numeric: tabular-nums; }
   .kpi-card.accent .kpi-value { color: var(--accent); }
   .kpi-card.live .kpi-value { color: var(--warn); }
@@ -509,21 +539,21 @@
   /* Light theme surface fixes: cards/inputs already use tokens, but a few shadows
      and the bracket/board backgrounds assume a dark canvas. */
   [data-theme="light"] #toast { box-shadow: 0 8px 32px rgba(20,24,15,0.18); }
-  [data-theme="light"] .champion-card { background: linear-gradient(135deg, rgba(255,217,61,0.22), var(--accent-bg)); }
+  [data-theme="light"] .champion-card { background: linear-gradient(135deg, rgba(163,230,53,0.22), var(--accent-bg)); }
 
   /* PILLS / BADGES. Status is always carried by an explicit text label, never by
      colour alone; the colour only reinforces it. */
   .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: 20px; background: var(--bg4); color: var(--text2); border: 1px solid var(--border); white-space: nowrap; letter-spacing: 0.2px; }
-  .pill-live { background: rgba(245,166,35,0.12); color: var(--warn); border-color: rgba(245,166,35,0.3); }
+  .pill-live { background: rgba(132,204,22,0.12); color: var(--warn); border-color: rgba(132,204,22,0.3); }
   .pill-done { background: var(--accent-bg); color: var(--accent); border-color: var(--accent-border); }
   .pill-free { background: var(--blue-bg); color: var(--blue); border-color: var(--blue-border); }
-  .pill-closed { background: var(--danger-bg); color: var(--danger); border-color: rgba(255,107,91,0.25); }
+  .pill-closed { background: var(--danger-bg); color: var(--danger); border-color: rgba(239,68,68,0.25); }
   .pill-queued { background: var(--bg4); color: var(--text2); }
 
   /* NOW / NEXT / QUEUE — a consistent visual language across Dashboard, Courts and
      Matches. Purely a label: the scheduler remains the single source of truth. */
   .phase-tag { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-head); font-size: 10px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--border); color: var(--text2); background: var(--bg4); }
-  .phase-now { color: var(--warn); border-color: rgba(245,166,35,0.35); background: rgba(245,166,35,0.1); }
+  .phase-now { color: var(--warn); border-color: rgba(132,204,22,0.35); background: rgba(132,204,22,0.1); }
   .phase-next { color: var(--blue); border-color: var(--blue-border); background: var(--blue-bg); }
   .phase-queue { color: var(--text3); }
 
@@ -531,7 +561,7 @@
   .courts-grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
   @media (min-width: 640px) { .courts-grid { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); } }
   .court-card { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 1rem; display: flex; flex-direction: column; gap: 10px; box-shadow: var(--shadow-sm); }
-  .court-card.live { border-color: rgba(245,166,35,0.45); box-shadow: 0 0 0 1px rgba(245,166,35,0.12); }
+  .court-card.live { border-color: rgba(132,204,22,0.45); box-shadow: 0 0 0 1px rgba(132,204,22,0.12); }
   .court-card.closed { opacity: 0.72; }
   .court-card.disabled { opacity: 0.55; border-style: dashed; }
   .court-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -560,10 +590,10 @@
     outline: none; transition: var(--transition); width: 100%; min-height: 44px;
     -webkit-appearance: none; appearance: none;
   }
-  input[type=time]:focus { border-color: var(--accent-border); box-shadow: 0 0 0 3px rgba(184,245,74,0.08); }
+  input[type=time]:focus { border-color: var(--accent-border); box-shadow: 0 0 0 3px rgba(16,185,129,0.08); }
   .court-window-tag { font-size: 11px; color: var(--text3); }
   .court-block { border-radius: var(--radius); padding: 11px 12px; background: var(--bg2); border: 1px solid var(--border); }
-  .court-block.live-block { background: rgba(245,166,35,0.06); border-color: rgba(245,166,35,0.28); }
+  .court-block.live-block { background: rgba(132,204,22,0.06); border-color: rgba(132,204,22,0.28); }
   .court-block.next-block { background: var(--accent-bg); border-color: var(--accent-border); }
   .court-block-label { font-size: 10px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; color: var(--text3); margin-bottom: 7px; display: flex; align-items: center; gap: 6px; }
   .court-block.next-block .court-block-label { color: var(--accent); }
@@ -585,8 +615,8 @@
   .mgrid { display: grid; grid-template-columns: 1fr; gap: 10px; }
   @media (min-width: 820px) { .mgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; } }
   .mrow { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px 15px; display: flex; flex-direction: column; gap: 10px; box-shadow: var(--shadow-sm); }
-  .mrow.live { border-color: rgba(245,166,35,0.4); background: rgba(245,166,35,0.04); }
-  .mrow.done { border-color: rgba(184,245,74,0.2); }
+  .mrow.live { border-color: rgba(132,204,22,0.4); background: rgba(132,204,22,0.04); }
+  .mrow.done { border-color: rgba(16,185,129,0.2); }
   .mrow-top { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
   .mrow-id { font-family: var(--font-head); font-size: 12px; font-weight: 800; color: var(--text2); letter-spacing: 0.5px; }
   .mrow-meta { font-size: 11.5px; color: var(--text3); letter-spacing: 0.2px; }
@@ -616,7 +646,7 @@
   .standings-table th.num { text-align: right; }
   .standings-table td { padding: 10px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
   .standings-table tr:last-child td { border-bottom: none; }
-  .standings-table tbody tr.qualify { background: rgba(184,245,74,0.04); }
+  .standings-table tbody tr.qualify { background: rgba(16,185,129,0.04); }
   .rank-cell { font-family: var(--font-head); font-size: 14px; font-weight: 800; width: 34px; color: var(--text3); }
   .rank-1 { color: var(--gold); } .rank-2 { color: var(--silver); } .rank-3 { color: var(--bronze); }
   .team-cell-name { font-weight: 600; color: var(--text); font-size: 13.5px; }
@@ -642,8 +672,8 @@
   .bracket-col-head { font-family: var(--font-head); font-size: 11px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; color: var(--text3); }
   .bracket-col-body { display: flex; flex-direction: column; gap: 10px; flex: 1; justify-content: center; }
   .bcard { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); padding: 9px 10px; }
-  .bcard.done { border-color: rgba(184,245,74,0.2); }
-  .bcard.live { border-color: rgba(245,166,35,0.35); }
+  .bcard.done { border-color: rgba(16,185,129,0.2); }
+  .bcard.live { border-color: rgba(132,204,22,0.35); }
   .bcard-id { font-family: var(--font-head); font-size: 10px; font-weight: 800; color: var(--text3); letter-spacing: 0.6px; margin-bottom: 5px; display: flex; justify-content: space-between; gap: 6px; }
   .bcard-team { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; line-height: 1.5; }
   .bcard-team .nm { overflow-wrap: anywhere; }
@@ -654,19 +684,19 @@
   .bcard-fmt { font-size: 10.5px; margin-top: 4px; letter-spacing: 0.2px; }
   .bcard-team .bcard-tail { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; }
   .bcard-edit { padding: 1px 6px; font-size: 10px; }
-  .bcard.conflict { border-color: var(--danger); box-shadow: 0 0 0 1px rgba(255,107,91,0.25); }
+  .bcard.conflict { border-color: var(--danger); box-shadow: 0 0 0 1px rgba(239,68,68,0.25); }
   .bcard-conflict { font-size: 10.5px; color: var(--danger); margin-top: 5px; line-height: 1.4; }
   .pill-override { background: var(--blue-bg); border: 1px solid var(--blue-border); color: var(--blue); font-size: 9.5px; padding: 1px 6px; }
   .conflict-banner .conflict-title { font-weight: 800; font-size: 13.5px; margin-bottom: 4px; }
   .conflict-banner .conflict-sub { font-size: 12px; line-height: 1.5; margin-bottom: 8px; }
-  .conflict-row { display: flex; gap: 8px; align-items: center; justify-content: space-between; font-size: 12px; padding: 6px 0; border-top: 1px solid rgba(255,107,91,0.2); flex-wrap: wrap; }
+  .conflict-row { display: flex; gap: 8px; align-items: center; justify-content: space-between; font-size: 12px; padding: 6px 0; border-top: 1px solid rgba(239,68,68,0.2); flex-wrap: wrap; }
   .part-block { margin-bottom: 12px; }
   .part-side { font-family: var(--font-head); font-size: 11px; font-weight: 800; letter-spacing: 0.6px; text-transform: uppercase; color: var(--text3); margin-bottom: 4px; }
   .part-registered { font-size: 12.5px; margin-bottom: 6px; }
   .part-label { display: block; font-size: 11.5px; color: var(--text2); margin-bottom: 3px; }
   .part-input { width: 100%; padding: 9px 11px; border-radius: var(--radius); border: 1px solid var(--border2); background: var(--bg2); color: var(--text); font-size: 14px; font-family: var(--font-body); }
   .part-input:focus { outline: none; border-color: var(--accent-border); }
-  .champion-card { background: linear-gradient(135deg, rgba(255,217,61,0.14), rgba(184,245,74,0.08)); border: 1px solid rgba(255,217,61,0.4); border-radius: var(--radius-lg); padding: 1.25rem; text-align: center; }
+  .champion-card { background: linear-gradient(135deg, rgba(163,230,53,0.14), rgba(16,185,129,0.08)); border: 1px solid rgba(163,230,53,0.4); border-radius: var(--radius-lg); padding: 1.25rem; text-align: center; }
   .champion-card .crown { font-size: 34px; }
   .champion-card .ctitle { font-family: var(--font-head); font-size: 11px; font-weight: 800; letter-spacing: 2px; color: var(--gold); text-transform: uppercase; }
   .champion-card .cname { font-family: var(--font-head); font-size: 22px; font-weight: 800; margin-top: 4px; }
@@ -690,7 +720,7 @@
     .team-edit-controls select { flex: 1 1 auto; }
   }
   .remove-btn { width: 40px; height: 40px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--text3); cursor: pointer; font-size: 18px; line-height: 1; flex-shrink: 0; transition: var(--transition); }
-  .remove-btn:hover { background: var(--danger-bg); color: var(--danger); border-color: rgba(255,107,91,0.3); }
+  .remove-btn:hover { background: var(--danger-bg); color: var(--danger); border-color: rgba(239,68,68,0.3); }
   /* Group configuration row: stable id, optional friendly label, live counts. */
   .group-cfg-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
   .group-cfg-id { font-family: var(--font-head); font-size: 13px; font-weight: 800; color: var(--text); min-width: 24px; }
@@ -778,10 +808,10 @@
     padding: 12px; font-family: var(--font-head); font-size: 22px; font-weight: 800; color: var(--text);
     text-align: center; min-height: 56px; width: 100%;
   }
-  .score-input:focus { border-color: var(--accent-border); box-shadow: 0 0 0 3px rgba(184,245,74,0.08); outline: none; }
+  .score-input:focus { border-color: var(--accent-border); box-shadow: 0 0 0 3px rgba(16,185,129,0.08); outline: none; }
   .score-preview { border-radius: var(--radius); padding: 11px 13px; font-size: 13.5px; font-weight: 600; text-align: center; margin-top: 10px; background: var(--bg4); border: 1px solid var(--border); }
   .score-preview.ok { background: var(--accent-bg); border-color: var(--accent-border); color: var(--accent); }
-  .score-preview.bad { background: var(--danger-bg); border-color: rgba(255,107,91,0.25); color: var(--danger); }
+  .score-preview.bad { background: var(--danger-bg); border-color: rgba(239,68,68,0.25); color: var(--danger); }
   .score-err { font-size: 12.5px; color: var(--danger); min-height: 18px; margin-top: 8px; }
 
   /* MISC */
@@ -810,6 +840,163 @@
   ::-webkit-scrollbar { width: 8px; height: 8px; }
   ::-webkit-scrollbar-track { background: var(--bg); }
   ::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 4px; }
+
+  /* ═══════════════ STITCH PRESENTATION LAYER ═══════════════
+     Component treatments from the Stitch "Apex Shuttle Tournament Engine" export:
+     pill badges, live indicators, score capsules, court cards, bracket nodes and
+     the tonal card hierarchy. These augment the existing component classes so the
+     UI reads as the Stitch design without changing any engine behaviour. */
+
+  /* Header nav strip: a recessed pill container, active destination as a solid
+     emerald chip (Stitch "data-active-classes" treatment). */
+  nav.tabs { background: var(--bg); border: 1px solid var(--border); border-radius: 0.75rem; padding: 3px; }
+  .tab.active { background: var(--accent); color: var(--on-accent); font-weight: 700; border-color: transparent; box-shadow: 0 0 16px rgba(16,185,129,0.25); }
+
+  /* Page header — Stitch headline + contextual sub-line. */
+  .page-title { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; }
+  .page-subtitle { font-size: 13.5px; color: var(--text2); }
+  .section-title { font-size: 11px; letter-spacing: 0.12em; color: var(--text3); }
+
+  /* Cards: tonal plate with a hairline outline and soft elevation (Stitch Plate). */
+  .card { box-shadow: var(--shadow); }
+  .kpi-card, .stat-card, .mrow, .court-card, .bcard { box-shadow: var(--shadow); }
+  .kpi-value, .stat-value { font-variant-numeric: tabular-nums; }
+  /* Stitch KPI tile: caption row with a trailing icon, large value beneath. */
+  .kpi-card { display: flex; flex-direction: column; gap: 6px; }
+  .kpi-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .kpi-top .kpi-label { margin-top: 0; }
+  .kpi-ico { color: var(--accent); font-size: 18px; opacity: 0.85; }
+  .tab-ico { display: inline-flex; align-items: center; }
+  .tab-ico .ms { font-size: 17px; }
+
+  /* Stitch dashboard hero — the "Active Tournament Hub" banner. */
+  .dash-hero {
+    position: relative; overflow: hidden; border-radius: var(--radius-lg);
+    background: var(--bg2); border: 1px solid var(--border);
+    padding: 1.25rem; margin-bottom: var(--stack-gap); box-shadow: var(--shadow);
+  }
+  .dash-hero-glow {
+    position: absolute; right: -5rem; top: -6rem; width: 20rem; height: 20rem;
+    border-radius: 50%; background: var(--accent-bg); filter: blur(60px); pointer-events: none;
+  }
+  .dash-hero-top { position: relative; display: flex; flex-direction: column; gap: 1rem; }
+  .dash-hero-id { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .hero-chip {
+    display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
+    font-family: var(--font-head); font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; padding: 3px 10px; border-radius: 9999px;
+    background: var(--accent-bg); color: var(--accent); border: 1px solid var(--accent-border);
+  }
+  .hero-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse-dot 1.4s ease-in-out infinite; }
+  .dash-hero-name { font-family: var(--font-head); font-size: 26px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; overflow-wrap: anywhere; }
+  .dash-hero-sub { font-size: 13px; color: var(--text2); }
+  .dash-hero-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .hero-chip-meta {
+    display: flex; align-items: center; gap: 9px; padding: 8px 12px;
+    border-radius: var(--radius); background: var(--bg4); min-width: 0;
+  }
+  .hero-chip-ico { font-size: 18px; }
+  .hero-chip-ico.primary { color: var(--accent); }
+  .hero-chip-ico.secondary { color: var(--warn); }
+  .hero-chip-ico.tertiary { color: var(--blue); }
+  .hero-chip-col { display: flex; flex-direction: column; min-width: 0; }
+  .hero-chip-label { font-family: var(--font-head); font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text3); }
+  .hero-chip-value { font-family: var(--font-head); font-size: 13px; font-weight: 600; color: var(--text); white-space: nowrap; }
+  @media (min-width: 900px) {
+    .dash-hero-top { flex-direction: row; align-items: center; justify-content: space-between; gap: 1.5rem; }
+    .dash-hero-name { font-size: 30px; }
+  }
+
+  /* Stitch page head: kicker + headline on the left, telemetry chips on the right.
+     Used by the operational screens (Courts, Matches, Standings, Teams, Settings). */
+  .page-head { display: flex; flex-direction: column; gap: 12px; margin-bottom: 1.1rem; }
+  .page-head-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .page-head-kicker {
+    display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
+    font-family: var(--font-head); font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--accent);
+  }
+  .page-head .page-title { margin-bottom: 0; }
+  .page-head .page-subtitle { margin-bottom: 0; }
+  .group-sub { font-family: var(--font-body); font-size: 11px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--text3); }
+  .page-head-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .head-chip {
+    display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px;
+    border-radius: var(--radius); background: var(--bg4); border: 1px solid var(--border);
+    font-family: var(--font-head); font-size: 12px; font-weight: 600; color: var(--text2);
+  }
+  .head-chip .ms { font-size: 16px; color: var(--accent); }
+  @media (min-width: 900px) {
+    .page-head { flex-direction: row; align-items: flex-end; justify-content: space-between; }
+    .page-head-chips { justify-content: flex-end; }
+  }
+
+  /* Stitch "live court" luminescence: an in-play court / match gets an emerald
+     edge stroke and a diffused ambient glow. */
+  .court-card.live, .mrow.live, .bcard.live {
+    border-color: var(--accent-border);
+    box-shadow: var(--glow-live);
+  }
+  .court-card.live .court-name, .mrow.live .mrow-id { color: var(--accent); }
+
+  /* Court-ready / live status dots. */
+  .pill-live .dot, .pill-free .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+  .pill-live .dot { background: var(--warn); box-shadow: 0 0 6px var(--warn); animation: pulse-dot 1.4s ease-in-out infinite; }
+  .pill-free .dot { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+  @keyframes pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+  /* Stitch live-match pill: solid capsule with a pulsing inner core. */
+  .pill-live { background: rgba(132,204,22,0.14); color: var(--warn); border-color: rgba(132,204,22,0.4); }
+  .pill-free { background: var(--accent-bg); color: var(--accent); border-color: var(--accent-border); }
+
+  /* Court cards: Stitch court card (raised plate, name + status header). */
+  .court-card { border-radius: var(--radius-lg); }
+  .court-card .court-head { align-items: flex-start; }
+  .court-window { font-family: var(--font-head); letter-spacing: 0.02em; }
+
+  /* Match cards: Stitch fixture card — id chip, stage chip, VS divider, score pill. */
+  .mrow-id { font-size: 13px; color: var(--text); }
+  .match-card .match-teams .t .sc { font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+
+  /* Standings: Stitch qualification zone — inset emerald left border on qualified
+     rows, zebra striping and uppercase header labels. */
+  .standings-table tbody tr.qualify { background: var(--accent-bg); box-shadow: inset 3px 0 0 var(--accent); }
+  .standings-table tbody tr:nth-child(even) { background: color-mix(in srgb, var(--bg2) 60%, transparent); }
+  .standings-table tbody tr.qualify:nth-child(even) { background: var(--accent-bg); }
+  .pts-cell { color: var(--accent); }
+  .rank-cell { font-family: var(--font-head); }
+  /* Stitch pool card: accent rail, group title with a qualify chip, live sub-line. */
+  .pool-card { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--card-pad); box-shadow: var(--shadow); margin-bottom: var(--stack-gap); }
+  .pool-head { display: flex; align-items: flex-start; gap: 11px; margin-bottom: 12px; }
+  .pool-accent { width: 4px; align-self: stretch; min-height: 38px; border-radius: 4px; background: var(--accent); flex-shrink: 0; }
+  .pool-head-main { min-width: 0; flex: 1; }
+  .pool-title-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .pool-name { font-family: var(--font-head); font-size: 17px; font-weight: 700; color: var(--text); }
+  .pool-chip { font-family: var(--font-head); font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 8px; border-radius: 9999px; background: var(--accent-bg); color: var(--accent); border: 1px solid var(--accent-border); }
+  .pool-sub { font-size: 12px; color: var(--text3); margin-top: 2px; }
+  .status-col { text-align: right; }
+  .seed-pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 9999px; background: var(--accent-bg); color: var(--accent); font-size: 10.5px; font-weight: 700; letter-spacing: 0.03em; white-space: nowrap; }
+  .seed-pill .ms { font-size: 13px; }
+
+  /* Bracket nodes: Stitch dual-row athlete slots inside an elevated frame; the
+     winner's connector is emerald, losers dim. */
+  .bcard { background: var(--bg2); border-radius: var(--radius); }
+  .bcard.done { border-color: var(--accent-border); }
+  .bcard-team.win .nm, .bcard-team.win .sc { color: var(--accent); font-weight: 700; }
+
+  /* Level / tier chips (Stitch tier pills). */
+  .level-chip { font-family: var(--font-head); text-transform: uppercase; letter-spacing: 0.06em; }
+
+  /* Score entry: Stitch monospace-infused numeric scores. */
+  .score-input { font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+
+  /* Focus rings: Stitch emerald interior ring glow. */
+  input[type=text]:focus, input[type=number]:focus, input[type=time]:focus,
+  .score-input:focus, .court-count-select:focus, .card select:focus,
+  select.level-select:focus, .team-edit-controls select:focus, .part-input:focus {
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 3px rgba(16,185,129,0.2) !important;
+  }
 </style>
 </head>
 <body>
@@ -818,6 +1005,7 @@
   <header>
     <a class="logo" href="#">
       Tournament
+      <span class="logo-live"><span class="logo-live-dot"></span>LIVE</span>
     </a>
     <nav class="tabs" id="nav-tabs" aria-label="Main navigation"></nav>
     <div class="header-actions">
@@ -3924,13 +4112,13 @@
   const $ = function (sel) { return document.querySelector(sel); };
 
   const SCREENS = [
-    { id: 'dashboard', label: 'Dashboard', icon: '📊' },
-    { id: 'matches', label: 'Matches', icon: '🎯' },
-    { id: 'courts', label: 'Courts', icon: '🏟️' },
-    { id: 'standings', label: 'Standings', icon: '📋' },
-    { id: 'knockout', label: 'Knockout', icon: '🏆' },
-    { id: 'teams', label: 'Teams', icon: '👥' },
-    { id: 'settings', label: 'Settings', icon: '⚙️' }
+    { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
+    { id: 'matches', label: 'Matches', icon: 'sports_kabaddi' },
+    { id: 'courts', label: 'Courts', icon: 'stadium' },
+    { id: 'standings', label: 'Standings', icon: 'leaderboard' },
+    { id: 'knockout', label: 'Knockout', icon: 'emoji_events' },
+    { id: 'teams', label: 'Teams', icon: 'groups' },
+    { id: 'settings', label: 'Settings', icon: 'settings' }
   ];
 
   let scoreCtx = null;   // { matchId, from }
@@ -3941,6 +4129,22 @@
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  // Stitch iconography: a Material Symbols glyph. Icon names are literal code
+  // constants (never user data), so they are emitted unescaped.
+  function icon(name, cls) {
+    return '<span class="ms' + (cls ? ' ' + cls : '') + '" aria-hidden="true">' + name + '</span>';
+  }
+
+  // Stitch KPI / stat tile: a label-caps caption (with a trailing icon) over a
+  // large tabular value — the "pace metric" card from the Stitch dashboard.
+  function kpiTile(label, value, opts) {
+    opts = opts || {};
+    return '<div class="kpi-card ' + (opts.cls || '') + '">' +
+      '<div class="kpi-top"><span class="kpi-label">' + esc(label) + '</span>' +
+      (opts.icon ? icon(opts.icon, 'kpi-ico') : '') + '</div>' +
+      '<div class="kpi-value">' + esc(String(value)) + '</div></div>';
   }
 
   /* ── toast ─────────────────────────────────────────── */
@@ -3982,7 +4186,7 @@
     const active = s.id === cur;
     return '<button class="tab' + (active ? ' active' : '') + '"' + (active ? ' aria-current="page"' : '') +
       ' onclick="App.nav(\'' + s.id + '\')">' +
-      '<span class="tab-ico" aria-hidden="true">' + s.icon + '</span>' + esc(s.label) + '</button>';
+      '<span class="tab-ico" aria-hidden="true"><span class="ms">' + s.icon + '</span></span>' + esc(s.label) + '</button>';
   }
 
   function renderTabs() {
@@ -4407,8 +4611,9 @@
     const info = TM.knockoutInfo();
     const ch = info.champion ? TM.getTeam(info.champion) : null;
 
-    let html = '<div class="page-title">Dashboard</div>';
-    html += '<div class="page-subtitle">Live control centre for ' + esc(st.tournament.name) + '</div>';
+    // Stitch hero: an active-tournament hub banner with the live chip, tournament
+    // name and a row of configuration parameter chips (all derived from state).
+    let html = dashHero(st, status);
 
     html += statusStrip(status, p, kpi);
     html += kpiCards(kpi);
@@ -4419,11 +4624,11 @@
     html += '<div class="dash-results">';
     html += '<div class="dash-pane">' + leadersBlock() + '</div>';
     html += '<div class="dash-pane">';
-    html += '<div class="section-title">Tournament progress <span class="line"></span></div>';
+    html += '<div class="section-title">' + icon('trending_up') + ' Tournament progress <span class="line"></span></div>';
     html += progressCard(stages, p);
     html += recentBlock();
     if (ch) {
-      html += '<div class="section-title">Champion <span class="line"></span></div>';
+      html += '<div class="section-title">' + icon('emoji_events') + ' Champion <span class="line"></span></div>';
       html += '<div class="champion-card"><div class="crown">🏆</div><div class="ctitle">Tournament Champion</div>' +
         '<div class="cname">' + esc(ch.name) + '</div>' + (ch.players && ch.players.length ? '<div class="muted" style="margin-top:4px;">' + esc(ch.players.join(' · ')) + '</div>' : '') + '</div>';
     }
@@ -4441,7 +4646,7 @@
     html += '<div class="section-title">' + phaseTag('queue') + ' Waiting queue <span class="line"></span></div>';
     html += waitingQueueBlock();
 
-    html += '<div class="section-title">League standings <span class="line"></span></div>';
+    html += '<div class="section-title">' + icon('leaderboard') + ' League standings <span class="line"></span></div>';
     html += leagueStandingsBlock();
 
     html += '<div class="analytics-grid">';
@@ -4452,9 +4657,41 @@
     return html;
   }
 
+  /* ── dashboard hero (Stitch "Active Tournament Hub") ───── */
+  // The banner, live chip and parameter chips are all read from live state: the
+  // tournament name, pair count, group count, enabled court count and the group
+  // scoring target. No hardcoded tournament data.
+  function dashHero(st, status) {
+    const pairs = st.teams.length;
+    const groupCount = TM.groupIds().length;
+    const courts = TM.enabledCourts().length;
+    const liveLabel = { complete: 'FINAL', knockout: 'LIVE', ready: 'READY', group: 'LIVE', empty: 'SETUP' }[status] || 'LIVE';
+    const chips = [
+      { ico: 'groups', tone: 'primary', label: 'Field', value: pairs + ' Pair' + (pairs === 1 ? '' : 's') },
+      { ico: 'lan', tone: 'secondary', label: 'Format', value: groupCount + ' Group' + (groupCount === 1 ? '' : 's') },
+      { ico: 'stadium', tone: 'tertiary', label: 'Courts', value: courts + ' Active Court' + (courts === 1 ? '' : 's') },
+      { ico: 'timer', tone: 'primary', label: 'Scoring', value: TM.GROUP_TARGET + '-Pt Single Sets' }
+    ];
+    let h = '<section class="dash-hero">';
+    h += '<div class="dash-hero-glow" aria-hidden="true"></div>';
+    h += '<div class="dash-hero-top">';
+    h += '<div class="dash-hero-id">';
+    h += '<span class="hero-chip hero-chip-live"><span class="hero-dot"></span>' + esc(liveLabel) + ' TOURNAMENT HUB</span>';
+    h += '<h1 class="dash-hero-name">' + esc(st.tournament.name) + '</h1>';
+    h += '<p class="dash-hero-sub">Live control centre · Round-robin qualification window</p>';
+    h += '</div>';
+    h += '<div class="dash-hero-chips">' + chips.map(function (c) {
+      return '<div class="hero-chip-meta"><span class="ms hero-chip-ico ' + c.tone + '">' + c.ico + '</span>' +
+        '<div class="hero-chip-col"><span class="hero-chip-label">' + esc(c.label) + '</span>' +
+        '<span class="hero-chip-value">' + esc(c.value) + '</span></div></div>';
+    }).join('') + '</div>';
+    h += '</div></section>';
+    return h;
+  }
+
   function pct(a, b) { return b ? Math.round((a / b) * 100) : 0; }
 
-  /* ── status strip ─────────────────────────────────────── */
+  /* ── status strip (Stitch live telemetry HUD) ─────────── */
   // The visible wording comes from TM.statusText so it is unit-testable and always
   // uses the group count (not the overall tournament total) during the group stage.
   function statusStrip(status, p, kpi) {
@@ -4463,22 +4700,22 @@
       esc(TM.statusText(status, p, kpi)) + '</span></div>';
   }
 
-  /* ── KPI cards ────────────────────────────────────────── */
+  /* ── KPI cards (Stitch pace metric grid) ──────────────── */
   function kpiCards(k) {
     const cards = [
-      { label: 'Pairs', value: k.pairs, cls: '' },
-      { label: 'Matches', value: k.totalMatches, cls: '' },
-      { label: 'Completed', value: k.completed, cls: 'accent' },
-      { label: 'Live', value: k.live, cls: k.live ? 'live' : '' },
-      { label: 'Courts', value: k.courts, cls: '' },
-      { label: 'Progress', value: k.progressPct + '%', cls: 'accent' }
+      { label: 'Pairs', value: k.pairs, cls: '', icon: 'groups' },
+      { label: 'Matches', value: k.totalMatches, cls: '', icon: 'sports_kabaddi' },
+      { label: 'Completed', value: k.completed, cls: 'accent', icon: 'task_alt' },
+      { label: 'Live', value: k.live, cls: k.live ? 'live' : '', icon: 'sensors' },
+      { label: 'Courts', value: k.courts, cls: '', icon: 'stadium' },
+      { label: 'Progress', value: k.progressPct + '%', cls: 'accent', icon: 'timelapse' }
     ];
     return '<div class="kpi-grid">' + cards.map(function (c) {
-      return '<div class="kpi-card ' + c.cls + '"><div class="kpi-value">' + esc(String(c.value)) + '</div><div class="kpi-label">' + esc(c.label) + '</div></div>';
+      return kpiTile(c.label, c.value, { cls: c.cls, icon: c.icon });
     }).join('') + '</div>';
   }
 
-  /* ── tournament progress ──────────────────────────────── */
+  /* ── tournament progress (Stitch pace card) ───────────── */
   function progressCard(stages, p) {
     const st = TM.getState();
     let html = '<div class="card">';
@@ -4489,7 +4726,7 @@
     });
     html += '</div>';
 
-    html += '<div class="progress-row" style="margin-top:16px;"><span>Overall</span><span class="mono">' + p.overallDone + ' / ' + p.overallTotal + ' · ' + p.pct + '%</span></div>';
+    html += '<div class="progress-row" style="margin-top:16px;"><span>' + icon('speed') + ' Overall</span><span class="mono">' + p.overallDone + ' / ' + p.overallTotal + ' · ' + p.pct + '%</span></div>';
     html += '<div class="progress-bar"><div class="progress-fill" style="width:' + p.pct + '%"></div></div>';
 
     if (!st.teams.length) html += '<div class="alert alert-info" style="margin:12px 0 0;">No pairs configured yet. Add pairs on the Teams screen to generate fixtures.</div>';
@@ -4549,7 +4786,7 @@
   /* ── level distribution ───────────────────────────────── */
   function levelDistributionBlock() {
     const ld = TM.levelDistribution();
-    let html = '<div class="section-title">Team level distribution <span class="line"></span></div>';
+    let html = '<div class="section-title">' + icon('bar_chart') + ' Team level distribution <span class="line"></span></div>';
     html += '<div class="card">';
     if (!ld.total) {
       html += '<div class="muted">No pairs configured yet.</div>';
@@ -4610,7 +4847,7 @@
   /* ── group performance ────────────────────────────────── */
   function groupPerformanceBlock() {
     const rows = TM.groupPerformance();
-    let html = '<div class="section-title">Group performance <span class="line"></span></div>';
+    let html = '<div class="section-title">' + icon('insights') + ' Group performance <span class="line"></span></div>';
     html += '<div class="card">';
     if (!rows.length) return html + '<div class="muted">No groups configured yet.</div></div>';
     html += '<div class="gp-list">';
@@ -4634,7 +4871,7 @@
   function leadersBlock() {
     const leaders = TM.dashboardLeaders(5);
     const groups = TM.groupIds();
-    let html = '<div class="section-title">Current leaders <span class="line"></span></div>';
+    let html = '<div class="section-title">' + icon('military_tech') + ' Current leaders <span class="line"></span></div>';
     html += '<div class="card">';
     if (!leaders.length) {
       return html + '<div class="muted">No completed matches yet.</div></div>';
@@ -4695,7 +4932,7 @@
 
   function recentBlock() {
     const rec = TM.recentResults(6);
-    let html = '<div class="section-title">Recent results <span class="line"></span></div>';
+    let html = '<div class="section-title">' + icon('history') + ' Recent results <span class="line"></span></div>';
     if (!rec.length) return html + '<div class="card"><div class="muted">No results yet. Start a match from the Courts tab.</div></div>';
     html += '<div class="mgrid">' + rec.map(resultRow).join('') + '</div>';
     return html;
@@ -4829,8 +5066,17 @@
 
   function viewCourts() {
     const st = TM.getState();
-    let html = '<div class="page-title">Courts</div>';
-    html += '<div class="page-subtitle">Rolling allocation — a court takes the next eligible match as soon as it frees up. No fixed slots.</div>';
+    const sched = TM.schedulerSummary();
+    let html = '<div class="page-head">' +
+      '<div class="page-head-main">' +
+      '<span class="page-head-kicker">' + icon('sensors') + ' ' + sched.live + ' live · ' + sched.available + ' available</span>' +
+      '<div class="page-title">Courts</div>' +
+      '<div class="page-subtitle">Rolling allocation — a court takes the next eligible match as soon as it frees up. No fixed slots.</div>' +
+      '</div>' +
+      '<div class="page-head-chips">' +
+      '<div class="head-chip">' + icon('stadium') + '<span>' + TM.enabledCourts().length + ' court' + (TM.enabledCourts().length === 1 ? '' : 's') + ' enabled</span></div>' +
+      '<div class="head-chip">' + icon('sports_score') + '<span>' + TM.GROUP_TARGET + '-pt single sets</span></div>' +
+      '</div></div>';
     // Explicit callback: Array.map would otherwise pass (element, index, array) and
     // feed the index in as `compact` and the whole array in as the suggestion map,
     // which crashed courtCard the moment any court had a suggested next match.
@@ -4969,8 +5215,18 @@
   function viewMatches() {
     const st = TM.getState();
     const total = TM.totalGroupMatchCount();
-    let html = '<div class="page-title">Matches</div>';
-    html += '<div class="page-subtitle">Group stage round-robin (' + total + ' matches) plus the knockout bracket. Tap a match to enter or correct its result.</div>';
+    const p = TM.progress();
+    let html = '<div class="page-head">' +
+      '<div class="page-head-main">' +
+      '<span class="page-head-kicker">' + icon('sports_kabaddi') + ' ' + p.overallDone + ' / ' + p.overallTotal + ' resolved</span>' +
+      '<div class="page-title">Matches</div>' +
+      '<div class="page-subtitle">Group stage round-robin (' + total + ' matches) plus the knockout bracket. Tap a match to enter or correct its result.</div>' +
+      '</div>' +
+      '<div class="page-head-chips">' +
+      '<div class="head-chip">' + icon('groups') + '<span>' + TM.groupIds().length + ' group' + (TM.groupIds().length === 1 ? '' : 's') + '</span></div>' +
+      '<div class="head-chip">' + icon('sports_score') + '<span>' + p.groupDone + ' / ' + p.groupTotal + ' group</span></div>' +
+      '<div class="head-chip">' + icon('emoji_events') + '<span>' + p.knockoutDone + ' / ' + p.knockoutTotal + ' knockout</span></div>' +
+      '</div></div>';
 
     TM.groupIds().forEach(function (g) {
       const gm = TM.groupMatches(g);
@@ -4986,7 +5242,7 @@
     });
 
     const ko = st.matches.filter(function (m) { return m.stage !== 'group'; });
-    html += '<div class="section-title">Knockout · ' + ko.filter(function (m) { return m.status === 'completed'; }).length + '/' + TM.progress().knockoutTotal + '<span class="line"></span></div>';
+    html += '<div class="section-title">' + icon('emoji_events') + ' Knockout · ' + ko.filter(function (m) { return m.status === 'completed'; }).length + '/' + TM.progress().knockoutTotal + '<span class="line"></span></div>';
     if (!ko.length) {
       html += '<div class="card"><div class="alert alert-info" style="margin:0;">The knockout bracket is generated once you start it — open the Knockout screen after all ' + total + ' group matches are complete.</div></div>';
     } else {
@@ -4996,18 +5252,19 @@
   }
 
   /* ═══════════════ STANDINGS ═══════════════ */
-  function standingsTable(group, compact) {
+  function standingsTable(group) {
     const rows = TM.computeStandings(group);
     const per = TM.qualifiedPerGroup();
     const qualifySlots = per[group] != null ? per[group] : 0;
     let html = '<div class="tbl-wrap"><table class="standings-table"><thead><tr>' +
       '<th>#</th><th>Team</th><th class="num">P</th><th class="num">W</th><th class="num">L</th>' +
       '<th class="num">Pts</th><th class="num">PF</th><th class="num">PA</th><th class="num">Diff</th>' +
+      '<th class="num status-col">Status</th>' +
       '</tr></thead><tbody>';
     rows.forEach(function (r, i) {
       const qualifies = i < qualifySlots;
       html += '<tr class="' + (qualifies ? 'qualify' : '') + '">' +
-        '<td class="rank-cell ' + (i < 3 && !compact ? 'rank-' + (i + 1) : '') + '">' + (i + 1) + '</td>' +
+        '<td class="rank-cell ' + (i < 3 ? 'rank-' + (i + 1) : '') + '">' + (i + 1) + '</td>' +
         '<td><div class="team-cell-name">' + esc(r.team.name) + '</div>' + teamSub(r.team) + '</td>' +
         '<td class="played-cell">' + r.played + '</td>' +
         '<td class="num-cell">' + r.won + '</td>' +
@@ -5016,6 +5273,9 @@
         '<td class="num-cell">' + r.pf + '</td>' +
         '<td class="num-cell">' + r.pa + '</td>' +
         '<td class="num-cell">' + (r.diff > 0 ? '+' : '') + r.diff + '</td>' +
+        '<td class="status-col">' + (qualifies
+          ? '<span class="seed-pill">' + icon('verified') + ' Seed #' + (i + 1) + '</span>'
+          : '<span class="muted">—</span>') + '</td>' +
         '</tr>';
     });
     html += '</tbody></table></div>';
@@ -5026,11 +5286,33 @@
     const q = TM.getQualification();
     const ko = TM.bracketRounds(tmQualifierCount());
     const rounds = ko.map(function (r) { return r.name; }).join(' → ');
-    let html = '<div class="page-title">Standings</div>';
-    html += '<div class="page-subtitle">Win = ' + TM.GROUP_WIN_POINTS + ' points · Loss = ' + TM.GROUP_LOSS_POINTS + ' · No draws. Tie-break: points → point difference → points scored.</div>';
+    let html = '<div class="page-head">' +
+      '<div class="page-head-main">' +
+      '<span class="page-head-kicker">' + icon('leaderboard') + ' Pool standings & qualification</span>' +
+      '<div class="page-title">Standings</div>' +
+      '<div class="page-subtitle">Win = ' + TM.GROUP_WIN_POINTS + ' points · Loss = ' + TM.GROUP_LOSS_POINTS + ' · No draws. Tie-break: points → point difference → points scored.</div>' +
+      '</div>' +
+      '<div class="page-head-chips">' +
+      '<div class="head-chip">' + icon('groups') + '<span>' + TM.getState().teams.length + ' pairs registered</span></div>' +
+      '<div class="head-chip">' + icon('military_tech') + '<span>Top ' + q.perGroup + ' advance / group</span></div>' +
+      '<div class="head-chip">' + icon('gavel') + '<span>Pts &gt; Diff &gt; PF</span></div>' +
+      '</div></div>';
+    // Stitch pool card: an accent bar, the group name, a qualification chip and a
+    // live pairs/qualify sub-line, then the standings matrix.
     TM.groupIds().forEach(function (g) {
-      html += '<div class="section-title">' + esc(TM.groupLabel(g)) + '<span class="line"></span></div>';
-      html += standingsTable(g, false);
+      const rows = TM.computeStandings(g);
+      const per = TM.qualifiedPerGroup();
+      const slots = per[g] != null ? per[g] : 0;
+      const played = rows.filter(function (r) { return r.played > 0; }).length;
+      html += '<div class="pool-card">' +
+        '<div class="pool-head"><span class="pool-accent"></span>' +
+        '<div class="pool-head-main">' +
+        '<div class="pool-title-row"><span class="pool-name">' + esc(TM.groupLabel(g)) + '</span>' +
+        '<span class="pool-chip">' + slots + ' qualify</span></div>' +
+        '<div class="pool-sub">' + rows.length + ' pair' + (rows.length === 1 ? '' : 's') + ' · ' + played + ' with results · ' + slots + ' advance</div>' +
+        '</div></div>';
+      html += standingsTable(g);
+      html += '</div>';
     });
     html += '<div class="card" style="margin-top:14px;"><div class="muted">Top ' + q.perGroup + ' pairs from each group qualify' +
       (rounds ? ' (' + rounds + ')' : '') + '. Highlighted rows are currently in a qualifying position.</div></div>';
@@ -5155,8 +5437,16 @@
     const rounds = TM.bracketRounds(count);
     const roundNames = rounds.map(function (r) { return r.name + ' (' + TM.knockoutFormatTag(r.key) + ')'; }).join(' → ');
 
-    let html = '<div class="page-title">Knockout</div>';
-    html += '<div class="page-subtitle">' + (roundNames || 'Knockout') + '. Generated from the group standings once you start the knockout.</div>';
+    let html = '<div class="page-head">' +
+      '<div class="page-head-main">' +
+      '<span class="page-head-kicker">' + icon('emoji_events') + ' ' + (info.exists ? 'Main knockout draw' : 'Knockout draw') + '</span>' +
+      '<div class="page-title">Knockout</div>' +
+      '<div class="page-subtitle">' + (roundNames || 'Knockout') + '. Generated from the group standings once you start the knockout.</div>' +
+      '</div>' +
+      '<div class="page-head-chips">' +
+      '<div class="head-chip">' + icon('military_tech') + '<span>' + count + ' qualify</span></div>' +
+      (info.champion ? '<div class="head-chip">' + icon('emoji_events') + '<span>Champion decided</span></div>' : '') +
+      '</div></div>';
     html += knockoutFlowHTML();
     html += conflictBanner();
 
@@ -5206,7 +5496,7 @@
     html += '</div></div>';
 
     const ko = st.matches.filter(function (m) { return m.stage !== 'group'; });
-    html += '<div class="section-title">Knockout matches <span class="line"></span></div>';
+    html += '<div class="section-title">' + icon('emoji_events') + ' Knockout matches <span class="line"></span></div>';
     html += '<div class="mgrid">' + ko.map(function (m) { return matchRow(m, 'knockout'); }).join('') + '</div>';
     return html;
   }
@@ -5240,8 +5530,17 @@
 
     const locked = st.matches.some(function (m) { return m.status !== 'queued'; });
     const groups = draftGroups();
-    let html = '<div class="page-title">Teams</div>';
-    html += '<div class="page-subtitle">Add, edit or remove pairs and assign each to a group and a level. The pair list is the source of truth — the number of pairs drives the fixtures.</div>';
+    let html = '<div class="page-head">' +
+      '<div class="page-head-main">' +
+      '<span class="page-head-kicker">' + icon('groups') + ' Team & level roster</span>' +
+      '<div class="page-title">Teams</div>' +
+      '<div class="page-subtitle">Add, edit or remove pairs and assign each to a group and a level. The pair list is the source of truth — the number of pairs drives the fixtures.</div>' +
+      '</div>' +
+      '<div class="page-head-chips">' +
+      '<div class="head-chip">' + icon('groups') + '<span>' + draftTeams.length + ' pairs</span></div>' +
+      '<div class="head-chip">' + icon('lan') + '<span>' + groups.length + ' group' + (groups.length === 1 ? '' : 's') + '</span></div>' +
+      '<div class="head-chip">' + icon('workspace_premium') + '<span>' + TM.selectableLevels().length + ' levels</span></div>' +
+      '</div></div>';
     if (locked) html += '<div class="alert alert-warn">Matches have already started. Renaming pairs, editing players and changing levels always apply. Adding, removing or moving pairs regenerates the fixtures and will lose existing results — you will be asked to confirm.</div>';
 
     // Level is independent of group, so an unassigned pair never blocks the
@@ -5693,12 +5992,21 @@
     const totalGroup = TM.totalGroupMatchCount();
     const q = TM.getQualification();
     const plan = TM.regeneratePlan();
-    let html = '<div class="page-title">Settings</div>';
-    html += '<div class="page-subtitle">The single place to configure the tournament. Everything here is dynamic — the default is a 10-pair, 2-group example.</div>';
+    let html = '<div class="page-head">' +
+      '<div class="page-head-main">' +
+      '<span class="page-head-kicker">' + icon('settings') + ' Engine & venue controls</span>' +
+      '<div class="page-title">Settings</div>' +
+      '<div class="page-subtitle">The single place to configure the tournament. Everything here is dynamic — the default is a 10-pair, 2-group example.</div>' +
+      '</div>' +
+      '<div class="page-head-chips">' +
+      '<div class="head-chip">' + icon('groups') + '<span>' + st.teams.length + ' pairs</span></div>' +
+      '<div class="head-chip">' + icon('lan') + '<span>' + groups.length + ' group' + (groups.length === 1 ? '' : 's') + '</span></div>' +
+      '<div class="head-chip">' + icon('stadium') + '<span>' + st.courts.length + ' court' + (st.courts.length === 1 ? '' : 's') + '</span></div>' +
+      '</div></div>';
 
     // Tournament configuration: name, pair count and group distribution. All three
     // are read from live configuration, so the app is never tied to 10 pairs or 2×5.
-    html += '<div class="section-title">Tournament Configuration <span class="line"></span></div>';
+    html += '<div class="section-title">' + icon('tune') + ' Tournament Configuration <span class="line"></span></div>';
     html += '<div class="card">' +
       '<div class="field"><label>Tournament name</label><input type="text" value="' + esc(st.tournament.name) + '" onchange="App.setName(this.value)"></div>' +
       '<div class="muted" style="font-size:12.5px;margin-top:4px;">Created ' + esc(String(st.tournament.createdAt).slice(0, 10)) + ' · ' +
@@ -5710,7 +6018,7 @@
     // Groups: counts are derived from actual pair assignments. Empty groups are
     // shown explicitly so the organizer knows they need pairs before fixtures can
     // be generated. Adding/removing/renaming groups never moves a pair around.
-    html += '<div class="section-title">Groups <span class="line"></span></div>';
+    html += '<div class="section-title">' + icon('lan') + ' Groups <span class="line"></span></div>';
     html += '<div class="card">';
     const emptyGroups = [];
     groups.forEach(function (g) {
@@ -5743,7 +6051,7 @@
     // format so an impossible bracket can never be requested.
     const qualCount = groups.reduce(function (t, g) { return t + (TM.qualifiedPerGroup()[g] || 0); }, 0);
     const koRounds = TM.bracketRounds(qualCount).map(function (r) { return r.name; }).join(' → ');
-    html += '<div class="section-title">Qualification <span class="line"></span></div>';
+    html += '<div class="section-title">' + icon('military_tech') + ' Qualification <span class="line"></span></div>';
     html += '<div class="card">' +
       '<div class="field"><label>Qualifiers per group</label>' +
       '<select onchange="App.setQualification(this.value)">';
@@ -5773,7 +6081,7 @@
     // its points-per-game target. The rules are configured during the group stage
     // and locked the moment the knockout is generated — so this section is read-only
     // once the bracket exists, and editing again requires resetting the knockout.
-    html += '<div class="section-title">Knockout Scoring <span class="line"></span></div>';
+    html += '<div class="section-title">' + icon('sports_score') + ' Knockout Scoring <span class="line"></span></div>';
     html += knockoutFlowHTML();
     html += '<div class="card">';
     const kRules = TM.getKnockoutRules();
@@ -5809,7 +6117,7 @@
     html += '</div>';
 
     // Regenerate fixtures: explicit, safe, with before/after counts.
-    html += '<div class="section-title">Regenerate Fixtures <span class="line"></span></div>';
+    html += '<div class="section-title">' + icon('autorenew') + ' Regenerate Fixtures <span class="line"></span></div>';
     html += '<div class="card">' +
       '<div class="muted" style="margin-bottom:8px;">Current: ' + plan.pairs + ' pairs · ' + groupSummaryText(plan.distribution) + ' · ' +
       plan.existingFixtures + ' fixtures · ' + plan.existingResults + ' completed</div>' +
@@ -5822,7 +6130,7 @@
     // live team state. Each level lists the actual pairs assigned to it, with an
     // inline control to move a pair, and a single summary line at the top. There is
     // deliberately no stored count anywhere.
-    html += '<div class="section-title">Team Level Configuration <span class="line"></span></div>';
+    html += '<div class="section-title">' + icon('workspace_premium') + ' Team Level Configuration <span class="line"></span></div>';
     html += '<div class="card">';
     html += '<div class="level-summary">' + esc(levelSummaryLine()) + '</div>';
     html += levelAssignmentBlocks();
@@ -5841,7 +6149,7 @@
     html += '<div class="muted" style="font-size:12px;margin-top:8px;">Add, rename, disable or remove levels here; disabling or removing a level moves its pairs to ' + esc(TM.UNASSIGNED_NAME) + '. Levels are independent of groups, so this never changes fixtures.</div>';
     html += '</div>';
 
-    html += '<div class="section-title">Court configuration <span class="line"></span></div>';
+    html += '<div class="section-title">' + icon('stadium') + ' Court configuration <span class="line"></span></div>';
     html += '<div class="card">' +
       '<div class="field"><label>Number of courts (' + TM.MIN_COURTS + '–' + TM.MAX_COURTS + ')</label>' +
       '<select class="court-count-select" onchange="App.setCourtCount(this.value)">';
@@ -5859,14 +6167,14 @@
     html += '<div class="muted" style="font-size:12px;margin-top:10px;">Add, rename, re-time, enable/disable or remove courts here. Disabling or removing a court never deletes matches, results, teams or groups, and never regenerates fixtures or touches standings or the knockout bracket. A match already in progress on a court keeps playing to a finish.</div>';
     html += '</div>';
 
-    html += '<div class="section-title">Scheduling <span class="line"></span></div>';
+    html += '<div class="section-title">' + icon('schedule') + ' Scheduling <span class="line"></span></div>';
     html += '<div class="card">' +
       '<div class="toggle">' +
       '<div class="toggle-info"><span class="toggle-title">Allow matches outside court availability</span><span class="toggle-sub">Override: lets courts accept new matches outside their availability window. Leave off for normal operation — a match already in progress always plays to a finish either way.</span></div>' +
       '<label class="switch"><input type="checkbox"' + (st.settings.allowOutsideAvailability ? ' checked' : '') + ' onchange="App.setAllowOutside(this.checked)"><span class="slider"></span></label>' +
       '</div></div>';
 
-    html += '<div class="section-title">Backup <span class="line"></span></div>';
+    html += '<div class="section-title">' + icon('save') + ' Backup <span class="line"></span></div>';
     html += '<div class="card">' +
       '<div class="muted" style="margin-bottom:10px;">All tournament data lives in this browser\'s localStorage. Export a JSON file to back it up or move it to another device.</div>' +
       '<div class="btn-group" style="margin-top:0;">' +
@@ -5876,7 +6184,7 @@
       '<input type="file" id="import-file" accept=".json,application/json" style="display:none" onchange="App.handleImport(event)">' +
       '</div>';
 
-    html += '<div class="section-title">Danger zone <span class="line"></span></div>';
+    html += '<div class="section-title">' + icon('warning') + ' Danger zone <span class="line"></span></div>';
     html += '<div class="card">' +
       '<div class="muted" style="margin-bottom:10px;">Reset returns the app to the default example configuration (10 pairs, 2 groups, 3 courts) and deletes all results.</div>' +
       '<div class="btn-group" style="margin-top:0;">' +
@@ -5884,7 +6192,7 @@
       '<button class="btn btn-danger" onclick="App.askClearResults()">Clear results only</button>' +
       '</div></div>';
 
-    html += '<div class="section-title">About <span class="line"></span></div>';
+    html += '<div class="section-title">' + icon('info') + ' About <span class="line"></span></div>';
     html += '<div class="card"><button class="btn btn-sm" onclick="App.about()">How it works</button></div>';
     return html;
   }
